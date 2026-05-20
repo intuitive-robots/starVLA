@@ -333,7 +333,11 @@ class VLATrainer(TrainerUtils):
 
     def _create_data_iterators(self):
         """Create data iterators."""
+        t_start = time.perf_counter()
         self.vla_iter = iter(self.vla_train_dataloader)
+        t_end = time.perf_counter()
+        if self.accelerator.is_main_process:
+            logger.info(f"DataLoader iterator created in {t_end - t_start:.3f}s")
 
     def _get_next_batch(self):
         """Get next batch (automatically handle data loop)."""
@@ -349,10 +353,34 @@ class VLATrainer(TrainerUtils):
 
         return batch_vla
 
+    def _log_first_batch_startup(self):
+        """Time the first batch fetch so startup stalls are visible in logs."""
+        if getattr(self, "_first_batch_startup_logged", False):
+            return
+
+        if self.accelerator.is_main_process:
+            logger.info("Fetching first training batch from DataLoader...")
+
+        t_start = time.perf_counter()
+        batch_vla = self._get_next_batch()
+        t_end = time.perf_counter()
+
+        if self.accelerator.is_main_process:
+            batch_size = len(batch_vla) if hasattr(batch_vla, "__len__") else "unknown"
+            logger.info(
+                "First training batch fetched in %.3fs (batch_size=%s)",
+                t_end - t_start,
+                batch_size,
+            )
+
+        self._pending_first_batch = batch_vla
+        self._first_batch_startup_logged = True
+
     def train(self):
         """Execute training loop."""
         self._log_training_config()
         self._create_data_iterators()
+        self._log_first_batch_startup()
         progress_bar = tqdm(
             total=self.config.trainer.max_train_steps,
             initial=self.completed_steps,
@@ -361,7 +389,11 @@ class VLATrainer(TrainerUtils):
 
         while self.completed_steps < self.config.trainer.max_train_steps:
             t_start_data = time.perf_counter()
-            batch_vla = self._get_next_batch()
+            if hasattr(self, "_pending_first_batch"):
+                batch_vla = self._pending_first_batch
+                del self._pending_first_batch
+            else:
+                batch_vla = self._get_next_batch()
             t_end_data = time.perf_counter()
 
             t_start_model = time.perf_counter()

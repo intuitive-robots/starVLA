@@ -102,10 +102,16 @@ def _parse_chunk_file_indices(parquet_path: Path) -> tuple[int, int]:
     )
 
 
-def calculate_dataset_statistics(parquet_paths: list[Path]) -> dict:
+def calculate_dataset_statistics(
+    parquet_paths: list[Path],
+    *,
+    stats_filter_config: dict | None = None,
+) -> dict:
     """Calculate the dataset statistics of all columns for a list of parquet files."""
     # Dataset statistics
     all_low_dim_data_list = []
+    total_raw_rows = 0
+    total_filtered_rows = 0
     # Collect all the data
     # parquet_paths = parquet_paths[:3]
     for parquet_path in tqdm(
@@ -114,9 +120,24 @@ def calculate_dataset_statistics(parquet_paths: list[Path]) -> dict:
     ):
         # Load the parquet file
         parquet_data = pd.read_parquet(parquet_path)
-        parquet_data = parquet_data
+        total_raw_rows += len(parquet_data)
+        parquet_data = _filter_dataframe_for_statistics(
+            parquet_data,
+            stats_filter_config=stats_filter_config,
+        )
+        if parquet_data.empty:
+            continue
+        total_filtered_rows += len(parquet_data)
         all_low_dim_data_list.append(parquet_data)
-    
+
+    if not all_low_dim_data_list:
+        raise ValueError("No rows left after applying dataset statistics filters.")
+
+    print(
+        f"Collected parquet rows for statistics: raw_rows={total_raw_rows}, "
+        f"filtered_rows={total_filtered_rows}"
+    )
+
     all_low_dim_data = pd.concat(all_low_dim_data_list, axis=0)
     # Compute dataset statistics
     dataset_statistics = {}
@@ -142,6 +163,123 @@ def calculate_dataset_statistics(parquet_paths: list[Path]) -> dict:
             "q99": np.quantile(np_data, 0.99, axis=0).tolist(),
         }
     return dataset_statistics
+
+
+def _normalize_episode_scalar_value(value):
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, list):
+        if not value:
+            return None
+        return _normalize_episode_scalar_value(value[0])
+    if hasattr(value, "item") and not isinstance(value, str):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
+
+
+def _normalize_keep_ranges_value(keep_ranges) -> list[tuple[int, int]]:
+    if keep_ranges is None:
+        return []
+    if hasattr(keep_ranges, "tolist"):
+        keep_ranges = keep_ranges.tolist()
+    normalized_keep_ranges: list[tuple[int, int]] = []
+    for item in keep_ranges:
+        if hasattr(item, "tolist"):
+            item = item.tolist()
+        if len(item) != 2:
+            continue
+        normalized_keep_ranges.append((int(item[0]), int(item[1])))
+    return normalized_keep_ranges
+
+
+def _load_v3_episode_filter_metadata(
+    dataset_path: Path,
+    *,
+    success_indicator_key: str | None,
+    include_keep_ranges: bool,
+) -> dict[int, dict]:
+    metadata_by_episode: dict[int, dict] = {}
+    episode_files = sorted(dataset_path.glob(LE_ROBOT3_EPISODE_FILENAME))
+    required_columns = ["episode_index"]
+    if include_keep_ranges:
+        required_columns.append("keep_ranges")
+    if success_indicator_key:
+        required_columns.append(success_indicator_key)
+
+    for episode_file in episode_files:
+        episode_df = pd.read_parquet(episode_file, columns=required_columns)
+        for _, row in episode_df.iterrows():
+            episode_index = _coerce_int_index(row["episode_index"], "episode_index")
+            episode_meta = metadata_by_episode.setdefault(episode_index, {})
+            if include_keep_ranges and "keep_ranges" in episode_df.columns:
+                episode_meta["keep_ranges"] = row["keep_ranges"]
+            if success_indicator_key and success_indicator_key in episode_df.columns:
+                episode_meta[success_indicator_key] = row[success_indicator_key]
+    return metadata_by_episode
+
+
+def _filter_dataframe_for_statistics(
+    parquet_data: pd.DataFrame,
+    *,
+    stats_filter_config: dict | None,
+) -> pd.DataFrame:
+    if not stats_filter_config:
+        return parquet_data
+
+    filtered_groups: list[pd.DataFrame] = []
+    filter_successful_trajectories = bool(stats_filter_config.get("filter_successful_trajectories", False))
+    success_indicator_key = stats_filter_config.get("success_indicator_key")
+    use_keep_ranges = bool(stats_filter_config.get("use_keep_ranges", False))
+    filter_nonempty_language = bool(stats_filter_config.get("filter_nonempty_language", False))
+    language_columns = list(stats_filter_config.get("language_columns", []))
+    episode_metadata = stats_filter_config.get("episode_metadata", {})
+
+    for episode_index, episode_df in parquet_data.groupby("episode_index", sort=False):
+        episode_index = int(episode_index)
+        episode_meta = episode_metadata.get(episode_index, {})
+
+        if filter_successful_trajectories and success_indicator_key:
+            success_value = _normalize_episode_scalar_value(episode_meta.get(success_indicator_key))
+            if success_value is not None and not bool(success_value):
+                continue
+
+        if filter_nonempty_language and language_columns:
+            has_nonempty_language = False
+            for language_column in language_columns:
+                if language_column not in episode_df.columns:
+                    continue
+                values = episode_df[language_column].astype(str).str.strip()
+                if (values != "").any():
+                    has_nonempty_language = True
+                    break
+            if not has_nonempty_language:
+                continue
+
+        if use_keep_ranges:
+            keep_ranges = _normalize_keep_ranges_value(episode_meta.get("keep_ranges"))
+            if not keep_ranges:
+                continue
+            if "frame_index" in episode_df.columns:
+                local_index = episode_df["frame_index"].to_numpy()
+            elif "index" in episode_df.columns:
+                local_index = episode_df["index"].to_numpy()
+            else:
+                continue
+            keep_mask = np.zeros(len(episode_df), dtype=bool)
+            for start, end in keep_ranges:
+                keep_mask |= (local_index >= int(start)) & (local_index < int(end))
+            episode_df = episode_df.loc[keep_mask]
+            if episode_df.empty:
+                continue
+
+        filtered_groups.append(episode_df)
+
+    if not filtered_groups:
+        return parquet_data.iloc[0:0].copy()
+    return pd.concat(filtered_groups, axis=0, ignore_index=True)
 
 
 def _normalize_action_mode(mode: str) -> str:
@@ -184,10 +322,21 @@ def _normalize_action_mode_state_map(action_mode_state_map: dict[str, str] | Non
 
 def _build_stats_cache_config(
     action_mode: str,
+    *,
+    stats_filter_config: dict | None = None,
 ) -> dict:
-    return {
+    payload = {
         "mode": action_mode,
     }
+    if stats_filter_config:
+        payload["filters"] = {
+            "use_keep_ranges": bool(stats_filter_config.get("use_keep_ranges", False)),
+            "filter_successful_trajectories": bool(stats_filter_config.get("filter_successful_trajectories", False)),
+            "success_indicator_key": stats_filter_config.get("success_indicator_key"),
+            "filter_nonempty_language": bool(stats_filter_config.get("filter_nonempty_language", False)),
+            "language_columns": list(stats_filter_config.get("language_columns", [])),
+        }
+    return payload
 
 
 def _invalidate_legacy_stats_cache(stats_path: Path, reason: str) -> None:
@@ -259,10 +408,11 @@ def _compute_statistics_for_mode(
     state_indices: list[int] | None,
     action_mode_apply_keys: list[str] | None,
     action_mode_state_map: dict[str, str] | None,
+    stats_filter_config: dict | None = None,
 ) -> dict:
     print(f"[RANK 0] Calculating dataset statistics for {dataset_name} (mode={action_mode})")
 
-    base_stats = calculate_dataset_statistics(parquet_paths)
+    base_stats = calculate_dataset_statistics(parquet_paths, stats_filter_config=stats_filter_config)
     
     if action_mode == "abs":
         return base_stats
@@ -284,6 +434,7 @@ def _compute_statistics_for_mode(
             action_mode_apply_keys=action_mode_apply_keys,
             action_mode_state_map=action_mode_state_map,
             base_stats=base_stats,
+            stats_filter_config=stats_filter_config,
         )
     if action_mode == "rel":
         return calculate_rel_action_statistics(
@@ -296,6 +447,7 @@ def _compute_statistics_for_mode(
             action_mode_apply_keys=action_mode_apply_keys,
             action_mode_state_map=action_mode_state_map,
             base_stats=base_stats,
+            stats_filter_config=stats_filter_config,
         )
     raise ValueError(f"Unsupported action mode for statistics: {action_mode}")
 
@@ -313,6 +465,7 @@ def _load_or_compute_statistics(
     state_indices: list[int] | None,
     action_mode_apply_keys: list[str] | None,
     action_mode_state_map: dict[str, str] | None,
+    stats_filter_config: dict | None = None,
 ) -> dict:
     le_statistics = _load_stats_cache(
         stats_path,
@@ -333,6 +486,7 @@ def _load_or_compute_statistics(
         state_indices=state_indices,
         action_mode_apply_keys=action_mode_apply_keys,
         action_mode_state_map=action_mode_state_map,
+        stats_filter_config=stats_filter_config,
     )
     _save_stats_cache(stats_path, stats_cache_config, le_statistics)
     return le_statistics
@@ -393,6 +547,7 @@ def calculate_delta_action_statistics(
     action_mode_apply_keys: list[str] | None = None,
     action_mode_state_map: dict[str, str] | None = None,
     base_stats: dict | None = None,
+    stats_filter_config: dict | None = None,
 ) -> dict:
     """
     Calculate action statistics using delta mode.
@@ -406,7 +561,7 @@ def calculate_delta_action_statistics(
       2) Otherwise, replace 'action.' with 'state.' directly.
     """
     if base_stats is None:
-        base_stats = calculate_dataset_statistics(parquet_paths)
+        base_stats = calculate_dataset_statistics(parquet_paths, stats_filter_config=stats_filter_config)
 
     action_col_slices = _get_action_col_slices(
         lerobot_modality_meta, action_keys_full, state_keys_full, action_mode_apply_keys, action_mode_state_map
@@ -435,36 +590,40 @@ def calculate_delta_action_statistics(
     accum: dict[str, list[np.ndarray]] = {col: [] for col in action_col_slices.keys()}
     for parquet_path in tqdm(sorted(list(parquet_paths)), desc="Collecting delta action stats"):
         data = pd.read_parquet(parquet_path)
-        trajectory_length = len(data)
-        for action_col, slice_list in action_col_slices.items():
-            if action_col not in data.columns:
-                raise ValueError(f"{action_col} not found in parquet columns.")
-            action_matrix = np.stack(data[action_col])
-            action_padding_ref = slice_list[0][3]
-            prepared_slices = []
-            for a_slice, state_col, s_slice, action_padding, state_padding in slice_list:
-                if state_col not in data.columns:
-                    raise ValueError(f"{state_col} not found in parquet columns.")
-                state_matrix = np.stack(data[state_col])
-                state_part_full = state_matrix[:, s_slice[0] : s_slice[1]]
-                prepared_slices.append((a_slice, state_part_full, state_padding))
-            for base_index in range(trajectory_length):
-                action_steps = np.array(action_indices) + base_index
-                action_chunk_full = _get_chunk(action_matrix, action_steps, action_padding_ref)
+        data = _filter_dataframe_for_statistics(data, stats_filter_config=stats_filter_config)
+        if data.empty:
+            continue
+        for _, episode_df in data.groupby("episode_index", sort=False):
+            trajectory_length = len(episode_df)
+            for action_col, slice_list in action_col_slices.items():
+                if action_col not in episode_df.columns:
+                    raise ValueError(f"{action_col} not found in parquet columns.")
+                action_matrix = np.stack(episode_df[action_col])
+                action_padding_ref = slice_list[0][3]
+                prepared_slices = []
+                for a_slice, state_col, s_slice, action_padding, state_padding in slice_list:
+                    if state_col not in episode_df.columns:
+                        raise ValueError(f"{state_col} not found in parquet columns.")
+                    state_matrix = np.stack(episode_df[state_col])
+                    state_part_full = state_matrix[:, s_slice[0] : s_slice[1]]
+                    prepared_slices.append((a_slice, state_part_full, state_padding))
+                for base_index in range(trajectory_length):
+                    action_steps = np.array(action_indices) + base_index
+                    action_chunk_full = _get_chunk(action_matrix, action_steps, action_padding_ref)
 
-                for a_slice, state_part_full, state_padding in prepared_slices:
-                    action_part_chunk = action_chunk_full[:, a_slice[0] : a_slice[1]]
-                    state_chunk = _get_chunk(state_part_full, np.array(state_indices) + base_index, state_padding)
-                    if action_part_chunk.shape[1] != state_chunk.shape[1]:
-                        raise ValueError(f"Action/state dim mismatch for {action_col}:{a_slice}")
+                    for a_slice, state_part_full, state_padding in prepared_slices:
+                        action_part_chunk = action_chunk_full[:, a_slice[0] : a_slice[1]]
+                        state_chunk = _get_chunk(state_part_full, np.array(state_indices) + base_index, state_padding)
+                        if action_part_chunk.shape[1] != state_chunk.shape[1]:
+                            raise ValueError(f"Action/state dim mismatch for {action_col}:{a_slice}")
 
-                    out = action_part_chunk.copy()
-                    if len(out) > 1:
-                        out[1:] = action_part_chunk[1:] - action_part_chunk[:-1]
-                    out[0] = action_part_chunk[0] - state_chunk[0]
-                    action_chunk_full[:, a_slice[0] : a_slice[1]] = out
+                        out = action_part_chunk.copy()
+                        if len(out) > 1:
+                            out[1:] = action_part_chunk[1:] - action_part_chunk[:-1]
+                        out[0] = action_part_chunk[0] - state_chunk[0]
+                        action_chunk_full[:, a_slice[0] : a_slice[1]] = out
 
-                accum[action_col].append(action_chunk_full)
+                    accum[action_col].append(action_chunk_full)
 
     delta_stats = copy.deepcopy(base_stats)
     for action_col, series_list in accum.items():
@@ -492,6 +651,7 @@ def calculate_rel_action_statistics(
     action_mode_apply_keys: list[str] | None = None,
     action_mode_state_map: dict[str, str] | None = None,
     base_stats: dict | None = None,
+    stats_filter_config: dict | None = None,
 ) -> dict:
     """
     Calculate action statistics using rel mode.
@@ -504,7 +664,7 @@ def calculate_rel_action_statistics(
       2) Otherwise, replace 'action.' with 'state.' directly.
     """
     if base_stats is None:
-        base_stats = calculate_dataset_statistics(parquet_paths)
+        base_stats = calculate_dataset_statistics(parquet_paths, stats_filter_config=stats_filter_config)
 
     action_col_slices = _get_action_col_slices(
         lerobot_modality_meta, action_keys_full, state_keys_full, action_mode_apply_keys, action_mode_state_map
@@ -533,33 +693,37 @@ def calculate_rel_action_statistics(
     accum: dict[str, list[np.ndarray]] = {col: [] for col in action_col_slices.keys()}
     for parquet_path in tqdm(sorted(list(parquet_paths)), desc="Collecting rel action stats"):
         data = pd.read_parquet(parquet_path)
-        trajectory_length = len(data)
-        for action_col, slice_list in action_col_slices.items():
-            if action_col not in data.columns:
-                raise ValueError(f"{action_col} not found in parquet columns.")
-            action_matrix = np.stack(data[action_col])
-            action_padding_ref = slice_list[0][3]
-            prepared_slices = []
-            for a_slice, state_col, s_slice, action_padding, state_padding in slice_list:
-                if state_col not in data.columns:
-                    raise ValueError(f"{state_col} not found in parquet columns.")
-                state_matrix = np.stack(data[state_col])
-                state_part_full = state_matrix[:, s_slice[0] : s_slice[1]]
-                prepared_slices.append((a_slice, state_part_full, state_padding))
-            for base_index in range(trajectory_length):
-                action_steps = np.array(action_indices) + base_index
-                action_chunk_full = _get_chunk(action_matrix, action_steps, action_padding_ref)
+        data = _filter_dataframe_for_statistics(data, stats_filter_config=stats_filter_config)
+        if data.empty:
+            continue
+        for _, episode_df in data.groupby("episode_index", sort=False):
+            trajectory_length = len(episode_df)
+            for action_col, slice_list in action_col_slices.items():
+                if action_col not in episode_df.columns:
+                    raise ValueError(f"{action_col} not found in parquet columns.")
+                action_matrix = np.stack(episode_df[action_col])
+                action_padding_ref = slice_list[0][3]
+                prepared_slices = []
+                for a_slice, state_col, s_slice, action_padding, state_padding in slice_list:
+                    if state_col not in episode_df.columns:
+                        raise ValueError(f"{state_col} not found in parquet columns.")
+                    state_matrix = np.stack(episode_df[state_col])
+                    state_part_full = state_matrix[:, s_slice[0] : s_slice[1]]
+                    prepared_slices.append((a_slice, state_part_full, state_padding))
+                for base_index in range(trajectory_length):
+                    action_steps = np.array(action_indices) + base_index
+                    action_chunk_full = _get_chunk(action_matrix, action_steps, action_padding_ref)
 
-                for a_slice, state_part_full, state_padding in prepared_slices:
-                    action_part_chunk = action_chunk_full[:, a_slice[0] : a_slice[1]]
-                    state_chunk = _get_chunk(state_part_full, np.array(state_indices) + base_index, state_padding)
-                    if action_part_chunk.shape[1] != state_chunk.shape[1]:
-                        raise ValueError(f"Action/state dim mismatch for {action_col}:{a_slice}")
+                    for a_slice, state_part_full, state_padding in prepared_slices:
+                        action_part_chunk = action_chunk_full[:, a_slice[0] : a_slice[1]]
+                        state_chunk = _get_chunk(state_part_full, np.array(state_indices) + base_index, state_padding)
+                        if action_part_chunk.shape[1] != state_chunk.shape[1]:
+                            raise ValueError(f"Action/state dim mismatch for {action_col}:{a_slice}")
 
-                    out = action_part_chunk - state_chunk[0]
-                    action_chunk_full[:, a_slice[0] : a_slice[1]] = out
+                        out = action_part_chunk - state_chunk[0]
+                        action_chunk_full[:, a_slice[0] : a_slice[1]] = out
 
-                accum[action_col].append(action_chunk_full)
+                    accum[action_col].append(action_chunk_full)
 
     rel_stats = copy.deepcopy(base_stats)
     for action_col, series_list in accum.items():
@@ -654,6 +818,8 @@ class LeRobotSingleDataset(Dataset):
         # self._episodes = self._get_episode_info() # TODO why we need this func
         self.curr_traj_data = None
         self.curr_traj_id = None
+        self._current_base_index = None
+        self._missing_success_indicator_keys_warned: set[str] = set()
         self._video_reader_cache: OrderedDict[str, tuple[object, np.ndarray]] = OrderedDict()
         self._video_reader_cache_size = int(self.data_cfg.get("video_reader_cache_size", 8)) if self.data_cfg else 8
 
@@ -661,6 +827,11 @@ class LeRobotSingleDataset(Dataset):
         self._modality_keys = self._get_modality_keys()
         self._delta_indices = self._get_delta_indices()
         self._all_steps = self._get_all_steps()
+        self._valid_base_indices_by_trajectory = self._build_valid_base_indices_by_trajectory()
+        self._valid_trajectory_ids = np.array(list(self._valid_base_indices_by_trajectory.keys()))
+        self._valid_trajectory_lengths = np.array(
+            [len(indices) for indices in self._valid_base_indices_by_trajectory.values()]
+        )
         self.set_transforms_metadata(self.metadata)
         self.set_epoch(0)
 
@@ -741,6 +912,18 @@ class LeRobotSingleDataset(Dataset):
             ]
         """
         return self._all_steps
+
+    @property
+    def valid_base_indices_by_trajectory(self) -> dict[int, np.ndarray]:
+        return self._valid_base_indices_by_trajectory
+
+    @property
+    def valid_trajectory_ids(self) -> np.ndarray:
+        return self._valid_trajectory_ids
+
+    @property
+    def valid_trajectory_lengths(self) -> np.ndarray:
+        return self._valid_trajectory_lengths
 
     @property
     def modality_keys(self) -> dict:
@@ -888,8 +1071,33 @@ class LeRobotSingleDataset(Dataset):
         normalized_state_map = _normalize_action_mode_state_map(
             self.data_cfg.get("action_mode_state_map", {}) if self.data_cfg else {}
         )
+        stats_filter_config = None
+        if self._lerobot_version == "v3.0":
+            language_columns = []
+            for language_key in self.modality_configs.get("language", ModalityConfig(delta_indices=[], modality_keys=[])).modality_keys:
+                if language_key.startswith("annotation."):
+                    language_columns.append(language_key.replace("annotation.", "", 1))
+            use_keep_ranges = self._should_use_keep_ranges()
+            filter_successful_trajectories = self._should_filter_successful_trajectories()
+            filter_nonempty_language = self._should_filter_nonempty_language()
+            success_indicator_key = self._get_success_indicator_key() if filter_successful_trajectories else None
+            if use_keep_ranges or filter_successful_trajectories or filter_nonempty_language:
+                episode_metadata = _load_v3_episode_filter_metadata(
+                    self.dataset_path,
+                    success_indicator_key=success_indicator_key,
+                    include_keep_ranges=use_keep_ranges,
+                )
+                stats_filter_config = {
+                    "use_keep_ranges": use_keep_ranges,
+                    "filter_successful_trajectories": filter_successful_trajectories,
+                    "success_indicator_key": success_indicator_key,
+                    "filter_nonempty_language": filter_nonempty_language,
+                    "language_columns": language_columns,
+                    "episode_metadata": episode_metadata,
+                }
         stats_cache_config = _build_stats_cache_config(
             action_mode=action_mode,
+            stats_filter_config=stats_filter_config,
         )
         parquet_files = list(self.dataset_path.glob(LE_ROBOT_DATA_FILENAME))
         parquet_files_filtered = [
@@ -910,6 +1118,7 @@ class LeRobotSingleDataset(Dataset):
                 state_indices=state_indices,
                 action_mode_apply_keys=apply_keys,
                 action_mode_state_map=normalized_state_map,
+                stats_filter_config=stats_filter_config,
             )
         else:
             le_statistics = None
@@ -1043,6 +1252,15 @@ class LeRobotSingleDataset(Dataset):
                         "videos/from_timestamps": from_timestamps,
                         "videos/file_indices": video_file_indices,
                     }
+                    if "keep_ranges" in episodes_data.columns:
+                        episode_meta["keep_ranges"] = episode.get("keep_ranges", None)
+                    success_indicator_key = self._get_success_indicator_key()
+                    if success_indicator_key in episodes_data.columns:
+                        episode_meta[success_indicator_key] = episode.get(success_indicator_key, None)
+                    if "tasks" in episodes_data.columns:
+                        episode_meta["tasks"] = episode.get("tasks", None)
+                    if "task" in episodes_data.columns:
+                        episode_meta["task"] = episode.get("task", None)
                     # episode_meta = {
                     #     "data/chunk_index": episode["data/chunk_index"],
                     #     "data/file_index": episode["data/file_index"],
@@ -1132,7 +1350,7 @@ class LeRobotSingleDataset(Dataset):
             cache_data = {
                 "config_key": config_key,
                 "steps": all_steps,
-                "num_trajectories": len(self.trajectory_ids),
+                "num_trajectories": len({trajectory_id for trajectory_id, _ in all_steps}),
                 "total_steps": len(all_steps),
                 "computed_timestamp": pd.Timestamp.now().isoformat(),
                 "delete_pause_frame": self.delete_pause_frame,
@@ -1163,6 +1381,10 @@ class LeRobotSingleDataset(Dataset):
             "delete_pause_frame": self.delete_pause_frame,
             "dataset_name": self.dataset_name,
             "lerobot_version": self._lerobot_version,
+            "use_keep_ranges": self._should_use_keep_ranges(),
+            "filter_successful_trajectories": self._should_filter_successful_trajectories(),
+            "success_indicator_key": self._get_success_indicator_key(),
+            "filter_nonempty_language": self._should_filter_nonempty_language(),
             "trajectory_file_strategy": "derive_from_data_files_v1"
             if self._should_derive_v3_episode_files_from_data()
             else "metadata",
@@ -1177,26 +1399,30 @@ class LeRobotSingleDataset(Dataset):
         all_steps: list[tuple[int, int]] = []
         skipped_trajectories = 0
         processed_trajectories = 0
-        
-        # Check if language modality is configured
-        has_language_modality = 'language' in self.modality_keys and len(self.modality_keys['language']) > 0
+        filtered_successful_trajectories = 0
+        filtered_language_trajectories = 0
+        filtered_keep_ranges_trajectories = 0
+        keep_ranges_steps_removed = 0
+
+        has_language_modality = "language" in self.modality_keys and len(self.modality_keys["language"]) > 0
+        filter_nonempty_language = self._should_filter_nonempty_language() and has_language_modality
+        filter_successful_trajectories = self._should_filter_successful_trajectories()
+        use_keep_ranges = self._should_use_keep_ranges()
         # TODO why trajectory_length here, why not use data length?
         for trajectory_id, trajectory_length in tqdm(zip(self.trajectory_ids, self.trajectory_lengths), total=len(self.trajectory_ids), desc="Getting All Step"):
             try:
-                if self._lerobot_version == "v2.0":
-                    data = self.get_trajectory_data(trajectory_id)
-                elif self._lerobot_version == "v3.0":
-                    data = self.get_trajectory_data_lerobot_v3(trajectory_id)
-                
                 trajectory_skipped = False
             
-                # Check if trajectory has valid language instruction (if language modality is configured)
-                if has_language_modality:
-                    self.curr_traj_data = data  # Set current trajectory data for get_language to work
+                if filter_successful_trajectories and not self._trajectory_is_successful(trajectory_id):
+                    filtered_successful_trajectories += 1
+                    skipped_trajectories += 1
+                    trajectory_skipped = True
+                    continue
 
-                    language_instruction = self.get_language(trajectory_id, self.modality_keys['language'][0], 0)
-                    if not language_instruction or language_instruction[0] == "":
-                        print(f"Skipping trajectory {trajectory_id} due to empty language instruction")
+                # Check if trajectory has valid language instruction (if language modality is configured)
+                if filter_nonempty_language:
+                    if not self._trajectory_has_nonempty_language(trajectory_id):
+                        filtered_language_trajectories += 1
                         skipped_trajectories += 1
                         trajectory_skipped = True
                         continue
@@ -1209,15 +1435,156 @@ class LeRobotSingleDataset(Dataset):
         
             if not trajectory_skipped:
                 processed_trajectories += 1
-        
-            for base_index in range(trajectory_length):
+
+            base_indices = self._get_valid_base_indices_for_trajectory(trajectory_id, trajectory_length)
+            if use_keep_ranges:
+                keep_ranges_steps_removed += int(trajectory_length) - len(base_indices)
+                if len(base_indices) == 0:
+                    filtered_keep_ranges_trajectories += 1
+                    skipped_trajectories += 1
+                    processed_trajectories -= 1
+                    continue
+
+            for base_index in base_indices:
                 all_steps.append((trajectory_id, base_index))
                 
         # Print summary statistics
-        print(f"Single-process summary: Processed {processed_trajectories} trajectories, skipped {skipped_trajectories} empty trajectories")
+        print(
+            "Single-process summary: "
+            f"Processed {processed_trajectories} trajectories, "
+            f"skipped {skipped_trajectories} trajectories "
+            f"(success={filtered_successful_trajectories}, "
+            f"language={filtered_language_trajectories}, "
+            f"keep_ranges={filtered_keep_ranges_trajectories})"
+        )
+        if use_keep_ranges:
+            print(f"Keep-ranges filtering removed {keep_ranges_steps_removed} candidate steps")
         print(f"Total steps: {len(all_steps)} from {len(self.trajectory_ids)} trajectories")
                    
         return all_steps
+
+    def _build_valid_base_indices_by_trajectory(self) -> dict[int, np.ndarray]:
+        valid_indices: dict[int, list[int]] = defaultdict(list)
+        for trajectory_id, base_index in self.all_steps:
+            valid_indices[int(trajectory_id)].append(int(base_index))
+        return {trajectory_id: np.array(indices, dtype=np.int64) for trajectory_id, indices in valid_indices.items()}
+
+    def _should_use_keep_ranges(self) -> bool:
+        if self.data_cfg is None:
+            return bool(self.delete_pause_frame)
+        value = self.data_cfg.get("use_keep_ranges", self.delete_pause_frame)
+        return value not in ["False", False, None]
+
+    def _should_filter_nonempty_language(self) -> bool:
+        if self.data_cfg is None:
+            return False
+        value = self.data_cfg.get("filter_nonempty_language", False)
+        return value not in ["False", False, None]
+
+    def _should_filter_successful_trajectories(self) -> bool:
+        if self.data_cfg is None:
+            return False
+        value = self.data_cfg.get("filter_successful_trajectories", False)
+        return value not in ["False", False, None]
+
+    def _get_success_indicator_key(self) -> str:
+        if self.data_cfg is None:
+            return "stats/is_episode_successful/min"
+        return str(self.data_cfg.get("success_indicator_key", "stats/is_episode_successful/min"))
+
+    def _normalize_episode_scalar(self, value):
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if isinstance(value, list):
+            if not value:
+                return None
+            return self._normalize_episode_scalar(value[0])
+        if hasattr(value, "item") and not isinstance(value, str):
+            try:
+                return value.item()
+            except Exception:
+                return value
+        return value
+
+    def _trajectory_is_successful(self, trajectory_id: int) -> bool:
+        success_indicator_key = self._get_success_indicator_key()
+        episode_meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+        if success_indicator_key not in episode_meta:
+            if success_indicator_key not in self._missing_success_indicator_keys_warned:
+                print(
+                    f"Success filtering requested, but metadata key {success_indicator_key!r} is missing "
+                    f"for dataset {self.dataset_name}. Treating trajectories as successful."
+                )
+                self._missing_success_indicator_keys_warned.add(success_indicator_key)
+            return True
+        value = self._normalize_episode_scalar(episode_meta[success_indicator_key])
+        return bool(value)
+
+    def _trajectory_has_nonempty_language(self, trajectory_id: int) -> bool:
+        episode_meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+
+        tasks_value = episode_meta.get("tasks", None)
+        if tasks_value is not None:
+            if hasattr(tasks_value, "tolist"):
+                tasks_value = tasks_value.tolist()
+            for item in tasks_value:
+                item = self._normalize_episode_scalar(item)
+                if item is not None and str(item).strip():
+                    return True
+            return False
+
+        task_value = episode_meta.get("task", None)
+        if task_value is not None:
+            task_value = self._normalize_episode_scalar(task_value)
+            if task_value is not None and str(task_value).strip():
+                return True
+            return False
+
+        if self._lerobot_version == "v2.0":
+            data = self.get_trajectory_data(trajectory_id)
+        else:
+            data = self.get_trajectory_data_lerobot_v3(trajectory_id)
+
+        self.curr_traj_data = data
+        for language_key in self.modality_keys.get("language", []):
+            language_instruction = self.get_language(trajectory_id, language_key, 0)
+            if language_instruction and str(language_instruction[0]).strip():
+                return True
+        return False
+
+    def _get_keep_ranges_for_trajectory(self, trajectory_id: int) -> list[tuple[int, int]]:
+        episode_meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+        keep_ranges = episode_meta.get("keep_ranges", None)
+        if keep_ranges is None:
+            return []
+        if hasattr(keep_ranges, "tolist"):
+            keep_ranges = keep_ranges.tolist()
+        normalized_keep_ranges: list[tuple[int, int]] = []
+        for item in keep_ranges:
+            if hasattr(item, "tolist"):
+                item = item.tolist()
+            if len(item) != 2:
+                continue
+            start, end = int(item[0]), int(item[1])
+            normalized_keep_ranges.append((start, end))
+        return normalized_keep_ranges
+
+    def _get_valid_base_indices_for_trajectory(self, trajectory_id: int, trajectory_length: int) -> list[int]:
+        if not self._should_use_keep_ranges():
+            return list(range(int(trajectory_length)))
+
+        keep_ranges = self._get_keep_ranges_for_trajectory(trajectory_id)
+        if not keep_ranges:
+            return []
+
+        valid_base_indices: list[int] = []
+        for start, end in keep_ranges:
+            clipped_start = max(0, start)
+            clipped_end = min(int(trajectory_length), end)
+            if clipped_end <= clipped_start:
+                continue
+            valid_base_indices.extend(range(clipped_start, clipped_end))
+        return valid_base_indices
 
     def _get_position_and_gripper_values(self, data: pd.DataFrame) -> tuple[list, list]:
         """Get position and gripper values based on available columns in the dataset."""
@@ -1334,6 +1701,147 @@ class LeRobotSingleDataset(Dataset):
             for key in config.modality_keys:
                 delta_indices[key] = np.array(config.delta_indices)
         return delta_indices
+
+    def _is_training_mode(self) -> bool:
+        return getattr(self.transforms, "training", True)
+
+    def _get_obs_image_size(self) -> tuple[int, int]:
+        if self.data_cfg is None:
+            return (224, 224)
+        image_size = self.data_cfg.get("obs_image_size", [224, 224])
+        if image_size is None:
+            return (224, 224)
+        if len(image_size) != 2:
+            raise ValueError(f"obs_image_size must have length 2, got {image_size}")
+        return (int(image_size[0]), int(image_size[1]))
+
+    def _get_sampling_rng(
+        self,
+        trajectory_id: int | None = None,
+        base_index: int | None = None,
+    ) -> np.random.Generator | None:
+        if not self._is_training_mode():
+            return None
+        seed = safe_hash(
+            (
+                self.dataset_name,
+                self.tag,
+                self.curr_traj_id if trajectory_id is None else int(trajectory_id),
+                self._current_base_index if base_index is None else int(base_index),
+                getattr(self, "epoch", 0),
+            )
+        )
+        return np.random.default_rng(seed)
+
+    def _normalize_sampling_key(self, key: str, prefix: str) -> str:
+        key = str(key)
+        return key if key.startswith(f"{prefix}.") else f"{prefix}.{key}"
+
+    def _resolve_sampled_video_keys(
+        self,
+        trajectory_id: int | None = None,
+        base_index: int | None = None,
+    ) -> list[str]:
+        all_video_keys = list(self.modality_keys.get("video", []))
+        if not self.data_cfg:
+            return all_video_keys
+
+        raw_groups = self.data_cfg.get("sample_video_groups", [])
+        if not raw_groups:
+            return all_video_keys
+
+        known_keys = set(all_video_keys)
+        groups: list[list[str]] = []
+        for group in raw_groups:
+            normalized_group = []
+            for key in group:
+                key = self._normalize_sampling_key(key, "video")
+                if key in known_keys:
+                    normalized_group.append(key)
+            normalized_group = list(dict.fromkeys(normalized_group))
+            if len(normalized_group) > 1:
+                groups.append(normalized_group)
+
+        if not groups:
+            return all_video_keys
+
+        group_lookup: dict[str, list[str]] = {}
+        for group in groups:
+            for key in group:
+                group_lookup[key] = group
+
+        rng = self._get_sampling_rng(trajectory_id=trajectory_id, base_index=base_index)
+        selected_keys: list[str] = []
+        consumed_keys: set[str] = set()
+        for key in all_video_keys:
+            if key in consumed_keys:
+                continue
+            group = group_lookup.get(key)
+            if group is None:
+                selected_keys.append(key)
+                consumed_keys.add(key)
+                continue
+            choice = group[0] if rng is None else str(rng.choice(group))
+            selected_keys.append(choice)
+            consumed_keys.update(group)
+        return selected_keys
+
+    def _select_language(self, data: dict) -> str:
+        candidates: list[str] = []
+        for language_key in self.modality_keys.get("language", []):
+            value = data.get(language_key, [""])
+            if isinstance(value, (list, tuple, np.ndarray)):
+                value = value[0] if len(value) > 0 else ""
+            if value is None:
+                continue
+            value = str(value).strip()
+            if value:
+                candidates.append(value)
+
+        if not candidates:
+            return ""
+
+        should_sample = bool(self.data_cfg and self.data_cfg.get("sample_language", False))
+        rng = self._get_sampling_rng() if should_sample else None
+        if rng is None:
+            return candidates[0]
+        return candidates[int(rng.integers(len(candidates)))]
+
+    def _apply_transforms_for_sample(
+        self,
+        raw_data: dict,
+        *,
+        selected_video_keys: list[str] | None = None,
+    ) -> dict:
+        """Apply transforms while restricting video transforms to the selected views."""
+        if selected_video_keys is None:
+            return self.transforms(raw_data)
+
+        transforms = getattr(self.transforms, "transforms", None)
+        if transforms is None:
+            return self.transforms(raw_data)
+
+        data = raw_data
+        for i, transform in enumerate(transforms):
+            original_apply_to = list(transform.apply_to)
+            filtered_apply_to = [
+                key for key in original_apply_to if not key.startswith("video.") or key in selected_video_keys
+            ]
+
+            if not filtered_apply_to and any(key.startswith("video.") for key in original_apply_to):
+                continue
+
+            try:
+                if filtered_apply_to != original_apply_to:
+                    transform.apply_to = filtered_apply_to
+                data = transform(data)
+            except Exception as e:
+                raise ValueError(f"Error applying transform {i} to data: {e}") from e
+            finally:
+                if filtered_apply_to != original_apply_to:
+                    transform.apply_to = original_apply_to
+
+        return data
 
     def _init_action_mode(self) -> None:
         if self.data_cfg is None:
@@ -1504,19 +2012,25 @@ class LeRobotSingleDataset(Dataset):
             dict: The data for the step.
         """
         trajectory_id, base_index = self.all_steps[index]
-        raw_data = self.get_step_data(trajectory_id, base_index)
-        data = self.transforms(raw_data)
-        return self._pack_sample(data)
+        selected_video_keys = self._resolve_sampled_video_keys(trajectory_id=trajectory_id, base_index=base_index)
+        raw_data = self.get_step_data(trajectory_id, base_index, selected_video_keys=selected_video_keys)
+        data = self._apply_transforms_for_sample(raw_data, selected_video_keys=selected_video_keys)
+        return self._pack_sample(data, selected_video_keys=selected_video_keys)
 
-    def _pack_sample(self, data: dict) -> dict:
+    def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
         step_images = []
-        for video_key in self.modality_keys["video"]:
+        if selected_video_keys is None:
+            selected_video_keys = self._resolve_sampled_video_keys()
+        for video_key in selected_video_keys:
             image = data[video_key][0]
-            image = Image.fromarray(image).resize((224, 224))
+            if isinstance(image, Image.Image):
+                pass
+            else:
+                image = Image.fromarray(image)
             step_images.append(image)
 
-        language = data[self.modality_keys["language"][0]][0]
+        language = self._select_language(data)
         action = []
         for action_key in self.modality_keys["action"]:
             action.append(data[action_key])
@@ -1538,7 +2052,12 @@ class LeRobotSingleDataset(Dataset):
 
         return sample
 
-    def get_step_data(self, trajectory_id: int, base_index: int) -> dict:
+    def get_step_data(
+        self,
+        trajectory_id: int,
+        base_index: int,
+        selected_video_keys: list[str] | None = None,
+    ) -> dict:
         """Get the RAW data for a single step in a trajectory. No transforms are applied.
 
         Args:
@@ -1565,12 +2084,16 @@ class LeRobotSingleDataset(Dataset):
             }
         """
         data = {}
+        self._current_base_index = base_index
         # Get the data for all modalities # just for action base data
         self.curr_traj_data = self.get_trajectory_data(trajectory_id)
         # TODO @JinhuiYE The logic below is poorly implemented. Data reading should be directly based on curr_traj_data.
         for modality in self.modality_keys:
             # Get the data corresponding to each key in the modality
-            for key in self.modality_keys[modality]:
+            modality_keys = self.modality_keys[modality]
+            if modality == "video" and selected_video_keys is not None:
+                modality_keys = selected_video_keys
+            for key in modality_keys:
                 data[key] = self.get_data_by_modality(trajectory_id, modality, key, base_index)
         data = self._apply_action_mode(data)
         return data
@@ -1605,14 +2128,23 @@ class LeRobotSingleDataset(Dataset):
                 chunk_index=chunk_index, file_index=file_index
             )
             assert parquet_path.exists(), f"Parquet file not found at {parquet_path}"
-            file_data = pd.read_parquet(parquet_path)
-            
-            # filter by trajectory_id
-            episode_data = (
-                file_data.loc[file_data["episode_index"] == trajectory_id]
-                .copy()
-                .reset_index(drop=True)
-            )
+
+            # Prefer predicate pushdown so we do not read an entire shard just to
+            # extract one episode. This is especially important for DROID v3 where
+            # each parquet shard can contain 1000+ episodes and hundreds of MB of
+            # data, causing dataloader stalls and memory pressure with many workers.
+            try:
+                episode_data = pd.read_parquet(
+                    parquet_path,
+                    filters=[("episode_index", "==", int(trajectory_id))],
+                ).reset_index(drop=True)
+            except Exception:
+                file_data = pd.read_parquet(parquet_path)
+                episode_data = (
+                    file_data.loc[file_data["episode_index"] == trajectory_id]
+                    .copy()
+                    .reset_index(drop=True)
+                )
             if episode_data.empty:
                 raise ValueError(
                     f"Trajectory {trajectory_id} not found in resolved data parquet {parquet_path}"
@@ -1856,6 +2388,8 @@ class LeRobotSingleDataset(Dataset):
         assert self.curr_traj_data is not None, f"No data found for {trajectory_id=}"
         assert le_key in self.curr_traj_data.columns, f"No {le_key} found in {trajectory_id=}"
         data_array: np.ndarray = np.stack(self.curr_traj_data[le_key])  # type: ignore
+        if data_array.ndim == 1:
+            data_array = data_array[:, None]
         assert data_array.ndim == 2, f"Expected 2D array, got key {le_key} is{data_array.shape} array"
         le_indices = np.arange(
             le_state_or_action_cfg[key].start,
@@ -1902,7 +2436,7 @@ class LeRobotSingleDataset(Dataset):
         step_indices = np.maximum(step_indices, 0)
         step_indices = np.minimum(step_indices, max_length - 1)
         # Get the annotations
-        task_indices: list[int] = []
+        language_values: list[str] = []
         assert key.startswith(
             "annotation."
         ), f"Language key must start with 'annotation.', got {key}"
@@ -1916,12 +2450,26 @@ class LeRobotSingleDataset(Dataset):
         original_key = subkey_meta.original_key
         if original_key is None:
             original_key = key
-        for i in range(len(step_indices)): # 
-            # task_indices.append(self.curr_traj_data[original_key][step_indices[i]].item())
-            value = self.curr_traj_data[original_key].iloc[step_indices[i]] # TODO check v2.0 
-            task_indices.append(value if isinstance(value, (int, float)) else value.item())
+        for i in range(len(step_indices)):
+            value = self.curr_traj_data[original_key].iloc[step_indices[i]]
+            if hasattr(value, "item") and not isinstance(value, str):
+                try:
+                    value = value.item()
+                except ValueError:
+                    pass
 
-        return self.tasks.loc[task_indices]["task"].tolist()
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                language_values.append("")
+            elif isinstance(value, str):
+                language_values.append(value)
+            elif isinstance(value, (np.integer, int)):
+                language_values.append(str(self.tasks.loc[int(value)]["task"]))
+            elif isinstance(value, (np.floating, float)) and float(value).is_integer():
+                language_values.append(str(self.tasks.loc[int(value)]["task"]))
+            else:
+                language_values.append(str(value))
+
+        return language_values
 
     def get_data_by_modality(
         self,
@@ -2340,9 +2888,14 @@ class LeRobotMixtureDataset(Dataset):
         # 3. Trajectory sampling weights
         self._trajectory_sampling_weights: list[np.ndarray] = []
         for i, dataset in enumerate(self.datasets):
-            trajectory_sampling_weights = np.ones(len(dataset.trajectory_lengths))
+            valid_lengths = (
+                dataset.valid_trajectory_lengths
+                if hasattr(dataset, "valid_trajectory_lengths")
+                else dataset.trajectory_lengths
+            )
+            trajectory_sampling_weights = np.ones(len(valid_lengths))
             if self.balance_trajectory_weights:
-                trajectory_sampling_weights *= dataset.trajectory_lengths
+                trajectory_sampling_weights *= valid_lengths
             
             # Check for zero or negative weights before normalization
             if np.any(trajectory_sampling_weights <= 0):
@@ -2448,12 +3001,12 @@ class LeRobotMixtureDataset(Dataset):
 
         # Sample trajectory
         trajectory_index = rng.choice(
-            len(dataset.trajectory_ids), p=self.trajectory_sampling_weights[dataset_index]
+            len(dataset.valid_trajectory_ids), p=self.trajectory_sampling_weights[dataset_index]
         )
-        trajectory_id = dataset.trajectory_ids[trajectory_index]
+        trajectory_id = dataset.valid_trajectory_ids[trajectory_index]
 
         # Sample step
-        base_index = rng.choice(dataset.trajectory_lengths[trajectory_index])
+        base_index = rng.choice(dataset.valid_base_indices_by_trajectory[int(trajectory_id)])
         return dataset, trajectory_id, base_index
 
     
@@ -2499,9 +3052,20 @@ class LeRobotMixtureDataset(Dataset):
                         break
                     index = random.randint(0, len(self) - 1)
                     
-                raw_data = dataset.get_step_data(trajectory_id, step)    
-                data = dataset.transforms(raw_data)
-                sample = dataset._pack_sample(data)
+                selected_video_keys = dataset._resolve_sampled_video_keys(
+                    trajectory_id=trajectory_id,
+                    base_index=step,
+                )
+                raw_data = dataset.get_step_data(
+                    trajectory_id,
+                    step,
+                    selected_video_keys=selected_video_keys,
+                )
+                data = dataset._apply_transforms_for_sample(
+                    raw_data,
+                    selected_video_keys=selected_video_keys,
+                )
+                sample = dataset._pack_sample(data, selected_video_keys=selected_video_keys)
                 
                 return sample
                 

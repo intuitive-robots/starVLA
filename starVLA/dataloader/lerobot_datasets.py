@@ -77,6 +77,15 @@ def make_LeRobotSingleDataset(
     """
     
     data_config = ROBOT_TYPE_CONFIG_MAP[robot_type]
+    default_data_cfg = getattr(data_config, "default_data_cfg", None)
+    if data_cfg is None:
+        data_cfg = {}
+    elif not isinstance(data_cfg, dict):
+        data_cfg = OmegaConf.to_container(data_cfg, resolve=True)
+    if default_data_cfg:
+        merged_data_cfg = dict(default_data_cfg)
+        merged_data_cfg.update(data_cfg)
+        data_cfg = merged_data_cfg
     modality_config = data_config.modality_config()
     transforms = data_config.transform()
     dataset_path = data_root_dir / data_name

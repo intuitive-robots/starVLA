@@ -582,6 +582,170 @@ class SingleFrankaRobotiqDeltaJointsDataConfig:
 
 ###########################################################################################
 
+class DroidLerobotJointPosDataConfig:
+    default_data_cfg = {
+        "obs_image_size": [180, 320],
+    }
+    video_keys = [
+        "video.left_external",
+        "video.right_external",
+        "video.wrist",
+    ]
+    state_keys = [
+        "state.joint_position",
+        "state.gripper_position",
+    ]
+    action_keys = [
+        "action.joint_position",
+        "action.gripper_position",
+    ]
+    action_key_dims = {
+        "action.joint_position": 7,
+        "action.gripper_position": 1,
+    }
+    state_key_dims = {
+        "state.joint_position": 7,
+        "state.gripper_position": 1,
+    }
+    language_keys = [
+        "annotation.language_instruction_1",
+        "annotation.language_instruction_2",
+        "annotation.language_instruction_3",
+    ]
+    observation_indices = [0]
+    action_indices = list(range(20))
+
+    def modality_config(self):
+        return {
+            "video": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.video_keys,
+            ),
+            "state": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.state_keys,
+            ),
+            "action": ModalityConfig(
+                delta_indices=self.action_indices,
+                modality_keys=self.action_keys,
+            ),
+            "language": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.language_keys,
+            ),
+        }
+
+    def transform(self):
+        transforms = [
+            VideoToTensor(apply_to=self.video_keys),
+            VideoResize(
+                apply_to=self.video_keys,
+                height=self.default_data_cfg["obs_image_size"][0],
+                width=self.default_data_cfg["obs_image_size"][1],
+                interpolation="linear",
+            ),
+            VideoToNumpy(apply_to=self.video_keys),
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={
+                    "state.joint_position": "q99",
+                    "state.gripper_position": "binary"
+                },
+            ),
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={
+                    "action.joint_position": "q99",
+                    "action.gripper_position": "binary"
+                },
+            ),
+        ]
+
+        return ComposedModalityTransform(transforms=transforms)
+
+
+###########################################################################################
+
+class DroidLerobotResizedJointPosDataConfig:
+    default_data_cfg = {
+        "obs_image_size": [180, 320],
+    }
+    video_keys = [
+        "video.exterior_1_left",
+        "video.exterior_2_left",
+        "video.wrist_left",
+    ]
+    state_keys = [
+        "state.joint_position",
+        "state.gripper_position",
+    ]
+    action_keys = [
+        "action.joint_position",
+        "action.gripper_position",
+    ]
+    action_key_dims = {
+        "action.joint_position": 7,
+        "action.gripper_position": 1,
+    }
+    state_key_dims = {
+        "state.joint_position": 7,
+        "state.gripper_position": 1,
+    }
+    language_keys = [
+        "annotation.language_instruction",
+        "annotation.language_instruction_2",
+        "annotation.language_instruction_3",
+    ]
+    observation_indices = [0]
+    action_indices = list(range(20))
+
+    def modality_config(self):
+        return {
+            "video": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.video_keys,
+            ),
+            "state": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.state_keys,
+            ),
+            "action": ModalityConfig(
+                delta_indices=self.action_indices,
+                modality_keys=self.action_keys,
+            ),
+            "language": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.language_keys,
+            ),
+        }
+
+    def transform(self):
+        transforms = [
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={
+                    "state.joint_position": "q99",
+                    "state.gripper_position": "binary",
+                },
+            ),
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={
+                    "action.joint_position": "q99",
+                    "action.gripper_position": "binary",
+                },
+            ),
+        ]
+
+        return ComposedModalityTransform(transforms=transforms)
+
+
+###########################################################################################
+
 class FourierGr1ArmsWaistDataConfig:
     video_keys = ["video.ego_view"]
     state_keys = [
@@ -1071,6 +1235,8 @@ ROBOT_TYPE_CONFIG_MAP = {
     "oxe_droid": OxeDroidDataConfig(),
     "oxe_bridge": OxeBridgeDataConfig(),
     "oxe_rt1": OxeRT1DataConfig(),
+    "droid_lerobot_joint_pos": DroidLerobotJointPosDataConfig(),
+    "droid_lerobot_resized_joint_pos": DroidLerobotResizedJointPosDataConfig(),
     "SO101": SO101Config(),
     "demo_sim_franka_delta_joints": SingleFrankaRobotiqDeltaJointsDataConfig(),
     "arx_x5": ArxX5DataConfig(),
@@ -1081,4 +1247,3 @@ ROBOT_TYPE_CONFIG_MAP = {
 
     "custom_robot_config": SingleFrankaRobotiqDeltaEefDataConfig(),
 }
-

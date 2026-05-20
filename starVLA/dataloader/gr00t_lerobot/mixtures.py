@@ -30,6 +30,13 @@ DATASET_NAMED_MIXTURES = {
         ("libero_10_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
                 # ("libero_90_no_noops_lerobot", 1.0, "libero_franka"),
     ],
+    "droid_lerobot": [
+        ("droid_success", 1.0, "droid_lerobot_joint_pos"),
+    
+    ],
+    "droid_lerobot_resized": [
+        ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
+    ],
     "libero_goal": [
         ("libero_goal_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
     ],

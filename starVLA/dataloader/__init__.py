@@ -27,6 +27,15 @@ def _build_loader_kwargs(data_cfg) -> dict:
 
     return loader_kwargs
 
+
+def _estimate_in_flight_samples(batch_size: int, loader_kwargs: dict) -> int | None:
+    """Estimate how many samples workers may prefetch before step 1."""
+    num_workers = int(loader_kwargs.get("num_workers", 0))
+    prefetch_factor = int(loader_kwargs.get("prefetch_factor", 0))
+    if num_workers <= 0 or prefetch_factor <= 0:
+        return None
+    return batch_size * num_workers * prefetch_factor
+
 def save_dataset_statistics(dataset_statistics, run_dir):
     """Saves a `dataset_statistics.json` file."""
     out_path = run_dir / "dataset_statistics.json"
@@ -55,16 +64,35 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
     if dataset_py == "lerobot_datasets":
         from starVLA.dataloader.lerobot_datasets import get_vla_dataset, collate_fn
         vla_dataset_cfg = cfg.datasets.vla_data
+        loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
 
         vla_dataset = get_vla_dataset(data_cfg=vla_dataset_cfg)
+        estimated_in_flight_samples = _estimate_in_flight_samples(
+            batch_size=cfg.datasets.vla_data.per_device_batch_size,
+            loader_kwargs=loader_kwargs,
+        )
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info(
+                "Building VLA DataLoader: batch_size=%s, num_workers=%s, prefetch_factor=%s, "
+                "persistent_workers=%s, pin_memory=%s, estimated_in_flight_samples=%s",
+                cfg.datasets.vla_data.per_device_batch_size,
+                loader_kwargs.get("num_workers", 0),
+                loader_kwargs.get("prefetch_factor", "n/a"),
+                loader_kwargs.get("persistent_workers", False),
+                loader_kwargs.get("pin_memory", False),
+                estimated_in_flight_samples if estimated_in_flight_samples is not None else "n/a",
+            )
         
         vla_train_dataloader = DataLoader(
             vla_dataset,
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
             collate_fn=collate_fn,
-            **_build_loader_kwargs(cfg.datasets.vla_data),
+            **loader_kwargs,
             # shuffle=True
-        )        
+        )
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info("Built VLA DataLoader with dataset_len=%s", len(vla_dataset))
         if dist.get_rank() == 0: 
             
             output_dir = Path(cfg.output_dir)
