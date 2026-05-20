@@ -33,20 +33,70 @@ from transformers import AutoProcessor, get_scheduler
 
 # Local Modules
 from starVLA.dataloader import build_dataloader
+from starVLA.dataloader.lerobot_datasets import get_vla_dataset
 from starVLA.model.framework.base_framework import build_framework
 from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
-
-deepspeed_plugin = DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
-accelerator.print(accelerator.state)
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+def parse_bool_flag(value):
+    """Accept common string forms for CLI booleans."""
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
+
+
+def create_accelerator(use_deepspeed: bool) -> Accelerator:
+    """Create the accelerator after CLI parsing so launch flags can control backend choice."""
+    accelerate_use_deepspeed = os.environ.get("ACCELERATE_USE_DEEPSPEED", "false").lower() == "true"
+    if not use_deepspeed and accelerate_use_deepspeed:
+        raise ValueError(
+            "--use_deepspeed false was requested, but Accelerate was launched with a DeepSpeed config. "
+            "Please launch with a non-DeepSpeed Accelerate config instead of "
+            "`starVLA/config/deepseeds/deepspeed_zero2.yaml`."
+        )
+    if use_deepspeed:
+        accelerator = Accelerator(deepspeed_plugin=DeepSpeedPlugin())
+    else:
+        accelerator = Accelerator()
+    accelerator.print(accelerator.state)
+    return accelerator
+
+
+def log_eval_backend_banner(cfg, accelerator: Accelerator) -> None:
+    """Print a visible startup banner for attention backend and eval behavior."""
+    if not accelerator.is_main_process:
+        return
+
+    attn_impl = str(getattr(cfg.framework.qwenvl, "attn_implementation", "unknown")).strip()
+    open_loop_disabled = "flash_attention" in attn_impl.lower()
+
+    banner_lines = [
+        "",
+        "=" * 88,
+        "STARTUP CONFIG",
+        f"Attention backend: {attn_impl}",
+        (
+            "Open-loop eval: DISABLED because Flash Attention backend is configured"
+            if open_loop_disabled
+            else "Open-loop eval: ENABLED"
+        ),
+        "=" * 88,
+        "",
+    ]
+    logger.warning("\n".join(banner_lines))
 
 
 def load_fast_tokenizer():
@@ -109,6 +159,7 @@ class VLATrainer(TrainerUtils):
         self.config = cfg
         self.model = model
         self.vla_train_dataloader = vla_train_dataloader
+        self.vla_eval_dataset = None
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.accelerator = accelerator
@@ -143,6 +194,13 @@ class VLATrainer(TrainerUtils):
             self.optimizer,
             self.vla_train_dataloader,
         )
+        if getattr(self.config.datasets.vla_data, "dataset_py", "") == "lerobot_datasets":
+            try:
+                self.vla_eval_dataset = get_vla_dataset(data_cfg=self.config.datasets.vla_data, mode="eval")
+            except ValueError as exc:
+                if self.accelerator.is_main_process:
+                    logger.warning(f"Skipping dedicated open-loop eval dataset construction: {exc}")
+                self.vla_eval_dataset = None
 
         self._init_wandb()
 
@@ -339,6 +397,7 @@ class VLATrainer(TrainerUtils):
 
     def eval_action_model(self, step_metrics: dict = None) -> float:
         """Run simple action-eval on current batch and attach score to metrics."""
+        step_metrics = step_metrics or {}
         examples = self._get_next_batch()
         actions = [example["action"] for example in examples]
         output_dict = self.accelerator.unwrap_model(self.model).predict_action(
@@ -351,10 +410,155 @@ class VLATrainer(TrainerUtils):
             num_pots = np.prod(actions.shape)
             score = TrainerUtils.euclidean_distance(normalized_actions, actions)
             step_metrics["mse_score"] = score / num_pots
+            if self._should_skip_open_loop_eval():
+                logger.info("Skipping open-loop eval because Flash Attention backend is configured.")
+            else:
+                open_loop_metrics = self._eval_open_loop_trajectories()
+                step_metrics.update(open_loop_metrics)
 
         del examples
         dist.barrier()
         return step_metrics
+
+    def _eval_open_loop_trajectories(self) -> dict:
+        """Evaluate stitched open-loop chunk prediction on one holdout trajectory per subdataset."""
+
+        action_horizon = int(getattr(self.config.framework.action_model, "action_horizon", 1))
+        eval_root = Path(self.config.output_dir) / "open_loop_eval" / f"step_{self.completed_steps}"
+        eval_root.mkdir(parents=True, exist_ok=True)
+
+        if self.vla_eval_dataset is None:
+            logger.warning("No dedicated eval dataset available for open-loop eval.")
+            return {}
+
+        trajectories = self._select_open_loop_trajectories(self.vla_eval_dataset)
+        if not trajectories:
+            logger.warning("No trajectories available for open-loop eval.")
+            return {}
+
+        model = self.accelerator.unwrap_model(self.model)
+        all_squared_errors = []
+        metrics = {}
+
+        for dataset_name, dataset, trajectory_id in trajectories:
+            gt_chunks = []
+            pred_chunks = []
+            trajectory_length = int(dataset.trajectory_lengths[dataset.get_trajectory_index(trajectory_id)])
+            trajectory_step_to_index = {
+                base_index: sample_index
+                for sample_index, (traj_id, base_index) in enumerate(dataset.all_steps)
+                if traj_id == trajectory_id
+            }
+
+            for step in range(0, trajectory_length, action_horizon):
+                if step not in trajectory_step_to_index:
+                    raise KeyError(
+                        f"Trajectory step not found in dataset.all_steps: dataset={dataset_name}, "
+                        f"trajectory_id={trajectory_id}, step={step}"
+                    )
+                sample = dataset[trajectory_step_to_index[step]]
+                try:
+                    pred_actions = model.predict_action(examples=[sample], use_ddim=True, num_ddim_steps=20)[
+                        "normalized_actions"
+                    ][0]
+                except Exception:
+                    logger.error(
+                        "Open-loop eval failure at dataset=%s trajectory_id=%s step=%s",
+                        dataset_name,
+                        trajectory_id,
+                        step,
+                    )
+                    raise
+                gt_actions = np.asarray(sample["action"], dtype=np.float32)
+
+                valid_horizon = min(action_horizon, trajectory_length - step)
+                gt_chunks.append(gt_actions[:valid_horizon])
+                pred_chunks.append(np.asarray(pred_actions, dtype=np.float32)[:valid_horizon])
+
+            if not gt_chunks:
+                continue
+
+            gt_traj = np.concatenate(gt_chunks, axis=0)
+            pred_traj = np.concatenate(pred_chunks, axis=0)
+            squared_error = (pred_traj - gt_traj) ** 2
+            all_squared_errors.append(squared_error)
+
+            per_dim_mse = squared_error.mean(axis=0)
+            traj_prefix = f"open_loop/{dataset_name}/traj_{trajectory_id}"
+            metrics[f"{traj_prefix}/mse_mean"] = float(per_dim_mse.mean())
+            for dim_idx, dim_mse in enumerate(per_dim_mse):
+                metrics[f"{traj_prefix}/mse_dim_{dim_idx}"] = float(dim_mse)
+
+            plot_path = eval_root / f"{dataset_name}_traj_{trajectory_id}.png"
+            self._plot_open_loop_trajectory(
+                gt_traj=gt_traj,
+                pred_traj=pred_traj,
+                save_path=plot_path,
+                title=f"{dataset_name} trajectory {trajectory_id} @ step {self.completed_steps}",
+            )
+            metrics[f"{traj_prefix}/plot"] = wandb.Image(str(plot_path))
+
+        if not all_squared_errors:
+            return metrics
+
+        stacked_squared_error = np.concatenate(all_squared_errors, axis=0)
+        per_dim_mse = stacked_squared_error.mean(axis=0)
+        metrics["open_loop/mse_mean"] = float(per_dim_mse.mean())
+        for dim_idx, dim_mse in enumerate(per_dim_mse):
+            metrics[f"open_loop/mse_dim_{dim_idx}"] = float(dim_mse)
+
+        # Log plots and aggregate metrics immediately so eval visuals are not gated by logging_frequency.
+        wandb.log(metrics, step=self.completed_steps)
+
+        return metrics
+
+    def _should_skip_open_loop_eval(self) -> bool:
+        """Skip stitched open-loop eval for Flash Attention based configs."""
+        attn_impl = str(getattr(self.config.framework.qwenvl, "attn_implementation", "")).strip().lower()
+        return "flash_attention" in attn_impl
+
+    def _select_open_loop_trajectories(self, mixture_dataset):
+        """Pick one deterministic holdout trajectory from each subdataset."""
+        selected = []
+        for dataset in getattr(mixture_dataset, "datasets", []):
+            trajectory_ids = list(getattr(dataset, "trajectory_ids", []))
+            dataset_name = getattr(dataset, "dataset_name", getattr(dataset, "_dataset_name", "dataset"))
+            if not trajectory_ids:
+                continue
+            # Use the final trajectory in each subdataset as a simple deterministic holdout.
+            trajectory_id = trajectory_ids[-1]
+            selected.append((dataset_name, dataset, trajectory_id))
+        return selected
+
+    def _plot_open_loop_trajectory(self, gt_traj: np.ndarray, pred_traj: np.ndarray, save_path: Path, title: str) -> None:
+        """Save a per-dimension line plot for one stitched open-loop trajectory."""
+        import math
+
+        import matplotlib.pyplot as plt
+
+        action_dim = gt_traj.shape[-1]
+        ncols = min(4, action_dim)
+        nrows = math.ceil(action_dim / ncols)
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
+        axes = axes.flatten()
+
+        for dim_idx in range(action_dim):
+            ax = axes[dim_idx]
+            ax.plot(gt_traj[:, dim_idx], label="gt", linewidth=2)
+            ax.plot(pred_traj[:, dim_idx], label="pred", linewidth=1.5)
+            ax.set_title(f"action_dim_{dim_idx}")
+            ax.set_xlabel("timestep")
+            ax.grid(True, alpha=0.3)
+
+        for ax in axes[action_dim:]:
+            ax.axis("off")
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper right")
+        fig.suptitle(title)
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=180, bbox_inches="tight")
+        plt.close(fig)
 
     def _log_training_config(self):
         """Record training config."""
@@ -416,11 +620,12 @@ class VLATrainer(TrainerUtils):
         self.accelerator.wait_for_everyone()
 
 
-def main(cfg) -> None:
+def main(cfg, accelerator: Accelerator) -> None:
     logger.info("VLA Training :: Warming Up")
 
     cfg = wrap_config(cfg)
     logger.info("✅ Configuration wrapped for access tracking")
+    log_eval_backend_banner(cfg, accelerator)
 
     output_dir = setup_directories(cfg=cfg)
     vla = build_framework(cfg)
@@ -440,8 +645,9 @@ def main(cfg) -> None:
     trainer.train()
 
     logger.info("... and that's all, folks!")
-    dist.barrier()
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
@@ -451,6 +657,12 @@ if __name__ == "__main__":
         type=str,
         default="examples/SimplerEnv/train_files/starvla_cotrain_oxe.yaml",
         help="Path to YAML config",
+    )
+    parser.add_argument(
+        "--use_deepspeed",
+        type=parse_bool_flag,
+        default=True,
+        help="Whether to initialize Accelerate with DeepSpeedPlugin. Default: true.",
     )
     args, clipargs = parser.parse_known_args()
 
@@ -466,6 +678,9 @@ if __name__ == "__main__":
 
     # Store source config path for later copying to output dir
     cfg.config_yaml = args.config_yaml
+    cfg.use_deepspeed = args.use_deepspeed
+
+    accelerator = create_accelerator(use_deepspeed=args.use_deepspeed)
 
     if cfg.is_debug and dist.is_initialized() and dist.get_rank() == 0:
         import debugpy
@@ -474,4 +689,4 @@ if __name__ == "__main__":
         print("🔍 Rank 0 waiting for debugger attach on port 10092...")
         debugpy.wait_for_client()
 
-    main(cfg)
+    main(cfg, accelerator)

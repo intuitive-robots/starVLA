@@ -33,6 +33,23 @@ DEFAULT_VIDEO_TOKEN = "<video>\n"
 local_rank = None
 
 
+def _build_loader_kwargs(data_cfg) -> dict:
+    """Construct DataLoader kwargs from config with safe defaults."""
+    num_workers = int(getattr(data_cfg, "num_workers", 4))
+    pin_memory = bool(getattr(data_cfg, "pin_memory", True))
+
+    loader_kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+    }
+
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = bool(getattr(data_cfg, "persistent_workers", True))
+        loader_kwargs["prefetch_factor"] = int(getattr(data_cfg, "prefetch_factor", 2))
+
+    return loader_kwargs
+
+
 def rank0_print(*args):
     if local_rank == 0:
         print(*args)
@@ -589,7 +606,7 @@ def make_vlm_dataloader(cfg):
         train_dataset,
         batch_size=cfg.datasets.vlm_data.per_device_batch_size,
         collate_fn=data_collator,
-        num_workers=4,
+        **_build_loader_kwargs(cfg.datasets.vlm_data),
     )
 
     return {

@@ -294,9 +294,10 @@ if __name__ == "__main__":
     model: Qwen_GR00T = Qwen_GR00T(cfg)
     print(model)
 
+    action_dim = cfg.framework.action_model.action_dim
     image = Image.fromarray(np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8))
     sample = {
-        "action": np.random.uniform(-1, 1, size=(16, 7)).astype(np.float16),
+        "action": np.random.uniform(-1, 1, size=(16, action_dim)).astype(np.float16),
         "image": [image],
         "lang": "This is a fake instruction for testing.",
     }

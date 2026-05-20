@@ -72,4 +72,5 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
     "demo_sim_franka_delta_joints": EmbodimentTag.FRANKA,
     "custom_robot_config": EmbodimentTag.NEW_EMBODIMENT,
     "fourier_gr1_arms_waist": EmbodimentTag.GR1,
+    "single_arm_franka_config": EmbodimentTag.FRANKA,
 }

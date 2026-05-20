@@ -1,3 +1,19 @@
+import os
+
+os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+os.environ.setdefault("MUJOCO_EGL_DEVICE_ID", "0")
+
+print(
+    "[EGL DEBUG]",
+    "pid=", os.getpid(),
+    "CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"),
+    "MUJOCO_GL=", os.environ.get("MUJOCO_GL"),
+    "PYOPENGL_PLATFORM=", os.environ.get("PYOPENGL_PLATFORM"),
+    "MUJOCO_EGL_DEVICE_ID=", os.environ.get("MUJOCO_EGL_DEVICE_ID"),
+    flush=True,
+)
+
 import dataclasses
 import json
 import logging
@@ -430,6 +446,11 @@ def eval_libero(args: Args) -> None:
     print(
         f"*****************num tasks in {args.task_suite_name}: {num_tasks_in_suite}****************, processing from{args.start_idx} to {args.end_idx}"
     )
+    # Keep retired envs alive so CPython's reference-counting GC never calls
+    # env.__del__() -> env.close() -> eglTerminate() while another worker is
+    # mid-render. NVIDIA EGL 590.x aborts any process whose EGL display is
+    # invalidated by concurrent eglTerminate from a different process.
+    _dead_envs: list = []
     # for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
     for task_id in tqdm.tqdm(range(args.start_idx, args.end_idx)):
 
@@ -441,6 +462,7 @@ def eval_libero(args: Args) -> None:
 
         # Initialize LIBERO environment and task description
         env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed)
+        _dead_envs.append(env)  # prevent GC/eglTerminate until process exits
 
         # Start episodes
         task_episodes, task_successes = 0, 0

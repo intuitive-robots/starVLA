@@ -27,8 +27,9 @@ for task_suite in task_suites:
                 overall_results[item]["success_count"] += results[item]["success_count"]
 
 for category in overall_results:
-    overall_results[category]["success_rate"] = float(overall_results[category]["success_count"]) / float(
-        overall_results[category]["total_count"]
+    total = overall_results[category]["total_count"]
+    overall_results[category]["success_rate"] = (
+        float(overall_results[category]["success_count"]) / float(total) if total > 0 else 0.0
     )
 
 with open(os.path.join(log_dir, "overall_results.json"), "w", encoding="utf-8") as f:

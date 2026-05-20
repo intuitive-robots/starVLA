@@ -87,7 +87,7 @@ for ((i=0; i<num_workers; i++)); do
     # multiple processes call eglGetPlatformDisplayEXT simultaneously (driver 590.x).
     # A 2s gap per worker serializes the init window without meaningful throughput loss.
     sleep $((i * 2))
-    CUDA_VISIBLE_DEVICES=$gpu_id MUJOCO_EGL_DEVICE_ID=$gpu_id python ./examples/LIBERO-plus/eval_files/parallel_eval/eval_libero_model.py \
+    CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python ./examples/LIBERO-plus/eval_files/parallel_eval/eval_libero_model_cpu.py \
         --pretrained_path "$your_ckpt" \
         --task_suite_name "$task_suite_name" \
         --num_trials_per_task "$num_trials_per_task" \

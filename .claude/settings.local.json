@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda run *)",
+      "Bash(gdb -batch -ex \"bt full\" /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python3 /e/home/jusers/blank4/jupiter/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.536177)",
+      "Bash(gdb -batch -ex 'set pagination off' -ex bt /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python3 /e/home/jusers/blank4/jupiter/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.568322)",
+      "Bash(grep -v \"^warning\\\\|^$\\\\|^Note\\\\|Don't know\\\\|Use the\\\\|set solib\")",
+      "Bash(gdb -batch -ex 'set pagination off' -ex bt /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python3 /e/home/jusers/blank4/jupiter/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.575522)",
+      "WebSearch",
+      "Bash(awk '{print $NF}')",
+      "Bash(gdb -batch -ex 'set pagination off' -ex bt /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python3 /e/home/jusers/blank4/jupiter/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.582582)",
+      "Bash(conda search *)",
+      "Bash(python3 -c ' *)",
+      "Bash(xargs file)",
+      "Bash(ldd /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/lib/python3.10/site-packages/mujoco/libmujoco.so.3.2.3)",
+      "Bash(ldd /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/lib/python3.10/site-packages/mujoco/_render.cpython-310-aarch64-linux-gnu.so)",
+      "Bash(dnf repolist *)",
+      "Bash(rpm -qa)",
+      "Bash(rpm -qa 'mesa-*')",
+      "Bash(module show *)",
+      "Read(//e/software/fs/jupiter/stages/2026/software/OpenGL/2025.09-GCCcore-14.3.0/lib/**)",
+      "Read(//e/software/fs/jupiter/stages/2026/software/OpenGL/2025.09-GCCcore-14.3.0/**)",
+      "Bash(python3 *)",
+      "Bash(gdb -batch -ex 'set pagination off' -ex 'thread apply 1 bt full' /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python /e/project1/m3/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.622990)"
+    ]
+  }
+}

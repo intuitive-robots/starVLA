@@ -136,6 +136,13 @@ class ModelClient:
         action_chunk_size = self.action_chunk_size
         if step % action_chunk_size == 0:
             response = self.client.predict_action(vla_input)
+            if not response.get("ok", False):
+                error = response.get("error", {})
+                raise RuntimeError(
+                    f"Policy server inference failed: {error.get('message', 'unknown error')} | response={response}"
+                )
+            if "data" not in response or "actions" not in response["data"]:
+                raise RuntimeError(f"Policy server returned malformed response: {response}")
             # server already un-normalized via training-time transform
             self.raw_actions = np.array(response["data"]["actions"][0])  # (chunk, D)
 

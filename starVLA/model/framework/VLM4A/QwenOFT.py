@@ -301,7 +301,6 @@ class Qwenvl_OFT(baseframework):
         # Support multiple ids (e.g., multiple variants)
         if isinstance(action_token_id, (list, tuple, set)):
             id_list = torch.tensor(list(action_token_id), device=device, dtype=input_ids.dtype)
-            # torch.isin requires PyTorch >=1.10
             mask = torch.isin(input_ids, id_list)
         else:
             mask = input_ids == action_token_id  # [B, L]
@@ -314,19 +313,12 @@ class Qwenvl_OFT(baseframework):
                 f" counts={counts.tolist()}"
             )
 
-        # Position indices
         idx = torch.arange(L, device=device).unsqueeze(0).expand(B, L)  # [B, L]
-        masked_pos = torch.where(mask, idx, torch.full_like(idx, -1))  # Set non-action positions to -1
-
-        # Take the last chunk_len positions (higher indices = later in sequence)
-        # Note: count sufficiency already verified, so -1 won't be incorrectly selected
-        topk_pos = masked_pos.topk(k=self.chunk_len, dim=-1).values  # [B, chunk_len] unsorted
-        # Sort in temporal order
-        selected_pos = topk_pos.sort(dim=-1).values  # [B, chunk_len]
-
-        # Gather
-        expanded_index = selected_pos.unsqueeze(-1).expand(-1, -1, H)  # [B, chunk_len, H]
-        action_queries = last_hidden.gather(dim=1, index=expanded_index)  # [B, chunk_len, H]
+        masked_pos = torch.where(mask, idx, torch.full_like(idx, -1))
+        topk_pos = masked_pos.topk(k=self.chunk_len, dim=-1).values
+        selected_pos = topk_pos.sort(dim=-1).values
+        expanded_index = selected_pos.unsqueeze(-1).expand(-1, -1, H)
+        action_queries = last_hidden.gather(dim=1, index=expanded_index)
         return action_queries
 
     # Discretised state → instruction prefix (π₀.5 style); shared with QwenPI_v3.

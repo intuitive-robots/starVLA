@@ -1,4 +1,4 @@
-run_id: libero_qwen08b_base
+run_id: libero_qwen08b_ft
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
@@ -9,8 +9,8 @@ version_id: "0.21"
 framework:
   name: QwenOFT
   qwenvl:
-    base_vlm:  /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
-    attn_implementation: sdpa #sdpa #flash_attention_3
+    base_vlm: /e/home/jusers/blank4/jupiter/blank4/code/train_downstream/train/outputs/ours_t097_fsd_rp_llov2_qwen35_0_8b_128/2026-05-17_01-57-08/checkpoints/checkpoint-9056
+    attn_implementation: flash_attention_3 #flash_attention_3 #sdpa #flash_attention_3
     vl_hidden_dim: 2048
   action_model:
     action_dim: 7
@@ -54,7 +54,7 @@ datasets:
 trainer:
   max_train_steps: 30000
   num_warmup_steps: 3000
-  save_interval: 5000
+  save_interval: 10000
   eval_interval: 1000
   learning_rate:
     base: 2.5e-05

@@ -7,6 +7,7 @@
 from pathlib import Path
 from typing import Sequence
 from omegaconf import OmegaConf
+import numpy as np
 
 from starVLA.dataloader.gr00t_lerobot.datasets import LeRobotSingleDataset, LeRobotMixtureDataset
 from starVLA.dataloader.gr00t_lerobot.registry import (
@@ -18,6 +19,45 @@ from starVLA.dataloader.gr00t_lerobot.registry import (
 
 def collate_fn(batch):
     return batch
+
+
+def _apply_trajectory_split(
+    dataset: LeRobotSingleDataset,
+    split: str,
+    holdout_trajectories_per_dataset: int = 1,
+) -> LeRobotSingleDataset:
+    """Apply a deterministic per-dataset trajectory split in-place."""
+    trajectory_ids = np.asarray(dataset.trajectory_ids)
+    trajectory_lengths = np.asarray(dataset.trajectory_lengths)
+    num_trajectories = len(trajectory_ids)
+
+    if holdout_trajectories_per_dataset <= 0 or num_trajectories == 0:
+        return dataset
+
+    if num_trajectories <= holdout_trajectories_per_dataset:
+        if split == "eval":
+            print(
+                f"Warning: Dataset {dataset.dataset_name} has only {num_trajectories} trajectories; "
+                "skipping eval holdout for this dataset."
+            )
+            selected_ids = trajectory_ids[:0]
+            selected_lengths = trajectory_lengths[:0]
+        else:
+            selected_ids = trajectory_ids
+            selected_lengths = trajectory_lengths
+    else:
+        split_index = num_trajectories - holdout_trajectories_per_dataset
+        if split == "eval":
+            selected_ids = trajectory_ids[split_index:]
+            selected_lengths = trajectory_lengths[split_index:]
+        else:
+            selected_ids = trajectory_ids[:split_index]
+            selected_lengths = trajectory_lengths[:split_index]
+
+    dataset._trajectory_ids = np.asarray(selected_ids)
+    dataset._trajectory_lengths = np.asarray(selected_lengths)
+    dataset._all_steps = dataset._get_all_steps_single_process()
+    return dataset
 
 def make_LeRobotSingleDataset(
     data_root_dir: Path | str,
@@ -83,8 +123,25 @@ def get_vla_dataset(
         filtered_mixture_spec.append((d_name, d_weight, robot_type))
 
     dataset_mixture = []
+    holdout_trajectories_per_dataset = int(data_cfg.get("holdout_trajectories_per_dataset", 1))
     for d_name, d_weight, robot_type in filtered_mixture_spec:
-        dataset_mixture.append((make_LeRobotSingleDataset(Path(data_root_dir), d_name, robot_type, delete_pause_frame=delete_pause_frame, data_cfg=data_cfg), d_weight))
+        dataset = make_LeRobotSingleDataset(
+            Path(data_root_dir),
+            d_name,
+            robot_type,
+            delete_pause_frame=delete_pause_frame,
+            data_cfg=data_cfg,
+        )
+        if mode in {"train", "eval"}:
+            dataset = _apply_trajectory_split(
+                dataset,
+                split=mode,
+                holdout_trajectories_per_dataset=holdout_trajectories_per_dataset,
+            )
+        if len(dataset) == 0:
+            print(f"Skipping {mode} dataset {dataset.dataset_name} because the split is empty.")
+            continue
+        dataset_mixture.append((dataset, d_weight))
 
     return LeRobotMixtureDataset(
         dataset_mixture,
@@ -105,6 +162,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_yaml", type=str, default="examples/LIBERO/train_files/starvla_cotrain_libero.yaml", help="Path to YAML config")
     args, clipargs = parser.parse_known_args()
+
+    #args.config_yaml = "/e/home/jusers/blank4/jupiter/blank4/code/starVLA/examples/LIBERO/train_files/starvla_real_robot_qwen_08_base.yaml"
 
     if os.getenv("DEBUGPY_ENABLE", "0") == "1":
         import debugpy

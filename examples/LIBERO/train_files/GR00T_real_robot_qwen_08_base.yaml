@@ -1,21 +1,32 @@
-run_id: libero_qwen08b_base
+run_id: GR00T_real_robot_abs_eef_qwen08b
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
-wandb_project: starvla_libero
+wandb_project: starvla_real_robot
 is_debug: false
 version_id: "0.21"
 
 framework:
-  name: QwenOFT
+  name: QwenGR00T
   qwenvl:
-    base_vlm:  /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
-    attn_implementation: sdpa #sdpa #flash_attention_3
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
+    attn_implementation: sdpa #flash_attention_3 #sdpa #flash_attention_3
     vl_hidden_dim: 2048
   action_model:
-    action_dim: 7
-    state_dim: 7
-    action_horizon: 8
+    action_dim: 8
+    state_dim: 0
+    action_horizon: 24
+    action_model_type: DiT-B
+    hidden_size: 768
+    action_hidden_dim: 768
+    add_pos_embed: True
+    max_seq_len: 1024
+  diffusion_model_cfg:
+    num_layers: 12
+    output_dim: 768
+    droupout: 0.1
+
+
 
 datasets:
   vlm_data:
@@ -37,9 +48,9 @@ datasets:
 
   vla_data:
     dataset_py: lerobot_datasets
-    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/libero_lerobot
-    data_mix: libero_mixed #libero_all # libero_goal
-    action_type: delta_qpos
+    data_root_dir: /e/project1/m3/mattes1/datasets/real_robot
+    data_mix: real_robot_mixed #libero_all # libero_goal
+    action_type: abs_ee
     sequential_step_sampling: False
     CoT_prompt: "Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format."
     per_device_batch_size: 32
@@ -50,10 +61,12 @@ datasets:
     prefetch_factor: 4
     persistent_workers: true
     pin_memory: true
+    include_state: false
+
 
 trainer:
-  max_train_steps: 30000
-  num_warmup_steps: 3000
+  max_train_steps: 20000
+  num_warmup_steps: 1000
   save_interval: 5000
   eval_interval: 1000
   learning_rate:

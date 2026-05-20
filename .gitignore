@@ -160,6 +160,7 @@ playground/BuildData
 playground/Checkpoints
 playground/Pretrained_models
 playground/Datasets
+franka_control_client/
 
 eval/SimplerEnv
 
@@ -211,6 +212,7 @@ starVLA/config/frameworks/*
 starVLA/model/modules/sam_model/*
 assets/SAMv2.txt
 playground/*
+franka_control_client/*
 qwen_talk.md
 assets/R1Pro.py
 examples/SPVLA

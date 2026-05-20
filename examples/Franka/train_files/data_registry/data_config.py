@@ -61,6 +61,78 @@ class SingleFrankaRobotiqDeltaJointsDataConfig:
     state_key_dims  = {"state.joints": 7}
     language_keys = ["annotation.human.action.task_description"]
     observation_indices = [0]
+    action_indices = list(range(9))
+
+    def modality_config(self):
+        return {
+            "video": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.video_keys),
+            "state": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.state_keys),
+            "action": ModalityConfig(delta_indices=self.action_indices, modality_keys=self.action_keys),
+            "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
+        }
+
+    def transform(self):
+        return ComposedModalityTransform(transforms=[
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(apply_to=self.state_keys, normalization_modes={"state.joints": "min_max"}),
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={"action.delta_joints": "min_max", "action.gripper_close": "binary"},
+            ),
+        ])
+
+
+
+class OursSingleFrankaRobotiqAbsEefDataConfig:
+    embodiment_tag = EmbodimentTag.FRANKA
+    video_keys = ["video.primary_image", "video.wrist_image"]
+    state_keys = ["state.eef_position", "state.eef_rotation", "state.gripper_close"]
+    action_keys = ["action.abs_eef_position", "action.abs_eef_rotation", "action.gripper_close"]
+    # Per-key dims for PolicyNormProcessor (3+4+1 = 8-D total)
+    action_key_dims = {"action.abs_eef_position": 3, "action.abs_eef_rotation": 4, "action.gripper_close": 1}
+    state_key_dims  = {"state.eef_position": 3, "state.eef_rotation": 3, "state.gripper_close": 1}
+    language_keys = ["annotation.human.action.task_description"]
+    observation_indices = [0]
+    action_indices = list(range(24))
+
+    def modality_config(self):
+        return {
+            "video": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.video_keys),
+            "state": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.state_keys),
+            "action": ModalityConfig(delta_indices=self.action_indices, modality_keys=self.action_keys),
+            "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
+        }
+
+    def transform(self):
+        return ComposedModalityTransform(transforms=[
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={"state.eef_position": "min_max", "state.eef_rotation": "min_max", "state.gripper_close": "binary"},
+            ),
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={
+                    "action.abs_eef_position": "min_max",
+                    "action.abs_eef_rotation": "min_max",
+                    "action.gripper_close": "binary",
+                },
+            ),
+        ])
+
+# ---------------------------------------------------------------------------
+class OursSingleFrankaRobotiqDeltaJointsDataConfig:
+    embodiment_tag = EmbodimentTag.FRANKA
+    video_keys = ["video.primary_image", "video.wrist_image"]
+    state_keys = ["state.joints"]
+    action_keys = ["action.delta_joints", "action.gripper_close"]
+    # Per-key dims for PolicyNormProcessor (7+1 = 8-D total)
+    action_key_dims = {"action.delta_joints": 7, "action.gripper_close": 1}
+    state_key_dims  = {"state.joints": 7}
+    language_keys = ["annotation.human.action.task_description"]
+    observation_indices = [0]
     action_indices = list(range(16))
 
     def modality_config(self):
@@ -81,6 +153,7 @@ class SingleFrankaRobotiqDeltaJointsDataConfig:
                 normalization_modes={"action.delta_joints": "min_max", "action.gripper_close": "binary"},
             ),
         ])
+
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +201,7 @@ ROBOT_TYPE_CONFIG_MAP = {
     "custom_robot_config": SingleFrankaRobotiqDeltaEefDataConfig(),
     "demo_sim_franka_delta_joints": SingleFrankaRobotiqDeltaJointsDataConfig(),
     "SO101": SO101Config(),
+    "single_arm_franka_config": OursSingleFrankaRobotiqAbsEefDataConfig(),
 }
 
 ROBOT_TYPE_TO_EMBODIMENT_TAG = {
@@ -144,4 +218,8 @@ DATASET_NAMED_MIXTURES = {
     ],
     "demo_sim_pick_place": [("sim_pick_place", 1.0, "demo_sim_franka_delta_joints")],
     "SO101_pick": [("pick_dataset_name", 1.0, "SO101")],
+    #cylinder_cube_full  folding_20hz_abs_cartesian_trimmed  pick_up_banana_xinkai_abs_cartesian_action
+    "real_robot_mixed": [("cylinder_cube_full", 1.0, "single_arm_franka_config"),
+                         ("folding_20hz_abs_cartesian_trimmed", 1.0, "single_arm_franka_config"),
+                        ("pick_up_banana_xinkai_abs_cartesian_action", 1.0, "single_arm_franka_config")],
 }

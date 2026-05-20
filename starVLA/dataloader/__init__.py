@@ -10,6 +10,23 @@ from starVLA.dataloader.vlm_datasets import make_vlm_dataloader
 
 logger = get_logger(__name__)
 
+
+def _build_loader_kwargs(data_cfg) -> dict:
+    """Construct DataLoader kwargs from config with safe defaults."""
+    num_workers = int(getattr(data_cfg, "num_workers", 4))
+    pin_memory = bool(getattr(data_cfg, "pin_memory", True))
+
+    loader_kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+    }
+
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = bool(getattr(data_cfg, "persistent_workers", True))
+        loader_kwargs["prefetch_factor"] = int(getattr(data_cfg, "prefetch_factor", 2))
+
+    return loader_kwargs
+
 def save_dataset_statistics(dataset_statistics, run_dir):
     """Saves a `dataset_statistics.json` file."""
     out_path = run_dir / "dataset_statistics.json"
@@ -45,7 +62,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             vla_dataset,
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
             collate_fn=collate_fn,
-            num_workers=4,
+            **_build_loader_kwargs(cfg.datasets.vla_data),
             # shuffle=True
         )        
         if dist.get_rank() == 0: 

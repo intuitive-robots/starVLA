@@ -28,7 +28,7 @@ import hashlib
 import io
 import json, torch
 import copy
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from pathlib import Path
 from typing import Sequence
 import os, random
@@ -40,6 +40,7 @@ from tqdm import tqdm
 from PIL import Image
 import torch.distributed as dist
 
+from starVLA.dataloader.gr00t_lerobot import video as video_utils
 from starVLA.dataloader.gr00t_lerobot.video import get_all_frames, get_frames_by_timestamps
 
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
@@ -70,6 +71,35 @@ EPSILON = 5e-4
 #  LeRobot v3.0 dataset file names 
 LE_ROBOT3_TASKS_FILENAME = "meta/tasks.parquet"
 LE_ROBOT3_EPISODE_FILENAME = "meta/episodes/*/*.parquet"
+
+
+def _coerce_int_index(value, field_name: str) -> int:
+    """Convert parquet/pandas scalar indices to Python ints for path formatting."""
+    if pd.isna(value):
+        raise ValueError(f"Missing index value for {field_name}")
+
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+
+    if isinstance(value, (np.floating, float)):
+        if not float(value).is_integer():
+            raise ValueError(f"Expected integer-like value for {field_name}, got {value!r}")
+        return int(value)
+
+    return int(value)
+
+
+def _parse_chunk_file_indices(parquet_path: Path) -> tuple[int, int]:
+    """Parse `chunk-XYZ/file-ABC.parquet` into integer indices."""
+    chunk_part = parquet_path.parent.name
+    file_part = parquet_path.stem
+    if not chunk_part.startswith("chunk-") or not file_part.startswith("file-"):
+        raise ValueError(f"Unexpected LeRobot parquet layout: {parquet_path}")
+
+    return (
+        int(chunk_part.split("-", 1)[1]),
+        int(file_part.split("-", 1)[1]),
+    )
 
 
 def calculate_dataset_statistics(parquet_paths: list[Path]) -> dict:
@@ -589,6 +619,7 @@ class LeRobotSingleDataset(Dataset):
             raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
         # indict letobot version
         self._lerobot_version =  self.data_cfg.get("lerobot_version", "v2.0") #self._indict_lerobot_version(**kwargs)
+        print(f"LeRobot dataset version: {self._lerobot_version}")
 
         self._action_mode = None
         self._action_mode_state_map = {}
@@ -623,6 +654,8 @@ class LeRobotSingleDataset(Dataset):
         # self._episodes = self._get_episode_info() # TODO why we need this func
         self.curr_traj_data = None
         self.curr_traj_id = None
+        self._video_reader_cache: OrderedDict[str, tuple[object, np.ndarray]] = OrderedDict()
+        self._video_reader_cache_size = int(self.data_cfg.get("video_reader_cache_size", 8)) if self.data_cfg else 8
 
         self._trajectory_ids, self._trajectory_lengths = self._get_trajectories()
         self._modality_keys = self._get_modality_keys()
@@ -636,6 +669,42 @@ class LeRobotSingleDataset(Dataset):
 
         # Check if the dataset is valid
         self._check_integrity()
+
+    def _get_cached_decord_reader(self, video_path: Path) -> tuple[object, np.ndarray]:
+        """Reuse decord readers per worker to avoid repeated mp4 open/init costs."""
+        cache_key = video_path.as_posix()
+        cached = self._video_reader_cache.pop(cache_key, None)
+        if cached is None:
+            if not video_utils.DECORD_AVAILABLE:
+                raise ImportError("decord is not available.")
+            video_reader = video_utils.decord.VideoReader(cache_key, **self.video_backend_kwargs)
+            frame_timestamps = video_reader.get_frame_timestamp(range(len(video_reader)))
+            cached = (video_reader, frame_timestamps)
+        self._video_reader_cache[cache_key] = cached
+
+        while len(self._video_reader_cache) > self._video_reader_cache_size:
+            self._video_reader_cache.popitem(last=False)
+
+        return cached
+
+    def _get_frames_by_timestamps_cached(
+        self,
+        video_path: Path,
+        timestamps: np.ndarray,
+    ) -> np.ndarray:
+        """Fetch frames with a cached decord reader when possible."""
+        if self.video_backend != "decord" or self._video_reader_cache_size <= 0:
+            return get_frames_by_timestamps(
+                video_path.as_posix(),
+                timestamps,
+                video_backend=self.video_backend,
+                video_backend_kwargs=self.video_backend_kwargs,
+            )
+
+        video_reader, frame_timestamps = self._get_cached_decord_reader(video_path)
+        indices = np.abs(frame_timestamps[:, :1] - timestamps).argmin(axis=0)
+        frames = video_reader.get_batch(indices)
+        return frames.asnumpy()
 
     @property
     def dataset_path(self) -> Path:
@@ -905,12 +974,18 @@ class LeRobotSingleDataset(Dataset):
         # v3.0
         elif self._lerobot_version == "v3.0":
             file_paths = sorted(list((self.dataset_path).glob(LE_ROBOT3_EPISODE_FILENAME)))
+            use_data_file_index_map = self._should_derive_v3_episode_files_from_data()
+            derived_episode_files = (
+                self._build_v3_episode_file_map() if use_data_file_index_map else {}
+            )
             trajectory_ids = []
             trajectory_lengths = []
             # data_chunck_index = []
             # data_file_index = []
             # vido_from_index = []
             self.trajectory_ids_to_metadata = {}
+            metadata_file_index_mismatches = 0
+            metadata_file_index_missing = 0
             for file_path in file_paths:
                 episodes_data = pd.read_parquet(file_path)
                 timestamp_cols = [
@@ -919,8 +994,9 @@ class LeRobotSingleDataset(Dataset):
                     if str(c).startswith("videos/") and str(c).endswith("/from_timestamp")
                 ]
                 for index, episode in episodes_data.iterrows():
-                    trajectory_ids.append(episode["episode_index"])
-                    trajectory_lengths.append(episode["length"])
+                    trajectory_id = _coerce_int_index(episode["episode_index"], "episode_index")
+                    trajectory_ids.append(trajectory_id)
+                    trajectory_lengths.append(_coerce_int_index(episode["length"], "length"))
 
                     from_timestamps = {}
                     for col in timestamp_cols:
@@ -944,10 +1020,25 @@ class LeRobotSingleDataset(Dataset):
                                 "chunk_index": int(episode[chunk_col]),
                                 "file_index": int(episode[file_col]),
                             }
-                    print(video_file_indices)
+                    metadata_chunk_index = _coerce_int_index(
+                        episode["data/chunk_index"], "data/chunk_index"
+                    )
+                    metadata_file_index = _coerce_int_index(
+                        episode["data/file_index"], "data/file_index"
+                    )
+                    derived_chunk_file = derived_episode_files.get(trajectory_id)
+                    if derived_chunk_file is None:
+                        metadata_file_index_missing += 1
+                        data_chunk_index = metadata_chunk_index
+                        data_file_index = metadata_file_index
+                    else:
+                        data_chunk_index, data_file_index = derived_chunk_file
+                        if (metadata_chunk_index, metadata_file_index) != derived_chunk_file:
+                            metadata_file_index_mismatches += 1
+
                     episode_meta = {
-                        "data/chunk_index": episode["data/chunk_index"],
-                        "data/file_index": episode["data/file_index"],
+                        "data/chunk_index": data_chunk_index,
+                        "data/file_index": data_file_index,
                         "data/file_from_index": index,
                         "videos/from_timestamps": from_timestamps,
                         "videos/file_indices": video_file_indices,
@@ -960,8 +1051,48 @@ class LeRobotSingleDataset(Dataset):
                     # }
                     self.trajectory_ids_to_metadata[trajectory_ids[-1]] = episode_meta
 
+            if use_data_file_index_map and metadata_file_index_mismatches:
+                print(
+                    f"LeRobot v3 metadata mismatch detected for {metadata_file_index_mismatches} "
+                    "episodes; using data-file-derived chunk/file indices instead."
+                )
+            if use_data_file_index_map and metadata_file_index_missing:
+                print(
+                    f"LeRobot v3 could not derive data parquet locations for "
+                    f"{metadata_file_index_missing} episodes; falling back to metadata for those entries."
+                )
+
             # Should be able to directly read the saved index info here
             return np.array(trajectory_ids), np.array(trajectory_lengths)
+
+    def _should_derive_v3_episode_files_from_data(self) -> bool:
+        """Enable the LIBERO-specific workaround for broken v3 metadata."""
+        return self._lerobot_version == "v3.0" and "libero" in self.dataset_name.lower()
+
+    def _build_v3_episode_file_map(self) -> dict[int, tuple[int, int]]:
+        """Map each episode_index to the actual data parquet that contains it."""
+        if self._lerobot_version != "v3.0":
+            return {}
+
+        episode_to_file: dict[int, tuple[int, int]] = {}
+        data_paths = sorted(self.dataset_path.glob(LE_ROBOT_DATA_FILENAME))
+        for parquet_path in tqdm(data_paths, desc="Indexing LeRobot v3 data files"):
+            chunk_index, file_index = _parse_chunk_file_indices(parquet_path)
+            data = pd.read_parquet(parquet_path, columns=["episode_index"])
+            episode_ids = pd.unique(data["episode_index"].dropna())
+            for episode_id in episode_ids:
+                coerced_episode_id = _coerce_int_index(episode_id, "episode_index")
+                current_location = (chunk_index, file_index)
+                previous_location = episode_to_file.get(coerced_episode_id)
+                if previous_location is not None and previous_location != current_location:
+                    raise ValueError(
+                        "Episode spans multiple data parquet files in LeRobot v3: "
+                        f"episode_index={coerced_episode_id}, previous={previous_location}, "
+                        f"current={current_location}"
+                    )
+                episode_to_file[coerced_episode_id] = current_location
+
+        return episode_to_file
 
     def _get_all_steps(self) -> list[tuple[int, int]]:
         """Get the trajectory IDs and base indices for all steps in the dataset.
@@ -981,7 +1112,12 @@ class LeRobotSingleDataset(Dataset):
             try:
                 with open(steps_path, "rb") as f:
                     cached_data = pickle.load(f)
-                return cached_data["steps"]
+                if cached_data.get("config_key") == config_key:
+                    return cached_data["steps"]
+                print(
+                    f"[RANK {os.environ.get('RANK', 'NA')}] "
+                    "Cached steps config mismatch, will rebuild."
+                )
             except Exception as e:
                 # include EOFError / PickleError / KeyError
                 print(
@@ -1026,6 +1162,10 @@ class LeRobotSingleDataset(Dataset):
         config_dict = {
             "delete_pause_frame": self.delete_pause_frame,
             "dataset_name": self.dataset_name,
+            "lerobot_version": self._lerobot_version,
+            "trajectory_file_strategy": "derive_from_data_files_v1"
+            if self._should_derive_v3_episode_files_from_data()
+            else "metadata",
         }
         # Create a hash of the configuration
         config_str = str(sorted(config_dict.items()))
@@ -1456,8 +1596,7 @@ class LeRobotSingleDataset(Dataset):
         if self.curr_traj_id == trajectory_id and self.curr_traj_data is not None:
             return self.curr_traj_data
         else: #TODO check detail later
-            episode_meta = self.trajectory_ids_to_metadata[trajectory_id]
-            chunk_index = episode_meta["data/chunk_index"]
+            chunk_index = self.get_episode_chunk(trajectory_id)
             file_index = self.get_episode_file_index(trajectory_id)
             # file_from_index = self.get_episode_file_from_index(trajectory_id)
             
@@ -1469,7 +1608,17 @@ class LeRobotSingleDataset(Dataset):
             file_data = pd.read_parquet(parquet_path)
             
             # filter by trajectory_id
-            episode_data = file_data.loc[file_data["episode_index"] == trajectory_id].copy()
+            episode_data = (
+                file_data.loc[file_data["episode_index"] == trajectory_id]
+                .copy()
+                .reset_index(drop=True)
+            )
+            if episode_data.empty:
+                raise ValueError(
+                    f"Trajectory {trajectory_id} not found in resolved data parquet {parquet_path}"
+                )
+            self.curr_traj_id = trajectory_id
+            self.curr_traj_data = episode_data
             return episode_data
 
 
@@ -1492,11 +1641,15 @@ class LeRobotSingleDataset(Dataset):
 
     def get_episode_chunk(self, ep_index: int) -> int:
         """Get the chunk index for an episode index."""
+        if self._lerobot_version == "v3.0":
+            episode_meta = self.trajectory_ids_to_metadata[ep_index]
+            return _coerce_int_index(episode_meta["data/chunk_index"], "data/chunk_index")
         return ep_index // self.chunk_size
+
     def get_episode_file_index(self, ep_index: int) -> int:
         """Get the file index for an episode index."""
         episode_meta = self.trajectory_ids_to_metadata[ep_index]
-        return episode_meta["data/file_index"]
+        return _coerce_int_index(episode_meta["data/file_index"], "data/file_index")
     
     def get_episode_file_from_index(self, ep_index: int) -> int:
         """Get the file from index for an episode index."""
@@ -1574,8 +1727,8 @@ class LeRobotSingleDataset(Dataset):
                 video_file_index = episode_meta["data/file_index"]
             video_filename = self.video_path_pattern.format(
                 video_key=original_key,
-                chunk_index=episode_meta["data/chunk_index"],
-                file_index=episode_meta["data/file_index"],
+                chunk_index=video_chunk_index,
+                file_index=video_file_index,
             )
         return self.dataset_path / video_filename
 
@@ -1661,12 +1814,7 @@ class LeRobotSingleDataset(Dataset):
             from_timestamp = float(from_timestamps.get(original_video_key, 0.0))
             video_timestamp = video_timestamp + from_timestamp
 
-        return get_frames_by_timestamps(
-            video_path.as_posix(),
-            video_timestamp,
-            video_backend=self.video_backend, # TODO
-            video_backend_kwargs=self.video_backend_kwargs,
-        )
+        return self._get_frames_by_timestamps_cached(video_path, video_timestamp)
 
     def get_state_or_action(
         self,
