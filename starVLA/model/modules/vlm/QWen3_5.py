@@ -119,21 +119,34 @@ class _QWen3_5_VL_Interface(nn.Module):
             )
         return generation_output
 
-    def build_qwenvl_inputs(self, images, instructions, solutions=None, **kwargs):
+    def build_qwenvl_inputs(self, images, instructions, solutions=None, cot_conversations=None, **kwargs):
         """
-        Build model inputs from raw data (images + instructions + optional solutions).
-        Follow Oficial Qwen3.5-VL Instruct format: https://huggingface.co/Qwen/Qwen3.5-VL-4B-Instruct
+        Build model inputs from raw data (images + instructions + optional solutions/cot_conversations).
+        Follow Official Qwen3.5-VL Instruct format: https://huggingface.co/Qwen/Qwen3.5-VL-4B-Instruct
+
+        Args:
+            images:            List[List[PIL.Image]]  — one inner list per sample
+            instructions:      List[str]
+            solutions:         List[str] | None  — fast-tokenizer action token sequences (existing path)
+            cot_conversations: List[list|None] | None  — per-sample ShareGPT conversations.
+                               Each entry is [{from: human, value: ...}, {from: gpt, value: ...}]
+                               or None (holdout / unannotated → no CoT loss for that sample).
+                               The human value may contain {instruction} which is filled in here.
         """
 
-        # Create messages: one message per sample
+        # Create user-only messages (prompt side).
+        # For CoT samples, the human turn comes from the conversation (not CoT_prompt config).
+        # For non-CoT samples, fall back to CoT_prompt config or bare instruction.
         messages = []
         assert len(images) == len(instructions), "Images and instructions must have the same length"
-        for imgs, instruction in zip(images, instructions):
+        for i, (imgs, instruction) in enumerate(zip(images, instructions)):
             content = [{"type": "image", "image": img} for img in imgs]
 
-            if "CoT_prompt" in self.config.datasets.vla_data:  # If using a grounding prompt to task
-                CoT_prompt = self.config.datasets.vla_data.get("CoT_prompt", "")
-                prompt = CoT_prompt.replace("{instruction}", instruction)
+            conv = cot_conversations[i] if cot_conversations is not None else None
+            if conv is not None:
+                prompt = conv[0]["value"].replace("{instruction}", instruction)
+            elif "CoT_prompt" in self.config.datasets.vla_data:
+                prompt = self.config.datasets.vla_data.get("CoT_prompt", "").replace("{instruction}", instruction)
             else:
                 prompt = instruction
 
@@ -141,12 +154,62 @@ class _QWen3_5_VL_Interface(nn.Module):
             msg = [{"role": "user", "content": content}]
 
             if solutions is not None:
-                solution = solutions[len(messages)]
-                msg.append({"role": "assistant", "content": [{"type": "text", "text": solution}]})
+                msg.append({"role": "assistant", "content": [{"type": "text", "text": solutions[i]}]})
             messages.append(msg)
 
-        # Preparation for inference
+        # ── CoT conversation path ─────────────────────────────────────────────────
+        # Loss is computed only on gpt (assistant) tokens; human/system tokens are masked.
+        if cot_conversations is not None:
+            assert len(cot_conversations) == len(messages), "cot_conversations length must match batch size"
 
+            # Append assistant (gpt) turn. None entries → empty string → no loss contribution.
+            messages_with_cot = []
+            for msg, conv in zip(messages, cot_conversations):
+                msg_cot = list(msg)
+                gpt_text = conv[1]["value"] if conv is not None else ""
+                msg_cot.append({"role": "assistant", "content": [{"type": "text", "text": gpt_text}]})
+                messages_with_cot.append(msg_cot)
+
+            # Encode prompt-only (no assistant) to measure per-sample prompt lengths.
+            # With add_generation_prompt=True the encoding ends exactly where the assistant starts.
+            prompt_only_inputs = self.processor.apply_chat_template(
+                messages,  # user-only messages
+                tokenize=True,
+                padding=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            # Encode full sequence (user + assistant CoT).
+            batch_inputs = self.processor.apply_chat_template(
+                messages_with_cot,
+                tokenize=True,
+                padding=True,
+                add_generation_prompt=False,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            # Build labels: mask everything up to (and including) the prompt, supervise only
+            # the assistant CoT tokens. With left padding the valid tokens are right-aligned.
+            max_full_len = batch_inputs["input_ids"].shape[1]
+            labels = batch_inputs["input_ids"].clone()
+            for i in range(labels.size(0)):
+                prompt_valid = int(prompt_only_inputs["attention_mask"][i].sum())
+                full_valid = int(batch_inputs["attention_mask"][i].sum())
+                asst_len = full_valid - prompt_valid
+                # With left padding: last `full_valid` positions are real tokens;
+                # last `asst_len` of those are the assistant response.
+                asst_start = max_full_len - max(asst_len, 0)
+                labels[i, :asst_start] = IGNORE_INDEX
+                # Mask any residual pad tokens that ended up in the label.
+                if self.processor.tokenizer.pad_token_id is not None:
+                    labels[i][labels[i] == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX
+            batch_inputs["labels"] = labels
+            return batch_inputs.to(self.model.device)
+
+        # Preparation for inference (no CoT / no solutions)
         batch_inputs = self.processor.apply_chat_template(
             messages, tokenize=True, padding=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         )

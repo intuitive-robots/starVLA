@@ -24,6 +24,8 @@ import torch
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
+from starVLA.dataloader.cot_resolver import assert_cot_prompt_consistent, build_cot_resolver
+from starVLA.model.modules.projector.readout import ReadoutProjector
 from starVLA.training.trainer_utils import initialize_overwatch
 
 logger = initialize_overwatch(__name__)
@@ -164,6 +166,31 @@ class Qwen_GR00T(baseframework):
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
 
+        # Step-based CoT resolver — NullCoTResolver when cot.source is absent/none.
+        self.cot_resolver = build_cot_resolver(self.config)
+        assert_cot_prompt_consistent(self.cot_resolver, self.config)
+
+        # GR00T N1.5-style readout projector (optional)
+        readout_cfg = getattr(self.config.framework, "readout_tokens", None)
+        _readout_enabled = bool(
+            readout_cfg.get("enabled", False) if hasattr(readout_cfg, "get")
+            else getattr(readout_cfg, "enabled", False)
+        ) if readout_cfg is not None else False
+
+        if _readout_enabled:
+            _g = lambda k, d: int(readout_cfg.get(k, d) if hasattr(readout_cfg, "get") else getattr(readout_cfg, k, d))
+            _num_tokens = _g("num_tokens", 32)
+            _num_layers = _g("num_layers",  2)
+            _num_heads  = _g("num_heads",   8)
+            _ffn_dim    = _g("ffn_dim",     0) or None
+            _dropout    = float(readout_cfg.get("dropout", 0.0) if hasattr(readout_cfg, "get") else getattr(readout_cfg, "dropout", 0.0))
+            vlm_hidden  = self.qwen_vl_interface.model.config.hidden_size
+            self.readout_projector = ReadoutProjector(
+                vlm_hidden, _num_tokens, _num_layers, _num_heads, _ffn_dim, _dropout
+            )
+        else:
+            self.readout_projector = None
+
     def forward(
         self,
         examples: List[dict] = None,
@@ -176,8 +203,23 @@ class Qwen_GR00T(baseframework):
 
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # [B, 1, state_dim]
 
+        # Resolve per-sample CoT texts from the step-based mapping.
+        # Returns None per sample when no annotation covers that trajectory/frame (holdout).
+        cot_conversations = [
+            self.cot_resolver.resolve(
+                ex.get("trajectory_name", ""),
+                ex.get("frame_index", 0),
+            )
+            for ex in examples
+        ]
+        has_cot = any(c is not None for c in cot_conversations)
+
         # Step 1: QWenVL input format
-        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=batch_images,
+            instructions=instructions,
+            cot_conversations=cot_conversations if has_cot else None,
+        )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -188,10 +230,19 @@ class Qwen_GR00T(baseframework):
             # last_hidden_state: [B, seq_len, H]
             last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
 
+        # CoT CE loss from the VLM language head (only present when labels were attached).
+        cot_loss = qwenvl_outputs.loss if (has_cot and qwenvl_outputs.loss is not None) else None
+
+        # Readout projection (optional) — compress VLM tokens before DiT
+        if self.readout_projector is not None:
+            dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
+        else:
+            dit_context = last_hidden                          # [B, L, H]
+
         # Step 4: Action Expert Forward and Loss
         with torch.autocast("cuda", dtype=torch.float32):
             actions = torch.tensor(
-                np.array(actions), device=last_hidden.device, dtype=last_hidden.dtype
+                np.array(actions), device=dit_context.device, dtype=dit_context.dtype
             )  # [B, T_full, action_dim]
             actions_target = actions[:, -self.action_horizon :, :]  # (B, action_horizon, action_dim)
 
@@ -201,18 +252,21 @@ class Qwen_GR00T(baseframework):
                 else 4
             )
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
-            last_hidden_repeated = last_hidden.repeat(repeated_diffusion_steps, 1, 1)
+            dit_context_repeated    = dit_context.repeat(repeated_diffusion_steps, 1, 1)
 
             state_repeated = None
             if state is not None:
-                state = torch.tensor(np.array(state), device=last_hidden.device, dtype=last_hidden.dtype)
+                state = torch.tensor(np.array(state), device=dit_context.device, dtype=dit_context.dtype)
                 state_repeated = state.repeat(repeated_diffusion_steps, 1, 1)
 
             action_loss = self.action_model(
-                last_hidden_repeated, actions_target_repeated, state_repeated
+                dit_context_repeated, actions_target_repeated, state_repeated
             )  # (B, chunk_len, action_dim)
 
-        return {"action_loss": action_loss}
+        result = {"action_loss": action_loss}
+        if cot_loss is not None:
+            result["cot_loss"] = cot_loss
+        return result
 
     @torch.inference_mode()
     def predict_action(
@@ -253,15 +307,20 @@ class Qwen_GR00T(baseframework):
             # last_hidden_state: [B, seq_len, H]
             last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
 
+        if self.readout_projector is not None:
+            dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
+        else:
+            dit_context = last_hidden                          # [B, L, H]
+
         state = (
-            torch.from_numpy(np.array(state)).to(last_hidden.device, dtype=last_hidden.dtype)
+            torch.from_numpy(np.array(state)).to(dit_context.device, dtype=dit_context.dtype)
             if state is not None
             else None
         )
 
         # Step 4: Action Expert Forward
         with torch.autocast("cuda", dtype=torch.float32):
-            pred_actions = self.action_model.predict_action(last_hidden, state)  # (B, chunk_len, action_dim)
+            pred_actions = self.action_model.predict_action(dit_context, state)
 
         normalized_actions = pred_actions.detach().cpu().numpy()
         return {"normalized_actions": normalized_actions}

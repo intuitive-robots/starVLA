@@ -25,7 +25,7 @@ import torch.distributed as dist
 import wandb
 from accelerate import Accelerator, DeepSpeedPlugin
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
+from accelerate.utils import DistributedDataParallelKwargs, set_seed
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -67,10 +67,11 @@ def create_accelerator(use_deepspeed: bool) -> Accelerator:
             "Please launch with a non-DeepSpeed Accelerate config instead of "
             "`starVLA/config/deepseeds/deepspeed_zero2.yaml`."
         )
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     if use_deepspeed:
-        accelerator = Accelerator(deepspeed_plugin=DeepSpeedPlugin())
+        accelerator = Accelerator(deepspeed_plugin=DeepSpeedPlugin(), kwargs_handlers=[ddp_kwargs])
     else:
-        accelerator = Accelerator()
+        accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
     accelerator.print(accelerator.state)
     return accelerator
 
@@ -448,6 +449,14 @@ class VLATrainer(TrainerUtils):
                 open_loop_metrics = self._eval_open_loop_trajectories()
                 step_metrics.update(open_loop_metrics)
 
+        # Eval CoT loss: run forward (not predict_action) on the same batch to get
+        # the language CE loss over CoT tokens. Logged separately from train/cot_loss.
+        with torch.no_grad():
+            eval_fwd = self.accelerator.unwrap_model(self.model).forward(examples)
+            eval_cot_loss = eval_fwd.get("cot_loss", None)
+            if eval_cot_loss is not None and self.accelerator.is_main_process:
+                step_metrics["eval/cot_loss"] = eval_cot_loss.item()
+
         del examples
         dist.barrier()
         return step_metrics
@@ -609,7 +618,12 @@ class VLATrainer(TrainerUtils):
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 output_dict = self.model.forward(batch_vla)
                 action_loss = output_dict["action_loss"]
+                cot_loss = output_dict.get("cot_loss", None)
+
+                cot_scale = getattr(getattr(self.config.trainer, "loss_scale", None), "cot", 0.1)
                 total_loss = action_loss
+                if cot_loss is not None:
+                    total_loss = total_loss + cot_scale * cot_loss
 
             self.accelerator.backward(total_loss)
 
@@ -625,9 +639,10 @@ class VLATrainer(TrainerUtils):
             if self.accelerator.sync_gradients:
                 self.lr_scheduler.step()
 
-        return {
-            "action_dit_loss": action_loss.item(),
-        }
+        metrics = {"action_dit_loss": action_loss.item()}
+        if cot_loss is not None:
+            metrics["train/cot_loss"] = cot_loss.item()
+        return metrics
 
     def _finalize_training(self):
         """Training end processing."""

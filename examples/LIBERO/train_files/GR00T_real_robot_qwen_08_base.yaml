@@ -21,10 +21,10 @@ framework:
     action_hidden_dim: 768
     add_pos_embed: True
     max_seq_len: 1024
-  diffusion_model_cfg:
-    num_layers: 12
-    output_dim: 768
-    droupout: 0.1
+    diffusion_model_cfg:
+      num_layers: 12
+      output_dim: 768
+      droupout: 0.1
 
 
 

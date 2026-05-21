@@ -2015,7 +2015,16 @@ class LeRobotSingleDataset(Dataset):
         selected_video_keys = self._resolve_sampled_video_keys(trajectory_id=trajectory_id, base_index=base_index)
         raw_data = self.get_step_data(trajectory_id, base_index, selected_video_keys=selected_video_keys)
         data = self._apply_transforms_for_sample(raw_data, selected_video_keys=selected_video_keys)
-        return self._pack_sample(data, selected_video_keys=selected_video_keys)
+        sample = self._pack_sample(data, selected_video_keys=selected_video_keys)
+
+        # Expose trajectory identity for step-based CoT lookup.
+        # Key format matches the annotation convention: "{dataset_name}/{chunk_idx}/{file_idx}".
+        meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+        chunk_idx = meta.get("data/chunk_index", 0)
+        file_idx = meta.get("data/file_index", int(trajectory_id))
+        sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{file_idx}"
+        sample["frame_index"] = int(base_index)
+        return sample
 
     def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
