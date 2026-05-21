@@ -3,7 +3,7 @@
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=08:00:00
+#SBATCH --time=11:45:00
 #SBATCH --output=slurm_logs/starvla_%j.out
 #SBATCH --error=slurm_logs/starvla_%j.err
 #SBATCH --partition=booster
@@ -18,7 +18,7 @@
 #   sbatch train_droid_slurm.sh --config path/to/my_config.yaml
 #   sbatch train_droid_slurm.sh --config path/to/my_config.yaml --trainer.max_train_steps 50000 --run_id my_run
 
-set -eo pipefail
+set -euo pipefail
 
 # ── Parse --config; collect remaining args as CLI overrides ──────────────
 CONFIG_YAML="./examples/DROID/train_files/train_droid.yaml"
@@ -65,22 +65,35 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export WANDB_MODE=offline
 export DISABLE_VERSION_CHECK=1
+export ACCELERATE_USE_DEEPSPEED=true
+export ACCELERATE_DEEPSPEED_CONFIG_FILE=./starVLA/config/deepseeds/ds_config.yaml
+
+#Recommended env vars for NFS performance (add to launch script):
+export LEROBOT_PARQUET_CACHE_SIZE=128
+export LEROBOT_VIDEO_DECODER_CACHE_SIZE=64
+export LEROBOT_PREFETCH_MP4=1
+  
 
 # ── NCCL / GLOO ───────────────────────────────────────────────────────────────
 export NCCL_DEBUG=WARN
 export NCCL_SOCKET_IFNAME=ib0
 export GLOO_SOCKET_IFNAME=ib0
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_BLOCKING_WAIT=1
-export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_TIMEOUT=10000
-export NCCL_SOCKET_TIMEOUT_MS=360000
 
-# ── Multi-node accelerate settings ─────────────────────────────────────────────
-MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "$SLURM_NODELIST" | head -n 1)}"
-MASTER_PORT="${MASTER_PORT:-29500}"
-GPUS_PER_NODE="${GPUS_PER_NODE:-$(nvidia-smi -L | wc -l)}"
-TOTAL_GPUS="${TOTAL_GPUS:-$((SLURM_NNODES * GPUS_PER_NODE))}"
+# ── Multi-node torchrun settings ───────────────────────────────────────────────
+MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)}"
+if [ "${SYSTEMNAME:-}" = juwelsbooster ] \
+       || [ "${SYSTEMNAME:-}" = juwels ] \
+       || [ "${SYSTEMNAME:-}" = jurecadc ] \
+       || [ "${SYSTEMNAME:-}" = jusuf ]; then
+    MASTER_ADDR="${MASTER_ADDR}i"
+fi
+MASTER_PORT="${MASTER_PORT:-54123}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-gpu}"
+TOTAL_GPUS="${TOTAL_GPUS:-$((SLURM_NNODES * $(nvidia-smi -L | wc -l)))}"
+export MASTER_ADDR
+export MASTER_PORT
+export SRUN_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK:-}"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 mkdir -p slurm_logs
@@ -92,20 +105,21 @@ echo "Master addr:   $MASTER_ADDR"
 echo "Master port:   $MASTER_PORT"
 echo "GPUs / node:   $GPUS_PER_NODE"
 echo "Total GPUs:    $TOTAL_GPUS"
+echo "System name:   ${SYSTEMNAME:-<unset>}"
 echo "Config:        $CONFIG_YAML"
 echo "Extra args:    ${EXTRA_ARGS[*]:-<none>}"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 LAUNCH_CMD=(
-    accelerate launch
-    --config_file starVLA/config/deepseeds/deepspeed_zero2.yaml
-    --main_process_ip "$MASTER_ADDR"
-    --main_process_port "$MASTER_PORT"
-    --machine_rank "$SLURM_PROCID"
-    --num_machines "$SLURM_NNODES"
-    --num_processes "$TOTAL_GPUS"
+    torchrun
+    --nnodes="$SLURM_JOB_NUM_NODES"
+    --nproc_per_node="$GPUS_PER_NODE"
+    --rdzv_id="$SLURM_JOB_ID"
+    --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT"
+    --rdzv_backend=c10d
     starVLA/training/train_starvla.py
     --config_yaml "$CONFIG_YAML"
+    --use_deepspeed "$ACCELERATE_USE_DEEPSPEED"
 )
 
 if ((${#EXTRA_ARGS[@]})); then
@@ -114,4 +128,4 @@ fi
 
 echo "Launch command: ${LAUNCH_CMD[*]}"
 
-srun --ntasks="$SLURM_NNODES" --ntasks-per-node=1 "${LAUNCH_CMD[@]}"
+srun --kill-on-bad-exit=1 --ntasks="$SLURM_NNODES" --ntasks-per-node=1 "${LAUNCH_CMD[@]}"

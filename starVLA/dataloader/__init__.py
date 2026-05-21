@@ -98,8 +98,43 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             output_dir = Path(cfg.output_dir)
             vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
         return vla_train_dataloader
+    elif dataset_py == "marigold_lerobot_datasets":
+        from starVLA.dataloader.marigold_datasets import get_marigold_vla_dataset, collate_fn
+        vla_dataset_cfg = cfg.datasets.vla_data
+        loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
+
+        vla_dataset = get_marigold_vla_dataset(data_cfg=vla_dataset_cfg)
+        estimated_in_flight_samples = _estimate_in_flight_samples(
+            batch_size=cfg.datasets.vla_data.per_device_batch_size,
+            loader_kwargs=loader_kwargs,
+        )
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info(
+                "Building Marigold VLA DataLoader: batch_size=%s, num_workers=%s, prefetch_factor=%s, "
+                "persistent_workers=%s, pin_memory=%s, estimated_in_flight_samples=%s",
+                cfg.datasets.vla_data.per_device_batch_size,
+                loader_kwargs.get("num_workers", 0),
+                loader_kwargs.get("prefetch_factor", "n/a"),
+                loader_kwargs.get("persistent_workers", False),
+                loader_kwargs.get("pin_memory", False),
+                estimated_in_flight_samples if estimated_in_flight_samples is not None else "n/a",
+            )
+
+        vla_train_dataloader = DataLoader(
+            vla_dataset,
+            batch_size=cfg.datasets.vla_data.per_device_batch_size,
+            collate_fn=collate_fn,
+            **loader_kwargs,
+        )
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info("Built Marigold VLA DataLoader with dataset_len=%s", len(vla_dataset))
+        if dist.get_rank() == 0:
+            output_dir = Path(cfg.output_dir)
+            vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
+        return vla_train_dataloader
     elif dataset_py == "vlm_datasets":
         vlm_data_module = make_vlm_dataloader(cfg)
         vlm_train_dataloader = vlm_data_module["train_dataloader"]
-        
+
         return vlm_train_dataloader

@@ -1,4 +1,4 @@
-run_id: droid_resized_qwenpi_v3
+run_id: droid_resized_qwenpi_v3_ft
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
@@ -9,7 +9,7 @@ version_id: "0.21"
 framework:
   name: QwenPI_v3
   qwenvl:
-    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-4B
+    base_vlm: /e/home/jusers/blank4/jupiter/blank4/code/train_downstream/train/outputs/ours_t097_fsd_rp_llov2_128/2026-05-14_16-16-30/checkpoints/checkpoint-9056
     attn_implementation: sdpa
     vl_hidden_dim: 2048
   action_model:
