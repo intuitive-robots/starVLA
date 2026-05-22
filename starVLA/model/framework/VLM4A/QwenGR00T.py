@@ -165,9 +165,10 @@ class Qwen_GR00T(baseframework):
         # are normalised upstream by `share_tools.apply_config_compat`, so we
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
+        self.is_inference = bool(kwargs.get("is_inference", False))
 
         # Step-based CoT resolver — NullCoTResolver when cot.source is absent/none.
-        self.cot_resolver = build_cot_resolver(self.config)
+        self.cot_resolver = build_cot_resolver(self.config, is_inference=self.is_inference)
         assert_cot_prompt_consistent(self.cot_resolver, self.config)
 
         # GR00T N1.5-style readout projector (optional)

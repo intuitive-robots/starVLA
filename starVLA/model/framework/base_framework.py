@@ -48,7 +48,7 @@ def _auto_import_framework_modules() -> None:
     _FRAMEWORKS_IMPORTED = True
 
 
-def build_framework(cfg): # The single entry point for building different model frameworks
+def build_framework(cfg, **kwargs): # The single entry point for building different model frameworks
     """
     Build a framework model from config.
     Args:
@@ -69,7 +69,7 @@ def build_framework(cfg): # The single entry point for building different model 
         )
 
     model_class = FRAMEWORK_REGISTRY[framework_id]
-    return model_class(cfg)
+    return model_class(cfg, **kwargs)
 
 
 # PreTrainedModel, AutoModel, PretrainedConfig,  are so good, find sometime to study them
@@ -206,6 +206,7 @@ class baseframework(PreTrainedModel):
     def from_pretrained(
         cls,
         pretrained_checkpoint: str,
+        is_inference: bool = False,
         **kwargs,
     ) -> None:
         """
@@ -220,6 +221,8 @@ class baseframework(PreTrainedModel):
 
         Args:
             pretrained_checkpoint: Path to .pt file inside run/checkpoints directory.
+            is_inference: When True, allow inference-only fallbacks such as
+                skipping optional training-only assets (for example CoT mapping files).
             **kwargs: Extra constructor overrides passed to subclass.
 
         Returns:
@@ -235,8 +238,8 @@ class baseframework(PreTrainedModel):
         config = dict_to_namespace(model_config)
         model_config = config
         model_config.trainer.pretrained_checkpoint = None
-        
-        FrameworkModel = build_framework(cfg=model_config)
+
+        FrameworkModel = build_framework(cfg=model_config, is_inference=is_inference, **kwargs)
         # set for action un-norm
         FrameworkModel.norm_stats = norm_stats
         # Load from Checkpoint (Custom --> should load both *projector* and *llm* weights)
@@ -266,4 +269,3 @@ class baseframework(PreTrainedModel):
         # **ensure model is on GPU**
         FrameworkModel = FrameworkModel
         return FrameworkModel
-

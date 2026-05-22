@@ -158,6 +158,7 @@ class QwenGR00T_CoT(baseframework):
         # Flow-matching action expert
         self.action_model: FlowmatchingActionHead = get_action_model(config=self.config)
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
+        self.is_inference = bool(kwargs.get("is_inference", False))
 
         # Knowledge insulation toggle — read once and cache as a plain bool.
         # Avoids repeated OmegaConf attribute lookups in the hot forward path.
@@ -169,7 +170,7 @@ class QwenGR00T_CoT(baseframework):
         )
 
         # Step-based CoT resolver
-        self.cot_resolver = build_cot_resolver(self.config)
+        self.cot_resolver = build_cot_resolver(self.config, is_inference=self.is_inference)
         assert_cot_prompt_consistent(self.cot_resolver, self.config)
 
         # GR00T N1.5-style readout projector (optional).

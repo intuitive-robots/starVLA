@@ -22,6 +22,7 @@ def main(args) -> None:
         ckpt_path=args.ckpt_path,
         device="cuda",
         use_bf16=args.use_bf16,
+        is_inference=True,
     )
 
     hostname = socket.gethostname()

@@ -13,8 +13,11 @@ Backward compat: entries with legacy "cot_text" field are wrapped automatically.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class CoTResolver:
@@ -136,7 +139,7 @@ def assert_cot_prompt_consistent(resolver: CoTResolver, cfg) -> None:
     )
 
 
-def build_cot_resolver(cfg) -> CoTResolver:
+def build_cot_resolver(cfg, is_inference: bool = False) -> CoTResolver:
     """
     Factory — reads datasets.vla_data.cot config block and returns
     the appropriate resolver. Falls back to NullCoTResolver when the
@@ -163,7 +166,20 @@ def build_cot_resolver(cfg) -> CoTResolver:
     if source == "mapping":
         mapping_path = cot_cfg.get("mapping_path") if hasattr(cot_cfg, "get") else getattr(cot_cfg, "mapping_path")
         if not mapping_path:
+            if is_inference:
+                logger.warning(
+                    "[CoTResolver] Inference mode requested CoT mapping source but no mapping_path was set. "
+                    "Falling back to NullCoTResolver."
+                )
+                return NullCoTResolver()
             raise ValueError("cot.source='mapping' requires cot.mapping_path to be set")
+        if is_inference and not Path(mapping_path).exists():
+            logger.warning(
+                "[CoTResolver] Inference mode could not find mapping file at %s. "
+                "Falling back to NullCoTResolver.",
+                mapping_path,
+            )
+            return NullCoTResolver()
         return MappingCoTResolver(mapping_path)
 
     raise ValueError(f"Unknown cot.source: '{source}'. Expected 'mapping' or 'none'.")

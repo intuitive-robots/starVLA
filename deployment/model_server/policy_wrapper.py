@@ -42,11 +42,12 @@ class PolicyServerWrapper:
         device: str = "cuda",
         use_bf16: bool = False,
         unnorm_key: Optional[str] = None,
+        is_inference: bool = False,
     ) -> None:
         self._ckpt_path = str(ckpt_path)
 
         logging.info("PolicyServerWrapper: loading framework from %s", self._ckpt_path)
-        framework = baseframework.from_pretrained(self._ckpt_path)
+        framework = baseframework.from_pretrained(self._ckpt_path, is_inference=is_inference)
         if use_bf16:
             framework = framework.to(torch.bfloat16)
         framework = framework.to(device).eval()
