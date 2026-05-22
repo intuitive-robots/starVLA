@@ -122,6 +122,10 @@ class ReadoutProjector(nn.Module):
         Returns:
             [B, num_tokens, H]  — compressed readout representations
         """
+        param = self.queries
+        if param.device != vl_embs.device or param.dtype != vl_embs.dtype:
+            self.to(device=vl_embs.device, dtype=vl_embs.dtype)
+
         queries = self.queries.expand(vl_embs.shape[0], -1, -1)
         for layer in self.layers:
             queries = layer(queries, vl_embs)

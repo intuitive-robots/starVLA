@@ -223,6 +223,18 @@ class VLATrainer(TrainerUtils):
                 entity=self.config.wandb_entity,
                 group="vla-train",
             )
+            for metric_name in (
+                "train/cot_loss",
+                "train_cot_loss",
+                "cot_loss",
+                "train/cot_coverage",
+                "cot_coverage",
+                "eval/cot_loss",
+                "eval_cot_loss",
+                "eval/cot_coverage",
+                "eval_cot_coverage",
+            ):
+                wandb.define_metric(metric_name)
 
     def _save_initial_configs(self):
         """Save full config and training script at the very start of training."""
@@ -456,6 +468,11 @@ class VLATrainer(TrainerUtils):
             eval_cot_loss = eval_fwd.get("cot_loss", None)
             if eval_cot_loss is not None and self.accelerator.is_main_process:
                 step_metrics["eval/cot_loss"] = eval_cot_loss.item()
+                step_metrics["eval_cot_loss"] = eval_cot_loss.item()
+            eval_cot_coverage = eval_fwd.get("cot_coverage", None)
+            if eval_cot_coverage is not None and self.accelerator.is_main_process:
+                step_metrics["eval/cot_coverage"] = float(eval_cot_coverage)
+                step_metrics["eval_cot_coverage"] = float(eval_cot_coverage)
 
         del examples
         dist.barrier()
@@ -642,6 +659,12 @@ class VLATrainer(TrainerUtils):
         metrics = {"action_dit_loss": action_loss.item()}
         if cot_loss is not None:
             metrics["train/cot_loss"] = cot_loss.item()
+            metrics["train_cot_loss"] = cot_loss.item()
+            metrics["cot_loss"] = cot_loss.item()
+        cot_coverage = output_dict.get("cot_coverage", None)
+        if cot_coverage is not None:
+            metrics["train/cot_coverage"] = float(cot_coverage)
+            metrics["cot_coverage"] = float(cot_coverage)
         return metrics
 
     def _finalize_training(self):

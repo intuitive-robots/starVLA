@@ -237,12 +237,27 @@ class TrainerUtils:
         """
         if dist.get_rank() != 0:
             return
+        def _module_param_counts(module):
+            total = sum(p.numel() for p in module.parameters())
+            trainable = sum(p.numel() for p in module.parameters() if p.requires_grad)
+            return total, trainable
+
         print("📊 model parameter statistics:")
-        num_params = sum(p.numel() for p in model.parameters())
-        num_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        num_params, num_trainable_params = _module_param_counts(model)
         print(
             f"# Parameters (in millions): {num_params / 10**6:.3f} Total, {num_trainable_params / 10**6:.3f} Trainable"
         )
+
+        for module_name in ("qwen_vl_interface", "action_model", "readout_projector"):
+            module = getattr(model, module_name, None)
+            if module is None:
+                continue
+            module_params, module_trainable_params = _module_param_counts(module)
+            trainable_status = "Trainable" if module_trainable_params > 0 else "Frozen"
+            print(
+                f"  - {module_name}: {module_params / 10**6:.3f}M Total, "
+                f"{module_trainable_params / 10**6:.3f}M Trainable ({trainable_status})"
+            )
         return num_params, num_trainable_params
 
     @staticmethod

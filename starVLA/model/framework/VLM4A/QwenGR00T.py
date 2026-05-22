@@ -213,6 +213,7 @@ class Qwen_GR00T(baseframework):
             for ex in examples
         ]
         has_cot = any(c is not None for c in cot_conversations)
+        cot_coverage = sum(c is not None for c in cot_conversations) / max(len(cot_conversations), 1)
 
         # Step 1: QWenVL input format
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
@@ -263,7 +264,7 @@ class Qwen_GR00T(baseframework):
                 dit_context_repeated, actions_target_repeated, state_repeated
             )  # (B, chunk_len, action_dim)
 
-        result = {"action_loss": action_loss}
+        result = {"action_loss": action_loss, "cot_coverage": cot_coverage}
         if cot_loss is not None:
             result["cot_loss"] = cot_loss
         return result

@@ -57,6 +57,11 @@ def _apply_trajectory_split(
     dataset._trajectory_ids = np.asarray(selected_ids)
     dataset._trajectory_lengths = np.asarray(selected_lengths)
     dataset._all_steps = dataset._get_all_steps_single_process()
+    dataset._valid_base_indices_by_trajectory = dataset._build_valid_base_indices_by_trajectory()
+    dataset._valid_trajectory_ids = np.array(list(dataset._valid_base_indices_by_trajectory.keys()))
+    dataset._valid_trajectory_lengths = np.array(
+        [len(indices) for indices in dataset._valid_base_indices_by_trajectory.values()]
+    )
     return dataset
 
 def make_LeRobotSingleDataset(

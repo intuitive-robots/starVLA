@@ -1,4 +1,4 @@
-run_id: GR00T_real_robot_abs_eef_qwen08ft_cot
+run_id: GR00T_real_robot_abs_eef_qwen08b_cot_box_ours
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
@@ -8,27 +8,20 @@ version_id: "0.21"
 
 framework:
   name: QwenGR00T_CoT
-  # ── Inference-time CoT generation ───────────────────────────────────────────
-  # generate_at_inference: true  → two-pass: generate CoT → re-encode → diffuse
-  # generate_at_inference: false → implicit CoT (prompt-only hidden states)
   cot:
-    generate_at_inference: false
+    generate_at_inference: true
     max_new_tokens: 128
 
-  # Q-Former style readout projector.
-  # When enabled, compresses all VLM tokens → num_tokens learned queries
-  # before passing to the DiT.  Each layer: self-attn → cross-attn to VLM → FFN.
-  # Recommended starting point: num_tokens=32, num_layers=2, num_heads=8.
   readout_tokens:
     enabled:    false
-    num_tokens: 32      # output query count  (try 16–64)
-    num_layers: 2       # Q-Former depth      (try 2–4)
-    num_heads:  8       # MHA heads           (hidden_dim / num_heads >= 128)
-    ffn_dim:    0       # FFN width; 0 → 2 × hidden_dim
+    num_tokens: 32
+    num_layers: 2
+    num_heads:  8
+    ffn_dim:    0
     dropout:    0.0
 
   qwenvl:
-    base_vlm: /e/home/jusers/blank4/jupiter/blank4/code/train_downstream/train/outputs/ours_t097_fsd_rp_llov2_qwen35_0_8b_128/2026-05-17_01-57-08/checkpoints/checkpoint-9056
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
     attn_implementation: sdpa
     vl_hidden_dim: 2048
   action_model:
@@ -71,20 +64,12 @@ datasets:
     action_type: abs_ee
     sequential_step_sampling: False
 
-    # CoT prompt template — {instruction} is replaced with the task language at runtime.
-    # The model learns to output the CoT response before taking actions.
     CoT_prompt: "Your task is {instruction}. What is the next subtask? Point to the target location."
 
-    # Step-based CoT supervision config.
-    # Build the mapping file with:
-    #   python scripts/create_cot_mapping.py \
-    #       --annotations <path>/annotations.jsonl \
-    #       --output <mapping_path> \
-    #       --holdout_fraction 0.1
     cot:
-      source: mapping            # 'mapping' | 'none'  (set 'none' to disable CoT loss entirely)
+      source: mapping
       mapping_path: data/cot_mappings/real_robot_ours_ours_cot.jsonl
-      loss_scale: 0.1            # weight of CoT CE loss relative to action diffusion loss
+      loss_scale: 0.1
 
     per_device_batch_size: 32
     load_all_data_for_training: true
@@ -113,7 +98,7 @@ trainer:
   loss_scale:
     vla: 1.0
     vlm: 0.1
-    cot: 0.1            # CoT CE loss scale; overrides datasets.vla_data.cot.loss_scale
+    cot: 0.1
   max_grad_norm: 1.0
   weight_decay: 0.0
   logging_frequency: 100

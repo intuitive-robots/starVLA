@@ -219,7 +219,18 @@ DATASET_NAMED_MIXTURES = {
     "demo_sim_pick_place": [("sim_pick_place", 1.0, "demo_sim_franka_delta_joints")],
     "SO101_pick": [("pick_dataset_name", 1.0, "SO101")],
     #cylinder_cube_full  folding_20hz_abs_cartesian_trimmed  pick_up_banana_xinkai_abs_cartesian_action
-    "real_robot_mixed": [("cylinder_cube_full", 1.0, "single_arm_franka_config"),
+    "real_robot_mixed_old": [("cylinder_cube_full", 1.0, "single_arm_franka_config"),
                          ("folding_20hz_abs_cartesian_trimmed", 1.0, "single_arm_franka_config"),
                         ("pick_up_banana_xinkai_abs_cartesian_action", 1.0, "single_arm_franka_config")],
+    "real_robot_mixed": [
+                    ("Put_the_orange_carrot_into_the_red_bowl_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_orange_carrot_into_the_red_dustpan_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_orange_lego_block_into_the_red_bowl_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_orange_lego_block_into_the_red_dustpan_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_cube_into_the_red_bowl_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_cube_into_the_red_dustpan_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_cuboid_into_the_red_bowl_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_cuboid_into_the_red_dustpan_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_lego_block_into_the_red_bowl_abs_cartesian_action", 1.0, "single_arm_franka_config"),
+                    ("Put_the_yellow_lego_block_into_the_red_dustpan_abs_cartesian_action", 1.0, "single_arm_franka_config")],
 }

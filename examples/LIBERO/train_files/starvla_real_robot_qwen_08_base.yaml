@@ -37,7 +37,7 @@ datasets:
 
   vla_data:
     dataset_py: lerobot_datasets
-    data_root_dir: /e/project1/m3/mattes1/datasets/real_robot
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/ours_real_robot_ambiguity
     data_mix: real_robot_mixed #libero_all # libero_goal
     action_type: abs_ee
     sequential_step_sampling: False

@@ -1,4 +1,4 @@
-run_id: GR00T_real_robot_abs_eef_qwen08ft_cot_insulated
+run_id: GR00T_real_robot_abs_eef_qwen08ft_cot_insulated_readout
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
@@ -7,7 +7,7 @@ is_debug: false
 version_id: "0.21"
 
 framework:
-  name: QwenGR00T_CoTrain      # registered in QwenGR00T_CoTrain.py
+  name: QwenGR00T_CoT
   qwenvl:
     base_vlm: /e/home/jusers/blank4/jupiter/blank4/code/train_downstream/train/outputs/ours_t097_fsd_rp_llov2_qwen35_0_8b_128/2026-05-17_01-57-08/checkpoints/checkpoint-9056
     attn_implementation: sdpa
@@ -27,10 +27,31 @@ framework:
       dropout: 0.1
 
   # ── Knowledge insulation (π0 / arxiv 2605.02881) ─────────────────────────
-  # When true: hidden states are detached before the DiT action expert.
-  # The VLM backbone receives gradients only from VLM co-training and CoT CE loss.
-  # Set false to reproduce standard QwenGR00T behaviour (coupled gradients).
+  # VLM backbone receives gradients only from CoT CE loss.
+  # DiT + readout projector receive gradients only from diffusion loss.
   knowledge_insulation: true
+
+  # ── Inference-time CoT generation ────────────────────────────────────────
+  cot:
+    generate_at_inference: false
+    max_new_tokens: 128
+
+  # ── Q-Former readout projector ────────────────────────────────────────────
+  # Compresses all VLM tokens → num_tokens learned queries before the DiT.
+  # Each layer: self-attn among queries → cross-attn to VLM hidden states → FFN.
+  #
+  # Hidden dim is set automatically to the VLM hidden size (no need to configure).
+  # Gradient flow: diffusion loss → readout projector only (post-detach).
+  #                CoT CE loss   → VLM backbone only (pre-detach).
+  #
+  # Recommended starting point — tune num_tokens first, then num_layers.
+  readout_tokens:
+    enabled:    true
+    num_tokens: 32      # compressed context size for DiT  (try 16, 32, 64)
+    num_layers: 2       # Q-Former depth                   (try 2, 4)
+    num_heads:  8       # MHA heads (hidden_dim / num_heads should be >= 128)
+    ffn_dim:    0       # 0 → 2 × hidden_dim automatically
+    dropout:    0.0
 
 
 datasets:
@@ -44,7 +65,8 @@ datasets:
     action_type: abs_ee
     sequential_step_sampling: False
 
-    CoT_prompt: "Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format."
+    # Must match --human_prompt used when running create_cot_mapping.py.
+    CoT_prompt: "Your task is {instruction}. What is the next subtask? Point to the target location."
 
     # Step-based CoT supervision.
     # Build with: python scripts/create_cot_mapping.py --annotations ... --output ...
@@ -78,10 +100,10 @@ trainer:
   freeze_modules: ''
   loss_scale:
     vla: 1.0
-    cot: 0.1    # CoT CE loss weight (per-step bounding-box annotations)
+    cot: 0.1
   max_grad_norm: 1.0
   weight_decay: 0.0
-  logging_frequency: 100
+  logging_frequency: 40
   gradient_clipping: 1.0
   gradient_accumulation_steps: 1
   gradient_checkpointing: false

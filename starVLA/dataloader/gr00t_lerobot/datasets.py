@@ -1388,10 +1388,11 @@ class LeRobotSingleDataset(Dataset):
             "trajectory_file_strategy": "derive_from_data_files_v1"
             if self._should_derive_v3_episode_files_from_data()
             else "metadata",
+            "num_trajectories": len(self._trajectory_ids),
+            "trajectory_ids_hash": hashlib.md5(self._trajectory_ids.tobytes()).hexdigest()[:8],
         }
-        # Create a hash of the configuration
         config_str = str(sorted(config_dict.items()))
-        return hashlib.md5(config_str.encode()).hexdigest()[:12]  #
+        return hashlib.md5(config_str.encode()).hexdigest()[:12]
 
 
     def _get_all_steps_single_process(self) -> list[tuple[int, int]]:
@@ -2018,11 +2019,13 @@ class LeRobotSingleDataset(Dataset):
         sample = self._pack_sample(data, selected_video_keys=selected_video_keys)
 
         # Expose trajectory identity for step-based CoT lookup.
-        # Key format matches the annotation convention: "{dataset_name}/{chunk_idx}/{file_idx}".
+        # Key format matches the annotation convention: "{dataset_name}/{chunk_idx}/{ep_within_chunk}".
+        # data/file_index is the parquet file index (0 when all episodes share one file) — not the
+        # episode-within-chunk index — so we derive it from trajectory_id (== episode_index).
         meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
-        chunk_idx = meta.get("data/chunk_index", 0)
-        file_idx = meta.get("data/file_index", int(trajectory_id))
-        sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{file_idx}"
+        chunk_idx = meta.get("data/chunk_index", int(trajectory_id) // self.chunk_size)
+        ep_within_chunk = int(trajectory_id) % self.chunk_size
+        sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{ep_within_chunk}"
         sample["frame_index"] = int(base_index)
         return sample
 
@@ -3075,6 +3078,11 @@ class LeRobotMixtureDataset(Dataset):
                     selected_video_keys=selected_video_keys,
                 )
                 sample = dataset._pack_sample(data, selected_video_keys=selected_video_keys)
+                meta = dataset.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+                chunk_idx = meta.get("data/chunk_index", int(trajectory_id) // dataset.chunk_size)
+                ep_within_chunk = int(trajectory_id) % dataset.chunk_size
+                sample["trajectory_name"] = f"{dataset.dataset_name}/{chunk_idx}/{ep_within_chunk}"
+                sample["frame_index"] = int(step)
                 
                 return sample
                 

@@ -231,6 +231,7 @@ class QwenGR00T_CoT(baseframework):
             for ex in examples
         ]
         has_cot = any(c is not None for c in cot_conversations)
+        cot_coverage = sum(c is not None for c in cot_conversations) / max(len(cot_conversations), 1)
 
         # ── 1. VLM backbone forward ──────────────────────────────────────────
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
@@ -289,7 +290,7 @@ class QwenGR00T_CoT(baseframework):
 
             action_loss = self.action_model(dit_context_rep, actions_rep, state_rep)
 
-        result = {"action_loss": action_loss}
+        result = {"action_loss": action_loss, "cot_coverage": cot_coverage}
         if cot_loss is not None:
             result["cot_loss"] = cot_loss
         return result
