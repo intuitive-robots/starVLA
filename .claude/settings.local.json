@@ -21,7 +21,19 @@
       "Read(//e/software/fs/jupiter/stages/2026/software/OpenGL/2025.09-GCCcore-14.3.0/lib/**)",
       "Read(//e/software/fs/jupiter/stages/2026/software/OpenGL/2025.09-GCCcore-14.3.0/**)",
       "Bash(python3 *)",
-      "Bash(gdb -batch -ex 'set pagination off' -ex 'thread apply 1 bt full' /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python /e/project1/m3/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.622990)"
+      "Bash(gdb -batch -ex 'set pagination off' -ex 'thread apply 1 bt full' /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/libero-plus/bin/python /e/project1/m3/blank4/code/starVLA/core.jpbo-013-30.jupiter.internal.622990)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from lerobot.datasets.lerobot_training_dataset import LeRobotTrainingDataset; print\\('ok'\\)\")",
+      "Bash(python *)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:www.pi.website)",
+      "WebFetch(domain:blog.phospho.ai)",
+      "WebFetch(domain:diffusion-vla.github.io)",
+      "Bash(head -5 /e/home/jusers/blank4/jupiter/blank4/annotations/reverted_changes/ann_run_470269/ours_real_robot/annotations.jsonl | python3 -c \"import sys,json; [print\\(json.dumps\\(json.loads\\(l\\), indent=2\\)\\) for l in sys.stdin]\" 2>/dev/null | head -60)",
+      "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_470269/ours_real_robot/**)",
+      "WebFetch(domain:www.themoonlight.io)",
+      "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_486882/ours_real_robot_ambiguity/**)",
+      "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_486882/**)"
     ]
   }
 }

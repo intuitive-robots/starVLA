@@ -8,7 +8,7 @@ set -euo pipefail
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
-EXPERIMENT_DIR="examples/LIBERO/train_files/experiments_real_robot"
+EXPERIMENT_DIR="examples/LIBERO/train_files/experiments_real_robot_ambig"
 
 for cfg in "$EXPERIMENT_DIR"/*.yaml; do
   job_name="$(basename "$cfg" .yaml)"

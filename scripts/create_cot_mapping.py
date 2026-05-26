@@ -982,13 +982,13 @@ def main():
     parser.add_argument(
         "--trace_snap_min_arc_px",
         type=float,
-        default=20.0,
+        default=8.0,
         help="Only snap trace endpoint to the selected box center when total trace arc is at least this many pixels.",
     )
     parser.add_argument(
         "--trace_min_arc_px",
         type=float,
-        default=20.0,
+        default=10.0,
         help="Filter per-frame trace entries with less than this many pixels of remaining raw trajectory motion.",
     )
     parser.add_argument(

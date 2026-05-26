@@ -32,7 +32,7 @@ arxiv 2605.02881):
      (implicit CoT — backbone has internalized grounding from training).
 
 Config knobs (framework:)
-  knowledge_insulation: true          # stop-grad DiT → backbone
+  knowledge_insulation: false         # stop-grad DiT → backbone
   cot:
     generate_at_inference: false      # explicit two-pass CoT at inference
     max_new_tokens: 128               # max CoT generation length
@@ -94,7 +94,7 @@ class QwenGR00TCoTDefaultConfig:
         "action_dim": 8,
         "state_dim": 0,
         "action_horizon": 24,
-        "repeated_diffusion_steps": 4,
+        "repeated_diffusion_steps": 8,
         "noise_beta_alpha": 1.5,
         "noise_beta_beta": 1.0,
         "noise_s": 0.999,
@@ -111,7 +111,7 @@ class QwenGR00TCoTDefaultConfig:
     # ── Knowledge insulation ──────────────────────────────────────────────────
     # When True: hidden states are detached before being passed to the DiT.
     # Backbone gradients come only from VLM co-training data and CoT CE loss.
-    knowledge_insulation: bool = True
+    knowledge_insulation: bool = False
 
     # ── Inference-time CoT generation ─────────────────────────────────────────
     # generate_at_inference=True: two-pass predict_action —
@@ -163,7 +163,7 @@ class QwenGR00T_CoT(baseframework):
         # Knowledge insulation toggle — read once and cache as a plain bool.
         # Avoids repeated OmegaConf attribute lookups in the hot forward path.
         self.knowledge_insulation: bool = bool(
-            getattr(self.config.framework, "knowledge_insulation", True)
+            getattr(self.config.framework, "knowledge_insulation", False)
         )
         logger.info(
             f"[QwenGR00T_CoTrain] knowledge_insulation={'ON' if self.knowledge_insulation else 'OFF'}"

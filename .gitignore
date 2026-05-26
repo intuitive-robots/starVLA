@@ -9,6 +9,8 @@ __pycache__/
 # C extensions
 *.so
 
+slurm_logs/
+
 # Distribution / packaging
 .Python
 build/

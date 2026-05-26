@@ -73,6 +73,36 @@ LE_ROBOT3_TASKS_FILENAME = "meta/tasks.parquet"
 LE_ROBOT3_EPISODE_FILENAME = "meta/episodes/*/*.parquet"
 
 
+def _read_process_rss_gib(pid: int | None = None) -> float:
+    """Read resident set size from /proc without extra dependencies."""
+    if pid is None:
+        pid = os.getpid()
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0 / 1024.0
+    except OSError:
+        return 0.0
+    return 0.0
+
+
+def _estimate_value_mib(value) -> float:
+    """Best-effort estimate of Python-visible payload size in MiB."""
+    if isinstance(value, np.ndarray):
+        return value.nbytes / 1024.0 / 1024.0
+    if isinstance(value, torch.Tensor):
+        return value.element_size() * value.numel() / 1024.0 / 1024.0
+    if isinstance(value, Image.Image):
+        bands = len(value.getbands()) or 1
+        return value.size[0] * value.size[1] * bands / 1024.0 / 1024.0
+    if isinstance(value, dict):
+        return sum(_estimate_value_mib(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return sum(_estimate_value_mib(v) for v in value)
+    return 0.0
+
+
 def _coerce_int_index(value, field_name: str) -> int:
     """Convert parquet/pandas scalar indices to Python ints for path formatting."""
     if pd.isna(value):
@@ -821,7 +851,27 @@ class LeRobotSingleDataset(Dataset):
         self._current_base_index = None
         self._missing_success_indicator_keys_warned: set[str] = set()
         self._video_reader_cache: OrderedDict[str, tuple[object, np.ndarray]] = OrderedDict()
-        self._video_reader_cache_size = int(self.data_cfg.get("video_reader_cache_size", 8)) if self.data_cfg else 8
+        self._video_reader_cache_size = int(self.data_cfg.get("video_reader_cache_size", 0)) if self.data_cfg else 0
+        self._worker_debug_enabled = False
+        self._worker_debug_interval = 0
+        self._worker_debug_counter = 0
+        self._last_raw_video_mib = 0.0
+        self._last_transformed_video_mib = 0.0
+        self._last_packed_image_mib = 0.0
+        self._last_action_mib = 0.0
+        self._last_state_mib = 0.0
+        if self.data_cfg:
+            debug_enabled = self.data_cfg.get(
+                "worker_memory_debug",
+                os.getenv("STARVLA_WORKER_MEMORY_DEBUG", "0"),
+            )
+            self._worker_debug_enabled = debug_enabled not in ["False", False, None, "0", 0]
+            self._worker_debug_interval = int(
+                self.data_cfg.get(
+                    "worker_memory_debug_interval",
+                    os.getenv("STARVLA_WORKER_MEMORY_DEBUG_INTERVAL", "500"),
+                )
+            )
 
         self._trajectory_ids, self._trajectory_lengths = self._get_trajectories()
         self._modality_keys = self._get_modality_keys()
@@ -1842,6 +1892,10 @@ class LeRobotSingleDataset(Dataset):
                 if filtered_apply_to != original_apply_to:
                     transform.apply_to = original_apply_to
 
+        video_keys = selected_video_keys if selected_video_keys is not None else self.modality_keys.get("video", [])
+        self._last_transformed_video_mib = sum(
+            _estimate_value_mib(data[key]) for key in video_keys if key in data
+        )
         return data
 
     def _init_action_mode(self) -> None:
@@ -2027,11 +2081,66 @@ class LeRobotSingleDataset(Dataset):
         ep_within_chunk = int(trajectory_id) % self.chunk_size
         sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{ep_within_chunk}"
         sample["frame_index"] = int(base_index)
+        self._maybe_log_worker_memory_debug(
+            trajectory_id=trajectory_id,
+            base_index=base_index,
+            selected_video_keys=selected_video_keys,
+        )
         return sample
+
+    def _maybe_log_worker_memory_debug(
+        self,
+        *,
+        trajectory_id: int,
+        base_index: int,
+        selected_video_keys: list[str] | None = None,
+    ) -> None:
+        """Periodically print worker-local dataset state for leak triage."""
+        if not self._worker_debug_enabled or self._worker_debug_interval <= 0:
+            return
+
+        self._worker_debug_counter += 1
+        if self._worker_debug_counter % self._worker_debug_interval != 0:
+            return
+
+        curr_traj_rows = 0
+        curr_traj_mem_mib = 0.0
+        if self.curr_traj_data is not None:
+            curr_traj_rows = len(self.curr_traj_data)
+            try:
+                curr_traj_mem_mib = float(
+                    self.curr_traj_data.memory_usage(deep=True).sum() / 1024.0 / 1024.0
+                )
+            except Exception:
+                curr_traj_mem_mib = 0.0
+
+        timestamp_cache_mib = 0.0
+        for _, frame_timestamps in self._video_reader_cache.values():
+            if isinstance(frame_timestamps, np.ndarray):
+                timestamp_cache_mib += frame_timestamps.nbytes / 1024.0 / 1024.0
+
+        print(
+            "[WorkerDebug] "
+            f"pid={os.getpid()} dataset={self.dataset_name} items={self._worker_debug_counter} "
+            f"rss_gib={_read_process_rss_gib():.2f} "
+            f"curr_traj_id={self.curr_traj_id} curr_traj_rows={curr_traj_rows} "
+            f"curr_traj_mem_mib={curr_traj_mem_mib:.3f} "
+            f"video_cache_entries={len(self._video_reader_cache)} "
+            f"video_cache_timestamps_mib={timestamp_cache_mib:.3f} "
+            f"raw_video_mib={self._last_raw_video_mib:.3f} "
+            f"transformed_video_mib={self._last_transformed_video_mib:.3f} "
+            f"packed_image_mib={self._last_packed_image_mib:.3f} "
+            f"action_mib={self._last_action_mib:.3f} "
+            f"state_mib={self._last_state_mib:.3f} "
+            f"selected_videos={selected_video_keys if selected_video_keys is not None else self.modality_keys.get('video', [])} "
+            f"trajectory_id={trajectory_id} base_index={base_index}",
+            flush=True,
+        )
 
     def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
         step_images = []
+        packed_image_mib = 0.0
         if selected_video_keys is None:
             selected_video_keys = self._resolve_sampled_video_keys()
         for video_key in selected_video_keys:
@@ -2041,12 +2150,16 @@ class LeRobotSingleDataset(Dataset):
             else:
                 image = Image.fromarray(image)
             step_images.append(image)
+            packed_image_mib += _estimate_value_mib(image)
 
         language = self._select_language(data)
         action = []
         for action_key in self.modality_keys["action"]:
             action.append(data[action_key])
         action = np.concatenate(action, axis=1).astype(np.float16)
+        self._last_packed_image_mib = packed_image_mib
+        self._last_action_mib = _estimate_value_mib(action)
+        self._last_state_mib = 0.0
 
         sample = {
             "action": action,
@@ -2061,6 +2174,7 @@ class LeRobotSingleDataset(Dataset):
                 state.append(data[state_key])
             state = np.concatenate(state, axis=1).astype(np.float16)
             sample["state"] = state
+            self._last_state_mib = _estimate_value_mib(state)
 
         return sample
 
@@ -2108,6 +2222,8 @@ class LeRobotSingleDataset(Dataset):
             for key in modality_keys:
                 data[key] = self.get_data_by_modality(trajectory_id, modality, key, base_index)
         data = self._apply_action_mode(data)
+        video_keys = selected_video_keys if selected_video_keys is not None else self.modality_keys.get("video", [])
+        self._last_raw_video_mib = sum(_estimate_value_mib(data[key]) for key in video_keys if key in data)
         return data
 
     def get_trajectory_data(self, trajectory_id: int) -> pd.DataFrame:
@@ -3083,6 +3199,11 @@ class LeRobotMixtureDataset(Dataset):
                 ep_within_chunk = int(trajectory_id) % dataset.chunk_size
                 sample["trajectory_name"] = f"{dataset.dataset_name}/{chunk_idx}/{ep_within_chunk}"
                 sample["frame_index"] = int(step)
+                dataset._maybe_log_worker_memory_debug(
+                    trajectory_id=int(trajectory_id),
+                    base_index=int(step),
+                    selected_video_keys=selected_video_keys,
+                )
                 
                 return sample
                 

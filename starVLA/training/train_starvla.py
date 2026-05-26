@@ -46,6 +46,182 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 logger = get_logger(__name__)
 
 
+def _read_proc_rss_bytes(pid: int) -> int | None:
+    """Read resident set size from /proc/<pid>/status in bytes."""
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1]) * 1024
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None
+    return None
+
+
+def _read_proc_ppid_and_name(pid: int) -> tuple[int | None, str | None]:
+    """Read parent PID and process name from /proc/<pid>/status."""
+    ppid = None
+    name = None
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("Name:"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        name = parts[1].strip()
+                elif line.startswith("PPid:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ppid = int(parts[1])
+                if ppid is not None and name is not None:
+                    break
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None, None
+    return ppid, name
+
+
+class MemoryMonitor:
+    """Lightweight host-memory monitor for rank processes and DataLoader workers."""
+
+    def __init__(self, cfg, accelerator: Accelerator):
+        trainer_cfg = getattr(cfg, "trainer", None)
+        memory_cfg = getattr(trainer_cfg, "memory_debug", None) if trainer_cfg is not None else None
+
+        env_enabled = os.environ.get("STARVLA_MEMORY_DEBUG", "").strip().lower()
+        env_enabled = env_enabled in {"1", "true", "yes", "on"}
+        cfg_enabled = False
+        if memory_cfg is not None:
+            cfg_enabled = bool(memory_cfg.get("enabled", False) if hasattr(memory_cfg, "get") else getattr(memory_cfg, "enabled", False))
+
+        self.enabled = bool(env_enabled or cfg_enabled)
+        self.accelerator = accelerator
+        self.interval = 250
+        self.log_worker_details = False
+
+        if memory_cfg is not None:
+            if hasattr(memory_cfg, "get"):
+                self.interval = int(memory_cfg.get("interval", self.interval))
+                self.log_worker_details = bool(memory_cfg.get("log_worker_details", self.log_worker_details))
+            else:
+                self.interval = int(getattr(memory_cfg, "interval", self.interval))
+                self.log_worker_details = bool(
+                    getattr(memory_cfg, "log_worker_details", self.log_worker_details)
+                )
+
+        env_interval = os.environ.get("STARVLA_MEMORY_DEBUG_INTERVAL", "").strip()
+        if env_interval:
+            self.interval = int(env_interval)
+
+    def _get_worker_pids(self, data_iter) -> list[int]:
+        workers = getattr(data_iter, "_workers", None)
+        pids = []
+        if workers is not None:
+            for worker in workers:
+                pid = getattr(worker, "pid", None)
+                if pid is not None:
+                    pids.append(int(pid))
+        if pids:
+            return pids
+
+        # Accelerate / DataLoader wrappers can hide the underlying iterator
+        # worker handles. Fall back to scanning direct child processes and pick
+        # PyTorch dataloader workers by process name.
+        main_pid = os.getpid()
+        proc_root = Path("/proc")
+        fallback_pids = []
+        try:
+            for entry in proc_root.iterdir():
+                if not entry.name.isdigit():
+                    continue
+                pid = int(entry.name)
+                ppid, name = _read_proc_ppid_and_name(pid)
+                if ppid != main_pid or name is None:
+                    continue
+                if name in {"pt_data_worker", "torch_shm_manager"}:
+                    fallback_pids.append(pid)
+        except OSError:
+            return []
+        return sorted(fallback_pids)
+
+    def collect(self, completed_steps: int, data_iter) -> dict:
+        if not self.enabled or completed_steps <= 0 or completed_steps % self.interval != 0:
+            return {}
+
+        local_rank = self.accelerator.process_index
+        main_pid = os.getpid()
+        worker_pids = self._get_worker_pids(data_iter)
+        worker_rss = []
+        for pid in worker_pids:
+            rss = _read_proc_rss_bytes(pid)
+            if rss is not None:
+                worker_rss.append({"pid": pid, "rss_bytes": rss})
+
+        local_snapshot = {
+            "rank": local_rank,
+            "main_pid": main_pid,
+            "main_rss_bytes": _read_proc_rss_bytes(main_pid) or 0,
+            "worker_count": len(worker_pids),
+            "worker_rss": worker_rss,
+        }
+
+        gathered = [local_snapshot]
+        if dist.is_initialized():
+            gathered = [None for _ in range(self.accelerator.num_processes)]
+            dist.all_gather_object(gathered, local_snapshot)
+
+        if not self.accelerator.is_main_process:
+            return {}
+
+        total_main_rss = sum(int(item["main_rss_bytes"]) for item in gathered if item is not None)
+        total_worker_rss = sum(
+            int(worker["rss_bytes"])
+            for item in gathered if item is not None
+            for worker in item["worker_rss"]
+        )
+        worker_rss_values = [
+            int(worker["rss_bytes"])
+            for item in gathered if item is not None
+            for worker in item["worker_rss"]
+        ]
+
+        metrics = {
+            "memory/main_rss_gib": total_main_rss / (1024 ** 3),
+            "memory/dataloader_workers_rss_gib": total_worker_rss / (1024 ** 3),
+            "memory/combined_rss_gib": (total_main_rss + total_worker_rss) / (1024 ** 3),
+            "memory/worker_count": float(sum(int(item["worker_count"]) for item in gathered if item is not None)),
+        }
+        if worker_rss_values:
+            metrics["memory/max_worker_rss_gib"] = max(worker_rss_values) / (1024 ** 3)
+            metrics["memory/avg_worker_rss_gib"] = (
+                sum(worker_rss_values) / len(worker_rss_values)
+            ) / (1024 ** 3)
+
+        if self.log_worker_details:
+            rank_summaries = []
+            for item in gathered:
+                if item is None:
+                    continue
+                rank_worker_total = sum(int(worker["rss_bytes"]) for worker in item["worker_rss"])
+                rank_summaries.append(
+                    f"rank={item['rank']} main={item['main_rss_bytes'] / (1024 ** 3):.2f}GiB "
+                    f"workers={item['worker_count']} worker_rss={rank_worker_total / (1024 ** 3):.2f}GiB"
+                )
+            logger.info("Memory snapshot @ step %s :: %s", completed_steps, " | ".join(rank_summaries))
+        else:
+            logger.info(
+                "Memory snapshot @ step %s :: main=%.2fGiB workers=%.2fGiB combined=%.2fGiB workers=%s",
+                completed_steps,
+                metrics["memory/main_rss_gib"],
+                metrics["memory/dataloader_workers_rss_gib"],
+                metrics["memory/combined_rss_gib"],
+                int(metrics["memory/worker_count"]),
+            )
+
+        return metrics
+
+
 def parse_bool_flag(value):
     """Accept common string forms for CLI booleans."""
     if isinstance(value, bool):
@@ -164,6 +340,7 @@ class VLATrainer(TrainerUtils):
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.accelerator = accelerator
+        self.memory_monitor = MemoryMonitor(cfg, accelerator)
 
         self.completed_steps = 0
         self.total_batch_size = self._calculate_total_batch_size()
@@ -430,6 +607,7 @@ class VLATrainer(TrainerUtils):
 
             step_metrics["timing/data"] = t_end_data - t_start_data
             step_metrics["timing/model"] = t_end_model - t_start_model
+            step_metrics.update(self.memory_monitor.collect(self.completed_steps, self.vla_iter))
             self._log_metrics(step_metrics)
 
             if self.completed_steps % self.config.trainer.save_interval == 0 and self.completed_steps > 0:
