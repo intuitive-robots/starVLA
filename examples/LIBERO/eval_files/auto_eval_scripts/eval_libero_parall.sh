@@ -34,7 +34,12 @@ server_pid=$!
 
 
 # Extract model_root from your_ckpt
-model_root=$(echo "$your_ckpt" | awk -F'/checkpoints/' '{print $1}')
+if [[ "$your_ckpt" == */checkpoints/* ]]; then
+    model_root="${your_ckpt%%/checkpoints/*}"
+else
+    ckpt_dir="$(dirname "$your_ckpt")"
+    model_root="$(dirname "$ckpt_dir")"
+fi
 folder_name=$(echo "$your_ckpt" | awk -F'/' '{print $(NF-2)"_"$(NF-1)"_"$NF}')
 
 video_out_path="${model_root}/videos/${task_suite_name}/${folder_name}"

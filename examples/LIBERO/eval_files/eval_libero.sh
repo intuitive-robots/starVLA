@@ -1,16 +1,19 @@
 #!/bin/bash
 # === Paths (adapted for this cluster) ===
-STARVLA_DIR=/home/jye624/Projcets/starVLA
+STARVLA_DIR=/home/vlad/code/starVLA
 
 cd ${STARVLA_DIR}
 # === Checkpoint ===
-CKPT=${STARVLA_DIR}/playground/Checkpoints/0405_libero4in1_CosmoPredict2GR00T/checkpoints/steps_50000_pytorch_model.pt
+CKPT=${STARVLA_DIR}/playground/Checkpoints/1229_libero4in1_qwen35oft/final_model/pytorch_model.pt
+
+CKPT=${STARVLA_DIR}/playground/Checkpoints/libero_qwen08b_ft/final_model/pytorch_model.pt
+
 
 ###########################################################################################
 # === Please modify the following paths according to your environment ===
-export LIBERO_HOME=/home/jye624/Projcets/LIBERO
+export LIBERO_HOME=/home/vlad/code/LIBERO
 export LIBERO_CONFIG_PATH=${LIBERO_HOME}/libero
-export LIBERO_Python=/home/jye624/.conda/envs/libero/bin/python
+export LIBERO_Python=/home/vlad/miniconda3/envs/libero/bin/python
 
 export PYTHONPATH=$PYTHONPATH:${LIBERO_HOME} # let eval_libero find the LIBERO tools
 export PYTHONPATH=$(pwd):${PYTHONPATH} # let LIBERO find the websocket tools from main repo
@@ -27,7 +30,12 @@ your_ckpt=${CKPT}
 
 folder_name=$(echo "$your_ckpt" | awk -F'/' '{print $(NF-2)"_"$(NF-1)"_"$NF}')
 # model_root: playground/Checkpoints/<run_id>
-model_root=$(echo "$your_ckpt" | awk -F'/checkpoints/' '{print $1}')
+if [[ "$your_ckpt" == */checkpoints/* ]]; then
+    model_root="${your_ckpt%%/checkpoints/*}"
+else
+    ckpt_dir="$(dirname "$your_ckpt")"
+    model_root="$(dirname "$ckpt_dir")"
+fi
 # === End of environment variable configuration ===
 ###########################################################################################
 

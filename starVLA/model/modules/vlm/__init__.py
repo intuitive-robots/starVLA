@@ -10,7 +10,7 @@ def get_vlm_model(config):
         from .QWen3 import _QWen3_VL_Interface
 
         return _QWen3_VL_Interface(config)
-    elif "Qwen3.5" in vlm_name:
+    elif "Qwen3.5" in vlm_name or "checkpoint" in vlm_name.lower():  # temp for some ckpt
         from .QWen3_5 import _QWen3_5_VL_Interface
 
         return _QWen3_5_VL_Interface(config)

@@ -8,6 +8,7 @@ import time
 
 import imageio
 import numpy as np
+import torch
 import tqdm
 import tyro
 from libero.libero import benchmark, get_libero_path
@@ -25,6 +26,18 @@ def _binarize_gripper_open(open_val: np.ndarray | float) -> np.ndarray:
     v = float(arr[0])
     bin_val = 1.0 - 2.0 * (v > 0.5)
     return np.asarray([bin_val], dtype=np.float32)
+
+
+def _get_task_init_states_compat(task_suite, task_id: int):
+    init_states_path = (
+        pathlib.Path(get_libero_path("init_states"))
+        / task_suite.tasks[task_id].problem_folder
+        / task_suite.tasks[task_id].init_states_file
+    )
+    try:
+        return torch.load(init_states_path, weights_only=False)
+    except TypeError:
+        return torch.load(init_states_path)
 
 
 @dataclasses.dataclass
@@ -115,7 +128,7 @@ def eval_libero(args: Args) -> None:
         task = task_suite.get_task(task_id)
 
         # Get default LIBERO initial states
-        initial_states = task_suite.get_task_init_states(task_id)
+        initial_states = _get_task_init_states_compat(task_suite, task_id)
 
         # Initialize LIBERO environment and task description
         env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed)

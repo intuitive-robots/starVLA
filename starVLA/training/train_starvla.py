@@ -38,9 +38,10 @@ from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
 
-deepspeed_plugin = DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
-accelerator.print(accelerator.state)
+# Accelerator is intentionally initialized inside main() so that
+# gradient_accumulation_steps from the YAML config can be forwarded.
+# (Module-level init would always default to 1.)
+accelerator: Accelerator = None  # set in main()
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -417,10 +418,22 @@ class VLATrainer(TrainerUtils):
 
 
 def main(cfg) -> None:
+    global accelerator
     logger.info("VLA Training :: Warming Up")
 
     cfg = wrap_config(cfg)
     logger.info("✅ Configuration wrapped for access tracking")
+
+    # Build Accelerator here so gradient_accumulation_steps from the config
+    # is respected.  DeepSpeed reads its own copy from ds_config.yaml;
+    # Accelerate needs the value separately to drive accumulate() / sync_gradients.
+    grad_accum_steps = int(getattr(cfg.trainer, "gradient_accumulation_steps", 1))
+    deepspeed_plugin = DeepSpeedPlugin()
+    accelerator = Accelerator(
+        deepspeed_plugin=deepspeed_plugin,
+        gradient_accumulation_steps=grad_accum_steps,
+    )
+    accelerator.print(accelerator.state)
 
     output_dir = setup_directories(cfg=cfg)
     vla = build_framework(cfg)

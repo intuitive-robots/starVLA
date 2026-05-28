@@ -1,13 +1,17 @@
 #!/bin/bash
 export PYTHONPATH=$(pwd):${PYTHONPATH} # let LIBERO find the websocket tools from main repo
 # === Paths (adapted for this cluster) ===
-STARVLA_DIR=/home/jye624/Projcets/starVLA
-LIBERO_HOME=/home/jye624/Projcets/LIBERO
-STARVLA_PYTHON=/home/jye624/.conda/envs/starVLA/bin/python
-LIBERO_PYTHON=/home/jye624/.conda/envs/libero/bin/python
+STARVLA_DIR=/home/vlad/code/starVLA
+LIBERO_HOME=/home/vlad/code/LIBERO
+STARVLA_PYTHON=/home/vlad/miniconda3/envs/starVLA/bin/python
+LIBERO_PYTHON=/home/vlad/miniconda3/envs/libero/bin/python
 
 # === Checkpoint ===
 CKPT=${STARVLA_DIR}/playground/Pretrained_models/StarVLA/Qwen3-VL-OFT-LIBERO-4in1/checkpoints/steps_50000_pytorch_model.pt
+
+
+CKPT=playground/Checkpoints/1229_libero4in1_qwen35oft/final_model/pytorch_model.pt
+CKPT=playground/Checkpoints/libero_qwen08b_ft/final_model/pytorch_model.pt
 
 export star_vla_python=${STARVLA_PYTHON}
 your_ckpt=${CKPT}   
