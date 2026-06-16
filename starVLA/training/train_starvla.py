@@ -234,7 +234,7 @@ def parse_bool_flag(value):
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
-def create_accelerator(use_deepspeed: bool) -> Accelerator:
+def create_accelerator(use_deepspeed: bool, gradient_accumulation_steps: int = 1) -> Accelerator:
     """Create the accelerator after CLI parsing so launch flags can control backend choice."""
     accelerate_use_deepspeed = os.environ.get("ACCELERATE_USE_DEEPSPEED", "false").lower() == "true"
     if not use_deepspeed and accelerate_use_deepspeed:
@@ -245,9 +245,16 @@ def create_accelerator(use_deepspeed: bool) -> Accelerator:
         )
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     if use_deepspeed:
-        accelerator = Accelerator(deepspeed_plugin=DeepSpeedPlugin(), kwargs_handlers=[ddp_kwargs])
+        accelerator = Accelerator(
+            deepspeed_plugin=DeepSpeedPlugin(),
+            kwargs_handlers=[ddp_kwargs],
+            gradient_accumulation_steps=gradient_accumulation_steps,
+        )
     else:
-        accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
+        accelerator = Accelerator(
+            kwargs_handlers=[ddp_kwargs],
+            gradient_accumulation_steps=gradient_accumulation_steps,
+        )
     accelerator.print(accelerator.state)
     return accelerator
 
@@ -574,7 +581,7 @@ class VLATrainer(TrainerUtils):
         progress_bar = tqdm(
             total=self.config.trainer.max_train_steps,
             initial=self.completed_steps,
-            disable=not self.accelerator.is_local_main_process,
+            disable=not self.accelerator.is_main_process,
         )
 
         while self.completed_steps < self.config.trainer.max_train_steps:
@@ -590,11 +597,14 @@ class VLATrainer(TrainerUtils):
             step_metrics = self._train_step(batch_vla)
             t_end_model = time.perf_counter()
 
-            if self.accelerator.sync_gradients:
+            sync = getattr(self, "_ds_sync_gradients", None)
+            if sync is None:
+                sync = self.accelerator.sync_gradients
+            if sync:
                 progress_bar.update(1)
                 self.completed_steps += 1
 
-            if self.accelerator.is_local_main_process:
+            if self.accelerator.is_main_process:
                 progress_bar.set_postfix(
                     {
                         "data_times": f"{t_end_data - t_start_data:.3f}",
@@ -807,6 +817,32 @@ class VLATrainer(TrainerUtils):
 
     def _train_step(self, batch_vla, batch_vlm=None):
         """Execute single training step."""
+        grad_accum = self.accelerator.gradient_accumulation_steps
+        use_deepspeed = getattr(self.config, "use_deepspeed", False)
+
+        if grad_accum > 1 and use_deepspeed:
+            # DeepSpeed ZeRO2 manages gradient accumulation internally via its
+            # engine: it skips the reduce-scatter on non-sync backward calls
+            # automatically. Accelerate's accumulate() uses DDP's no_sync()
+            # which is incompatible with ZeRO2 gradient partitioning.
+            self._accum_count = getattr(self, "_accum_count", 0) + 1
+            self._ds_sync_gradients = (self._accum_count % grad_accum == 0)
+
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                output_dict = self.model.forward(batch_vla)
+                action_loss = output_dict["action_loss"] / grad_accum
+
+            self.accelerator.backward(action_loss)
+
+            if self._ds_sync_gradients:
+                if self.config.trainer.gradient_clipping is not None:
+                    self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.trainer.gradient_clipping)
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
+
+            return {"action_dit_loss": action_loss.item() * grad_accum}
+
         with self.accelerator.accumulate(self.model):
             self.optimizer.zero_grad()
 
@@ -928,7 +964,8 @@ if __name__ == "__main__":
     cfg.config_yaml = args.config_yaml
     cfg.use_deepspeed = args.use_deepspeed
 
-    accelerator = create_accelerator(use_deepspeed=args.use_deepspeed)
+    grad_accum = int(cfg.trainer.get("gradient_accumulation_steps", 1))
+    accelerator = create_accelerator(use_deepspeed=args.use_deepspeed, gradient_accumulation_steps=grad_accum)
 
     if cfg.is_debug and dist.is_initialized() and dist.get_rank() == 0:
         import debugpy
