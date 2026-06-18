@@ -365,6 +365,7 @@ class QwenGR00T_CoT(baseframework):
             else getattr(cot_cfg, "generate_at_inference", False)
         )
 
+        generated_cot = None
         if generate_at_inference:
             # Pass 1: generate CoT
             generated_cot = self._generate_cot(batch_images, instructions)
@@ -413,4 +414,10 @@ class QwenGR00T_CoT(baseframework):
         with torch.autocast("cuda", dtype=torch.float32):
             pred_actions = self.action_model.predict_action(dit_context, state_t)
 
-        return {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        result = {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        if generated_cot is not None:
+            result["cot_text"] = generated_cot
+            result["has_explicit_cot"] = True
+        else:
+            result["has_explicit_cot"] = False
+        return result

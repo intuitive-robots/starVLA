@@ -116,6 +116,9 @@ class PolicyServerWrapper:
             "action_chunk_size": self._action_chunk_size,
             "available_unnorm_keys": self._available_unnorm_keys,
             "default_unnorm_key": self._default_unnorm_key,
+            "cot_generate_at_inference": bool(
+                self._model_cfg.get("framework", {}).get("cot", {}).get("generate_at_inference", False)
+            ),
         }
         # Enrich with per-embodiment keys when a default processor already exists.
         if self._default_unnorm_key is not None:
@@ -129,7 +132,7 @@ class PolicyServerWrapper:
         examples: List[dict],
         unnorm_key: Optional[str] = None,
         **kwargs,
-    ) -> Dict[str, np.ndarray]:
+    ) -> Dict[str, Any]:
         """Run the framework, then un-normalize via training-time transforms.
 
         Args:
@@ -140,7 +143,8 @@ class PolicyServerWrapper:
                 (``do_sample``, ``use_ddim``, ``num_ddim_steps``, ...).
 
         Returns:
-            ``{"actions": np.ndarray[B, T, D]}`` -- un-normalized.
+            ``{"actions": np.ndarray[B, T, D]}`` plus any optional
+            framework-provided metadata (for example explicit CoT text).
         """
         effective_key = unnorm_key if unnorm_key is not None else self._default_unnorm_key
         if effective_key is None:
@@ -160,4 +164,9 @@ class PolicyServerWrapper:
             [proc.unapply_actions(normalized[b]) for b in range(normalized.shape[0])],
             axis=0,
         )
-        return {"actions": unnorm}
+        result: Dict[str, Any] = {"actions": unnorm}
+        for key, value in out.items():
+            if key == "normalized_actions":
+                continue
+            result[key] = value
+        return result
