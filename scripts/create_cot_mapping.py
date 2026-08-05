@@ -32,6 +32,9 @@ Selection modes:
     ours      → use initial_object_box and the lightweight winner trace
     detection → use lightweight candidate confidences for the initial box/trace
 
+Both legacy RoboG rows and compact robog.annotation v2 rows are supported.
+For v2, detection mode reads the published baselines.detector record.
+
 Target selection:
     mode           → match selection_mode: annotation target for ours, detection-confidence target for detection
     annotation     → use target_object_box
@@ -105,6 +108,10 @@ def _publication_v2_to_legacy_view(row: dict) -> dict:
     task = row.get("task") or {}
     obj = row.get("object") or {}
     selection = row.get("selection") or {}
+    detector_baseline = ((row.get("baselines") or {}).get("detector") or {})
+    detector_initial = detector_baseline.get("initial") or {}
+    detector_target = detector_baseline.get("target") or {}
+    detector_track = detector_baseline.get("track") or {}
     initial = obj.get("initial") or {}
     target = obj.get("target") or {}
     track = obj.get("track") or {}
@@ -160,6 +167,19 @@ def _publication_v2_to_legacy_view(row: dict) -> dict:
         lightweight["arrays_blob"] = arrays["blob"]
     if selection.get("selected_candidate_index") is not None:
         lightweight["winner_idx"] = int(selection["selected_candidate_index"])
+    if detector_initial.get("box_xyxy_pixels") is not None:
+        lightweight["candidate_boxes"] = [detector_initial["box_xyxy_pixels"]]
+        lightweight["candidate_confidences"] = [detector_initial.get("detector_score")]
+    if detector_target.get("box_xyxy_pixels") is not None:
+        lightweight["target_candidate_boxes"] = [detector_target["box_xyxy_pixels"]]
+        lightweight["target_candidate_confidences"] = [detector_target.get("detector_score")]
+
+    detector_point_meta = {}
+    detector_frame_indices = detector_track.get("frame_indices")
+    if detector_frame_indices is not None:
+        detector_point_meta["frame_indices_relative_to_window"] = [
+            int(frame) - start_frame for frame in detector_frame_indices
+        ]
 
     image_size = window.get("image_size_hw")
     legacy = dict(row)
@@ -190,8 +210,11 @@ def _publication_v2_to_legacy_view(row: dict) -> dict:
         "verified_target": target.get("verified"),
         "obj_traces_cotracker_point": track.get("xy_pixels"),
         "obj_traces_cotracker_point_meta": point_meta,
+        "detector_baseline_trace": detector_track.get("xy_pixels"),
+        "detector_baseline_trace_meta": detector_point_meta,
         "lightweight": lightweight,
         "_publication_v2": True,
+        "_publication_detector_baseline": bool(detector_initial),
     })
     if initial.get("frame_index") is not None:
         legacy["detection_frame_index"] = int(initial["frame_index"]) - start_frame
@@ -556,8 +579,11 @@ def _centroid_trace_from_arrays_blob(row: dict, candidate_idx: int | None) -> li
     return [[float(x), float(y)] for x, y in trace[:, :2]]
 
 
-def _tracking_frame_indices_from_arrays_blob(row: dict) -> list[int] | None:
-    point_meta = row.get("obj_traces_cotracker_point_meta")
+def _tracking_frame_indices_from_arrays_blob(
+    row: dict,
+    point_meta_key: str = "obj_traces_cotracker_point_meta",
+) -> list[int] | None:
+    point_meta = row.get(point_meta_key)
     if isinstance(point_meta, dict):
         indices = point_meta.get("frame_indices_relative_to_window")
         if isinstance(indices, (list, tuple)):
@@ -840,8 +866,19 @@ def build_phase_entries(
 
     entries = []
     if trace_format:
-        full_trace = _candidate_trace(ann, init_trace_idx, ("obj_traces_cotracker_point", "obj_traces"))
-        frame_indices = _tracking_frame_indices_from_arrays_blob(ann)
+        if selection_mode == "detection" and ann.get("detector_baseline_trace"):
+            full_trace = _trace_from_tracker(ann, ("detector_baseline_trace",))
+            frame_indices = _tracking_frame_indices_from_arrays_blob(
+                ann,
+                point_meta_key="detector_baseline_trace_meta",
+            )
+        else:
+            full_trace = _candidate_trace(
+                ann,
+                init_trace_idx,
+                ("obj_traces_cotracker_point", "obj_traces"),
+            )
+            frame_indices = _tracking_frame_indices_from_arrays_blob(ann)
         snap_box = cand_box if cand_box is not None else init_box
         if _raw_trace_arc(full_trace) < trace_min_arc_px:
             if stats is not None:
@@ -1174,11 +1211,17 @@ def main():
     annotations = _load_annotations(ann_path)
     print(f"Loaded {len(annotations)} annotation entries from {ann_path}")
     publication_v2_count = sum(bool(annotation.get("_publication_v2")) for annotation in annotations)
-    if publication_v2_count and (args.all or selection_mode == "detection"):
+    missing_detector_baseline_count = sum(
+        bool(annotation.get("_publication_v2"))
+        and not annotation.get("_publication_detector_baseline")
+        for annotation in annotations
+    )
+    if missing_detector_baseline_count and (args.all or selection_mode == "detection"):
         print(
-            f"Note: {publication_v2_count} publication-v2 rows contain only the selected boxes/track. "
+            f"Note: {missing_detector_baseline_count} of {publication_v2_count} publication-v2 rows "
+            "contain only the selected boxes/track. "
             "Their detection-mode outputs fall back to those published selections because rejected "
-            "detector candidates are intentionally not stored in schema v2."
+            "detector candidates are not available in those files."
         )
 
     # Holdout
