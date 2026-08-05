@@ -2074,11 +2074,12 @@ class LeRobotSingleDataset(Dataset):
 
         # Expose trajectory identity for step-based CoT lookup.
         # Key format matches the annotation convention: "{dataset_name}/{chunk_idx}/{ep_within_chunk}".
-        # data/file_index is the parquet file index (0 when all episodes share one file) — not the
-        # episode-within-chunk index — so we derive it from trajectory_id (== episode_index).
-        meta = self.trajectory_ids_to_metadata.get(int(trajectory_id), {})
-        chunk_idx = meta.get("data/chunk_index", int(trajectory_id) // self.chunk_size)
-        ep_within_chunk = int(trajectory_id) % self.chunk_size
+        # Physical data/chunk_index describes file storage and may remain zero for
+        # datasets with many episodes. Derive both logical components from the
+        # globally unique episode index so the CoT key cannot wrap or collide.
+        episode_index = int(trajectory_id)
+        chunk_idx = episode_index // self.chunk_size
+        ep_within_chunk = episode_index % self.chunk_size
         sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{ep_within_chunk}"
         sample["frame_index"] = int(base_index)
         self._maybe_log_worker_memory_debug(
@@ -3194,9 +3195,9 @@ class LeRobotMixtureDataset(Dataset):
                     selected_video_keys=selected_video_keys,
                 )
                 sample = dataset._pack_sample(data, selected_video_keys=selected_video_keys)
-                meta = dataset.trajectory_ids_to_metadata.get(int(trajectory_id), {})
-                chunk_idx = meta.get("data/chunk_index", int(trajectory_id) // dataset.chunk_size)
-                ep_within_chunk = int(trajectory_id) % dataset.chunk_size
+                episode_index = int(trajectory_id)
+                chunk_idx = episode_index // dataset.chunk_size
+                ep_within_chunk = episode_index % dataset.chunk_size
                 sample["trajectory_name"] = f"{dataset.dataset_name}/{chunk_idx}/{ep_within_chunk}"
                 sample["frame_index"] = int(step)
                 dataset._maybe_log_worker_memory_debug(
