@@ -80,6 +80,140 @@ DEFAULT_TRACE_HUMAN_PROMPT = (
 )
 
 
+def _is_publication_v2(row: dict) -> bool:
+    schema = row.get("schema")
+    return (
+        isinstance(schema, dict)
+        and schema.get("name") == "robog.annotation"
+        and str(schema.get("version")) == "2.0"
+    )
+
+
+def _publication_v2_to_legacy_view(row: dict) -> dict:
+    """Expose publication-v2 fields through the legacy names used below.
+
+    The adapter is intentionally read-only with respect to the input row and
+    only reconstructs fields that are present in the compact public schema.
+    Rejected detector candidates are not part of v2 and therefore cannot be
+    reconstructed here.
+    """
+    if not _is_publication_v2(row):
+        return row
+
+    source = row.get("source") or {}
+    window = row.get("window") or {}
+    task = row.get("task") or {}
+    obj = row.get("object") or {}
+    selection = row.get("selection") or {}
+    initial = obj.get("initial") or {}
+    target = obj.get("target") or {}
+    track = obj.get("track") or {}
+
+    trajectory_name = source.get("trajectory_id")
+    if trajectory_name is None:
+        raise ValueError("publication-v2 annotation is missing source.trajectory_id")
+    if not obj and row.get("arms"):
+        raise ValueError(
+            f"publication-v2 bimanual annotation {trajectory_name!r} is not supported "
+            "by the single-object CoT mapping format"
+        )
+
+    start_frame = int(window.get("start_frame", 0))
+    phase_annotations = []
+    for phase in task.get("phases") or []:
+        if not isinstance(phase, dict):
+            continue
+        phase_annotations.append({
+            "phase": phase.get("type", ""),
+            "start_frame": phase.get("start_frame"),
+            "end_frame": phase.get("end_frame_inclusive"),
+            "description": phase.get("description"),
+        })
+
+    point_meta = dict(track.get("point_selection") or {})
+    absolute_frame_indices = track.get("frame_indices")
+    if absolute_frame_indices is not None:
+        point_meta["frame_indices_relative_to_window"] = [
+            int(frame) - start_frame for frame in absolute_frame_indices
+        ]
+    elif track.get("sampling") == "tracking_timeline" and track.get("xy_pixels"):
+        # RoboG's tracking timeline is constructed with np.linspace from the
+        # detection frame through the final frame. Early v2 files named that
+        # sampling rule but omitted the explicit indices, so reconstruct the
+        # deterministic timeline for phase-aligned trace tails.
+        track_start = max(0, int(initial.get("frame_index", start_frame)) - start_frame)
+        track_end = max(
+            track_start,
+            int(window.get("end_frame_exclusive", start_frame + 1)) - start_frame - 1,
+        )
+        point_meta["frame_indices_relative_to_window"] = np.linspace(
+            track_start,
+            track_end,
+            len(track["xy_pixels"]),
+            dtype=int,
+        ).tolist()
+        point_meta["frame_indices_source"] = "reconstructed_tracking_timeline"
+
+    lightweight = {}
+    arrays = row.get("arrays") or {}
+    if arrays.get("blob"):
+        lightweight["arrays_blob"] = arrays["blob"]
+    if selection.get("selected_candidate_index") is not None:
+        lightweight["winner_idx"] = int(selection["selected_candidate_index"])
+
+    image_size = window.get("image_size_hw")
+    legacy = dict(row)
+    legacy.update({
+        "trajectory_name": str(trajectory_name),
+        "dataset_name": source.get("dataset_id"),
+        "subtask_index": source.get("subtask_index"),
+        "language_instruction": task.get("instruction"),
+        "start_frame": start_frame,
+        "end_frame": window.get("end_frame_exclusive", start_frame),
+        "num_frames": window.get("trajectory_frame_count"),
+        "phase_annotations": phase_annotations,
+        "movement_type": task.get("action"),
+        "task_obj_info": {
+            "action": task.get("action"),
+            "object": obj.get("label"),
+            "object_instance": obj.get("instance_id"),
+            "instance_relation_to_previous": obj.get("relation_to_previous"),
+            "start_location": task.get("start_location"),
+            "target_location": task.get("target_location"),
+        },
+        "initial_object_box": initial.get("box_xyxy_pixels"),
+        "initial_object_box_detection_confidence": initial.get("detector_score"),
+        "initial_object_box_selection_score": selection.get("score"),
+        "initial_object_box_selection_score_name": selection.get("method"),
+        "target_object_box": target.get("box_xyxy_pixels"),
+        "target_object_box_confidence": target.get("detector_score"),
+        "verified_target": target.get("verified"),
+        "obj_traces_cotracker_point": track.get("xy_pixels"),
+        "obj_traces_cotracker_point_meta": point_meta,
+        "lightweight": lightweight,
+        "_publication_v2": True,
+    })
+    if initial.get("frame_index") is not None:
+        legacy["detection_frame_index"] = int(initial["frame_index"]) - start_frame
+    if isinstance(image_size, (list, tuple)) and len(image_size) >= 2:
+        legacy["image_height"] = image_size[0]
+        legacy["image_width"] = image_size[1]
+    return legacy
+
+
+def _load_annotations(path: Path) -> list[dict]:
+    annotations = []
+    with open(path) as source:
+        for line_number, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                annotations.append(_publication_v2_to_legacy_view(json.loads(line)))
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise ValueError(f"Could not load annotation line {line_number}: {exc}") from exc
+    return annotations
+
+
 def _box_center(box: list) -> tuple[int, int]:
     x1, y1, x2, y2 = box
     return (int((x1 + x2) / 2), int((y1 + y2) / 2))
@@ -423,6 +557,12 @@ def _centroid_trace_from_arrays_blob(row: dict, candidate_idx: int | None) -> li
 
 
 def _tracking_frame_indices_from_arrays_blob(row: dict) -> list[int] | None:
+    point_meta = row.get("obj_traces_cotracker_point_meta")
+    if isinstance(point_meta, dict):
+        indices = point_meta.get("frame_indices_relative_to_window")
+        if isinstance(indices, (list, tuple)):
+            return [int(i) for i in indices]
+
     lightweight = _lightweight_payload(row)
     blob = lightweight.get("arrays_blob")
     if not blob:
@@ -689,6 +829,8 @@ def build_phase_entries(
         cand_box, cand_idx = _select_detection_target_box(ann)
         if cand_box is None:
             cand_box, _ = _select_box(ann.get("target_candidate_boxes"), [], use_confidence=False)
+        if cand_box is None:
+            cand_box, cand_idx = _select_annotation_target_box(ann)
         cand_trace_idx = init_trace_idx
     else:
         # density-penalized track-point score target selection
@@ -1029,9 +1171,15 @@ def main():
     base_out_path = Path(args.output)
     base_out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(ann_path) as f:
-        annotations = [json.loads(l) for l in f if l.strip()]
-        print(f"Loaded {len(annotations)} annotation entries from {ann_path}")
+    annotations = _load_annotations(ann_path)
+    print(f"Loaded {len(annotations)} annotation entries from {ann_path}")
+    publication_v2_count = sum(bool(annotation.get("_publication_v2")) for annotation in annotations)
+    if publication_v2_count and (args.all or selection_mode == "detection"):
+        print(
+            f"Note: {publication_v2_count} publication-v2 rows contain only the selected boxes/track. "
+            "Their detection-mode outputs fall back to those published selections because rejected "
+            "detector candidates are intentionally not stored in schema v2."
+        )
 
     # Holdout
     all_trajs = sorted({a["trajectory_name"] for a in annotations})
