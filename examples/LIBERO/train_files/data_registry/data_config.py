@@ -1,5 +1,7 @@
 """LIBERO benchmark — data config, embodiment tags, and mixtures."""
 
+import os
+
 from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
 from starVLA.dataloader.gr00t_lerobot.transform.base import ComposedModalityTransform
 from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionToTensor, StateActionTransform
@@ -39,27 +41,51 @@ class Libero4in1DataConfig:
     action_indices = list(range(8))
     state_indices = [0]
 
-    def modality_config(self):
+    def modality_config(self, action_horizon: int | None = None):
+        # action_horizon lets the ground-truth action chunk length track
+        # framework.action_model.action_horizon (passed via datasets.vla_data.action_horizon);
+        # otherwise falls back to the class default of 8.
+        action_indices = list(range(action_horizon)) if action_horizon else self.action_indices
         return {
             "video": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.video_keys),
             "state": ModalityConfig(delta_indices=self.state_indices, modality_keys=self.state_keys), # igore state modality for now since some datasets don't have state and we want to be able to use them, can add back later if needed
-            "action": ModalityConfig(delta_indices=self.action_indices, modality_keys=self.action_keys),
+            "action": ModalityConfig(delta_indices=action_indices, modality_keys=self.action_keys),
             "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
         }
 
+    # Gripper normalization mode. IMPORTANT: this transform is rebuilt from CODE at
+    # inference time (deployment/model_server/policy_norm_processor.py fetches this
+    # DataConfig and calls .transform()), but the checkpoint does NOT record which
+    # mode it was trained with. So changing the default silently corrupts every
+    # checkpoint trained under the old default: the server would un-normalize with a
+    # rule the model never saw.
+    #
+    # Pick per checkpoint via STARVLA_LIBERO_GRIPPER_NORM:
+    #   "none"          -> gripper left un-normalized (checkpoints whose
+    #                      dataset_statistics.json has action.min[6] == 0, i.e. data
+    #                      already stored gripper as {0,1}; e.g. 1229_libero4in1_qwen35oft)
+    #   "binary_invert" -> {-1,+1} raw LIBERO -> {1=open, 0=close} target, invertible
+    #                      back to raw (checkpoints with action.min[6] == -1)
+    # auto_eval_libero.sh sets this from the checkpoint's stats file.
+    GRIPPER_NORM_MODE = os.environ.get("STARVLA_LIBERO_GRIPPER_NORM", "binary_invert")
+
     def transform(self):
+        normalization_modes = {
+            "action.x": "min_max",
+            "action.y": "min_max",
+            "action.z": "min_max",
+            "action.roll": "min_max",
+            "action.pitch": "min_max",
+            "action.yaw": "min_max",
+        }
+        if self.GRIPPER_NORM_MODE != "none":
+            normalization_modes["action.gripper"] = self.GRIPPER_NORM_MODE
+
         return ComposedModalityTransform(transforms=[
             StateActionToTensor(apply_to=self.action_keys),
             StateActionTransform(
                 apply_to=self.action_keys,
-                normalization_modes={
-                    "action.x": "min_max",
-                    "action.y": "min_max",
-                    "action.z": "min_max",
-                    "action.roll": "min_max",
-                    "action.pitch": "min_max",
-                    "action.yaw": "min_max",
-                },
+                normalization_modes=normalization_modes,
             ),
         ])
 

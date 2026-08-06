@@ -73,11 +73,59 @@ LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
 
 
-def _binarize_gripper_open(open_val: np.ndarray | float) -> np.ndarray:
+def _binarize_gripper(open_val: np.ndarray | float, encoding: str) -> np.ndarray:
+    """Map the model's gripper output to the LIBERO action convention.
+
+    LIBERO/robosuite: action[6] = +1 closes, -1 opens (cf. LIBERO_DUMMY_ACTION,
+    which holds -1 while objects settle, i.e. open).
+
+    Two training encodings exist, distinguished by the action stats in the
+    checkpoint's ``dataset_statistics.json``. Dim 6 is excluded from
+    ``normalization_modes`` in the data config, so the raw dataset value passes
+    through the model un-normalized and its convention reaches us verbatim:
+
+      ``zero_one``:       gripper in [0, 1], 1 = open   (libero_*_no_noops_1.0.0_lerobot)
+      ``pm_one``:         gripper in [-1, 1], +1 = close (lerobot_3_0/libero_lerobot,
+                          which stores raw LIBERO actions)
+      ``zero_one_close``: gripper in [0, 1], 1 = close  -- produced when the data config
+                          sets ``"action.gripper": "binary"``. Cannot be auto-detected:
+                          dataset_statistics.json still records the RAW min/max, so pass
+                          it explicitly.
+
+    These invert each other, and normalization would not reconcile them (min_max
+    is order-preserving), so the convention must come from the checkpoint.
+    Getting it wrong inverts the gripper and the policy can never grasp.
+    """
     arr = np.asarray(open_val, dtype=np.float32).reshape(-1)
     v = float(arr[0])
-    bin_val = 1.0 - 2.0 * (v > 0.5)
+    if encoding == "zero_one":
+        bin_val = 1.0 - 2.0 * (v > 0.5)  # 1 (open) -> -1, 0 (close) -> +1
+    elif encoding == "pm_one":
+        bin_val = 1.0 if v > 0.0 else -1.0  # already LIBERO convention; just binarize
+    elif encoding == "zero_one_close":
+        bin_val = 1.0 if v > 0.5 else -1.0  # 1 (close) -> +1, 0 (open) -> -1
+    else:
+        raise ValueError(f"Unknown gripper encoding: {encoding!r}")
     return np.asarray([bin_val], dtype=np.float32)
+
+
+def _detect_gripper_encoding(ckpt_path: str | None) -> str:
+    """Infer the gripper encoding from the checkpoint's dataset_statistics.json.
+
+    A dim-6 minimum below -0.5 means raw LIBERO actions (``pm_one``); a minimum
+    at ~0 means the [0, 1] encoding (``zero_one``). Returns "" if not found.
+    """
+    if not ckpt_path:
+        return ""
+    for parent in pathlib.Path(ckpt_path).resolve().parents:
+        stats_file = parent / "dataset_statistics.json"
+        if stats_file.is_file():
+            with open(stats_file, encoding="utf-8") as f:
+                stats = json.load(f)
+            key = next(iter(stats))
+            gripper_min = float(stats[key]["action"]["min"][6])
+            return "pm_one" if gripper_min < -0.5 else "zero_one"
+    return ""
 
 
 def get_logger(file):
@@ -135,6 +183,10 @@ class Args:
     start_idx: int = -1
     end_idx: int = -1
     output_dir: str = "./output"
+
+    # Gripper output convention: "auto" reads dataset_statistics.json next to the
+    # checkpoint; override with "zero_one" or "pm_one". See _binarize_gripper.
+    gripper_encoding: str = "auto"
 
 
 class PolicyModel:
@@ -411,6 +463,18 @@ def eval_libero(args: Args) -> None:
             use_bf16=args.use_bf16,
         )
 
+    # Resolve the gripper convention; a wrong choice inverts the gripper and the
+    # policy can never grasp, so fail rather than guess silently.
+    gripper_encoding = args.gripper_encoding
+    if gripper_encoding == "auto":
+        gripper_encoding = _detect_gripper_encoding(args.pretrained_path)
+        if not gripper_encoding:
+            raise RuntimeError(
+                f"Could not auto-detect the gripper encoding (no dataset_statistics.json found near "
+                f"{args.pretrained_path}). Pass --gripper_encoding zero_one|pm_one explicitly."
+            )
+    logger.info(f"Using gripper encoding: {gripper_encoding}")
+
     disturb_res = {}
     LIBERO_HOME = os.environ.get("LIBERO_HOME", "path_to_LIBERO-plus")
     with open(os.path.join(LIBERO_HOME, "libero/libero/benchmark/task_classification.json")) as f:
@@ -517,7 +581,7 @@ def eval_libero(args: Args) -> None:
                 world_vector_delta = np.asarray(raw_action.get("world_vector"), dtype=np.float32).reshape(-1)
                 rotation_delta = np.asarray(raw_action.get("rotation_delta"), dtype=np.float32).reshape(-1)
                 open_gripper = np.asarray(raw_action.get("open_gripper"), dtype=np.float32).reshape(-1)
-                gripper = _binarize_gripper_open(open_gripper)
+                gripper = _binarize_gripper(open_gripper, gripper_encoding)
 
                 if not (world_vector_delta.size == 3 and rotation_delta.size == 3 and open_gripper.size == 1):
                     logger.warning(

@@ -10,7 +10,7 @@ framework:
   name: QwenPI_v3
   qwenvl:
     base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-4B
-    attn_implementation: sdpa
+    attn_implementation: flash_attention_3 #sdpa
     vl_hidden_dim: 2048
   action_model:
     action_model_type: DiT-B
@@ -27,13 +27,13 @@ framework:
     noise_s: 0.999
     num_timestep_buckets: 1000
     num_inference_timesteps: 4
-    num_target_vision_tokens: 32
+    num_target_vision_tokens: 16
     diffusion_model_cfg:    # Parameters for the DiT transformer
       dropout: 0.2
       final_dropout: true
       interleave_self_attention: true
       norm_type: "ada_norm"
-      num_layers: 16
+      num_layers: 32
 
 
 
@@ -56,9 +56,9 @@ datasets:
     pin_memory: false
 
   vla_data:
-    dataset_py: marigold_lerobot_datasets #lerobot_datasets
+    dataset_py: marigold_data_datasets # full marigold_data InfiniteDataReader path
     data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/DROID/
-    data_mix: droid_lerobot_resized #libero_all # libero_goal
+    data_mix: droid_lerobot_resized_success #libero_all # libero_goal
     action_type: abs_qpos
     action_mode: abs
     use_keep_ranges: true
@@ -69,12 +69,25 @@ datasets:
     CoT_prompt: "Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format."
     per_device_batch_size: 16
     load_all_data_for_training: true
-    video_backend: decord
+    target_fps: 15
+    video_backend: torchcodec
+    marigold_video_backend: torchcodec
+    marigold_sharding_plan_cache_root: /e/home/jusers/blank4/jupiter/blank4/cache/marigold_sharding
+    marigold_instruction_mode: local
+    marigold_normalize_q99: true
+    marigold_norm_stats_path: /e/home/jusers/blank4/jupiter/blank4/cache/norm_stats_droid_resized_success/franka_robotiq_gripper.json
+    marigold_camera_decode_groups:
+      - [camera_external_left, camera_external_right]
+      - [camera_wrist]
+    marigold_camera_groups:
+      - [camera_external_left, camera_external_right]
+      - [camera_wrist]
     lerobot_version: "v3.0"
     num_workers: 8
-    prefetch_factor: 2
+    prefetch_factor: 1
     persistent_workers: true
-    pin_memory: false
+    pin_memory: true
+    worker_torch_num_threads: 1
     include_state: true
     obs_image_size: [180, 320]
     sample_language: true
@@ -83,9 +96,10 @@ datasets:
 
 
 trainer:
-  max_train_steps: 20000
+  max_train_steps: 100000
   num_warmup_steps: 1000
   save_interval: 5000
+  save_total_limit: 4
   eval_interval: 1000
   learning_rate:
     base: 2.5e-05

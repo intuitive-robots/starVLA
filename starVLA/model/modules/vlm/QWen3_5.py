@@ -3,6 +3,7 @@
 # Implemented by [Shijie LIAN/ Huazhong University of Science & Technology] in [2026].
 # Design and Merged by [Jinhui YE / HKUST University] in [2026].
 
+import os
 from typing import Optional
 
 import torch
@@ -86,6 +87,55 @@ class _QWen3_5_VL_Interface(nn.Module):
             self._ACTION_TOKEN_MIN = _ACTION_TOKEN_MIN
             self._ACTION_TOKEN_MAX = _ACTION_TOKEN_MAX
 
+        # Opt-in fast decode: static KV-cache + torch.compile(mode="reduce-overhead")
+        # on the per-step forward used by generate(). Off by default -- first call
+        # pays a real compilation warmup (tens of seconds), and only the decode-step
+        # call inside generate() is ever compiled (see `generate()` below); the plain
+        # `forward()` used for training and the fused-forward inference paths is
+        # untouched. Enable via `framework.qwenvl.compile_generate: true` in the
+        # model config, or the STARVLA_COMPILE_GENERATE=1 env var for an existing
+        # checkpoint without editing its saved config.yaml.
+        self._compile_generate = bool(qwenvl_config.get("compile_generate", False)) or (
+            os.environ.get("STARVLA_COMPILE_GENERATE", "") == "1"
+        )
+        self._compiled_forward = None
+        if self._compile_generate and not self.model._supports_default_dynamic_cache():
+            # Qwen3_5ForConditionalGeneration sets `_is_stateful = True`, which makes
+            # `_supports_default_dynamic_cache()` return False -- HF's own generate()
+            # then silently IGNORES `cache_implementation="static"` and keeps using
+            # whatever legacy/growing cache the model manages internally. That means
+            # the decode-step shape still changes every step, so the "compiled"
+            # forward would recompile on every single token instead of reusing one
+            # graph -- strictly slower than plain eager, not just unhelpful. Refuse
+            # to enable it rather than silently regressing throughput.
+            # (Confirmed still broken as of transformers 5.3.0; Qwen2.5-VL and
+            # Qwen3-VL do NOT have this problem, only the 3.5 line.)
+            logger.warning(
+                "[QWen3_5] compile_generate requested but this model class "
+                "(Qwen3_5ForConditionalGeneration) does not support the standard "
+                "Cache API in the installed transformers version, so "
+                "cache_implementation='static' would be silently ignored and the "
+                "compiled forward would recompile every decode step -- net SLOWER "
+                "than eager. Disabling compile_generate; leaving fast_action_decode "
+                "and the bf16 generate() fix (both unaffected by this) in place."
+            )
+            self._compile_generate = False
+        if self._compile_generate:
+            # Dynamo's default guard cache (8) is too small once prompts vary in
+            # length across calls (e.g. different instructions/episodes) -- each new
+            # prompt length is a new shape and needs its own compiled graph. Past
+            # the limit, dynamo silently falls back to eager instead of erroring, but
+            # that quietly loses the speedup, so raise the ceiling.
+            import torch._dynamo as _dynamo
+
+            _dynamo.config.cache_size_limit = max(_dynamo.config.cache_size_limit, 64)
+            logger.info(
+                "[QWen3_5] compile_generate=True: the decode-step forward will be "
+                "torch.compile'd (mode='reduce-overhead') + static KV-cache on first "
+                "use. Expect a one-time warmup of ~tens of seconds per distinct "
+                "prompt length seen."
+            )
+
     def forward(
         self,
         **kwargs,
@@ -113,13 +163,64 @@ class _QWen3_5_VL_Interface(nn.Module):
         Returns:
             GenerateOutput | Model-dependent generation return.
         """
-        with torch.autocast("cuda", dtype=torch.float16):
-            generation_output = self.model.generate(
-                **kwargs,
-            )
+        # bf16, not fp16: weights are cast to bf16 in __init__ (matches forward()'s
+        # autocast). An fp16 autocast here forces every op to cast bf16 weights to
+        # fp16 and back each step -- pure overhead on top of an already per-step-heavy
+        # decode loop, with no accuracy upside.
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            if self._compile_generate:
+                generation_output = self._generate_compiled(**kwargs)
+            else:
+                generation_output = self.model.generate(
+                    **kwargs,
+                )
         return generation_output
 
-    def build_qwenvl_inputs(self, images, instructions, solutions=None, cot_conversations=None, **kwargs):
+    def _generate_compiled(self, **kwargs):
+        """Static-cache + compiled-forward generate().
+
+        A dynamic KV-cache grows every step, so its shape changes every step, so
+        torch.compile has to recompile every step -- useless. A static cache
+        pre-allocates a fixed-size buffer instead, so once the cache is warm the
+        decode-step forward always sees the SAME input/cache shape (`[B, 1]` +
+        fixed-length cache) and one compiled graph (with CUDA graph capture, under
+        `mode="reduce-overhead"`) covers every remaining step.
+
+        `self.model.forward` is only swapped for a compiled version for the
+        duration of this call, then restored -- training's `forward()` (variable
+        image counts / sequence lengths, `output_hidden_states=True`) and the
+        fused-forward inference path never see the compiled callable, so they
+        can't be destabilized by this.
+        """
+        if self._compiled_forward is None:
+            self._compiled_forward = torch.compile(self.model.forward, mode="reduce-overhead", fullgraph=False)
+
+        kwargs.setdefault("cache_implementation", "static")
+        original_forward = self.model.forward
+        self.model.forward = self._compiled_forward
+        try:
+            return self.model.generate(**kwargs)
+        except Exception:
+            # Disable permanently (not just for this call): a compile/static-cache
+            # failure is almost always shape- or op-related and will recur on every
+            # subsequent call, so retrying it forever would just waste a compile
+            # attempt's worth of time on every single request.
+            self._compile_generate = False
+            logger.error(
+                "[QWen3_5] compiled generate() failed; disabling compile_generate "
+                "and falling back to the uncompiled path for the rest of this run.",
+                exc_info=True,
+            )
+            self.model.forward = original_forward
+            return self.model.generate(
+                **{k: v for k, v in kwargs.items() if k != "cache_implementation"},
+            )
+        finally:
+            self.model.forward = original_forward
+
+    def build_qwenvl_inputs(
+        self, images, instructions, solutions=None, cot_conversations=None, assistant_suffix=None, **kwargs
+    ):
         """
         Build model inputs from raw data (images + instructions + optional solutions/cot_conversations).
         Follow Official Qwen3.5-VL Instruct format: https://huggingface.co/Qwen/Qwen3.5-VL-4B-Instruct
@@ -132,6 +233,13 @@ class _QWen3_5_VL_Interface(nn.Module):
                                Each entry is [{from: human, value: ...}, {from: gpt, value: ...}]
                                or None (holdout / unannotated → no CoT loss for that sample).
                                The human value may contain {instruction} which is filled in here.
+            assistant_suffix:  List[str] | None — appended to each sample's ASSISTANT turn,
+                               after the CoT answer. Used by QwenOFT_CoT to place its
+                               <action> token block behind the reasoning so the action
+                               queries can attend to it (attention is causal). These suffix
+                               tokens are excluded from the CoT cross-entropy labels: only
+                               the CoT answer itself is supervised.
+                               Requires cot_conversations (ignored otherwise).
         """
 
         # Create user-only messages (prompt side).
@@ -162,13 +270,26 @@ class _QWen3_5_VL_Interface(nn.Module):
         if cot_conversations is not None:
             assert len(cot_conversations) == len(messages), "cot_conversations length must match batch size"
 
+            if assistant_suffix is not None:
+                assert len(assistant_suffix) == len(messages), "assistant_suffix length must match batch size"
+
             # Append assistant (gpt) turn. None entries → empty string → no loss contribution.
+            # ``messages_with_cot`` may additionally carry the action-token suffix; we keep a
+            # separate ``messages_cot_only`` (answer without suffix) to locate the end of the
+            # supervised span below.
             messages_with_cot = []
-            for msg, conv in zip(messages, cot_conversations):
-                msg_cot = list(msg)
+            messages_cot_only = []
+            for i, (msg, conv) in enumerate(zip(messages, cot_conversations)):
                 gpt_text = conv[1]["value"] if conv is not None else ""
-                msg_cot.append({"role": "assistant", "content": [{"type": "text", "text": gpt_text}]})
+                suffix = assistant_suffix[i] if assistant_suffix is not None else ""
+
+                msg_cot = list(msg)
+                msg_cot.append({"role": "assistant", "content": [{"type": "text", "text": gpt_text + suffix}]})
                 messages_with_cot.append(msg_cot)
+
+                msg_only = list(msg)
+                msg_only.append({"role": "assistant", "content": [{"type": "text", "text": gpt_text}]})
+                messages_cot_only.append(msg_only)
 
             # Encode prompt-only (no assistant) to measure per-sample prompt lengths.
             # With add_generation_prompt=True the encoding ends exactly where the assistant starts.
@@ -193,6 +314,37 @@ class _QWen3_5_VL_Interface(nn.Module):
 
             # Build labels: mask everything up to (and including) the prompt, supervise only
             # the assistant CoT tokens. With left padding the valid tokens are right-aligned.
+            # When an action-token suffix was appended, encode the answer-only variant so we
+            # can stop supervision at the end of the CoT answer.
+            cot_only_inputs = None
+            empty_asst_inputs = None
+            if assistant_suffix is not None:
+                cot_only_inputs = self.processor.apply_chat_template(
+                    messages_cot_only,
+                    tokenize=True,
+                    padding=True,
+                    add_generation_prompt=False,
+                    return_dict=True,
+                    return_tensors="pt",
+                )
+                # Same messages with an EMPTY assistant turn. The difference from the
+                # prompt-only length is exactly the assistant scaffolding (<|im_end|> etc.),
+                # which we must subtract or the supervised span would run past the CoT
+                # answer and into the action-token suffix.
+                messages_empty_asst = []
+                for msg in messages:
+                    m = list(msg)
+                    m.append({"role": "assistant", "content": [{"type": "text", "text": ""}]})
+                    messages_empty_asst.append(m)
+                empty_asst_inputs = self.processor.apply_chat_template(
+                    messages_empty_asst,
+                    tokenize=True,
+                    padding=True,
+                    add_generation_prompt=False,
+                    return_dict=True,
+                    return_tensors="pt",
+                )
+
             max_full_len = batch_inputs["input_ids"].shape[1]
             labels = batch_inputs["input_ids"].clone()
             for i in range(labels.size(0)):
@@ -203,6 +355,17 @@ class _QWen3_5_VL_Interface(nn.Module):
                 # last `asst_len` of those are the assistant response.
                 asst_start = max_full_len - max(asst_len, 0)
                 labels[i, :asst_start] = IGNORE_INDEX
+                if cot_only_inputs is not None:
+                    # Supervise only [asst_start, asst_start + cot_len): the CoT answer.
+                    # Everything after it is the action-token block, which must not be
+                    # trained as a language target. ``scaffold`` removes the assistant
+                    # wrapper tokens (<|im_end|> ...) counted by the answer-only encoding;
+                    # note this also drops EOS supervision, which is intentional here since
+                    # the sequence does not end after the answer.
+                    cot_valid = int(cot_only_inputs["attention_mask"][i].sum())
+                    scaffold = int(empty_asst_inputs["attention_mask"][i].sum()) - prompt_valid
+                    cot_len = max(cot_valid - prompt_valid - max(scaffold, 0), 0)
+                    labels[i, asst_start + cot_len :] = IGNORE_INDEX
                 # Mask any residual pad tokens that ended up in the label.
                 if self.processor.tokenizer.pad_token_id is not None:
                     labels[i][labels[i] == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX

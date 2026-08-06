@@ -156,7 +156,7 @@ class _Gemma4_VL_Interface(nn.Module):
         return outputs
 
     def generate(self, **kwargs):
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast("cuda", dtype=torch.bfloat16):
             return self.model.generate(**kwargs)
 
     # ----- input building -----------------------------------------------------

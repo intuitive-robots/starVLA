@@ -467,7 +467,11 @@ class Libero4in1DataConfig:
     action_indices = list(range(8))
     state_indices = list(range(-16, 0))
 
-    def modality_config(self):
+    def modality_config(self, action_horizon: int | None = None):
+        # action_horizon lets the ground-truth action chunk length track
+        # framework.action_model.action_horizon (passed via datasets.vla_data.action_horizon);
+        # otherwise falls back to the class default of 8.
+        action_indices = list(range(action_horizon)) if action_horizon else self.action_indices
         video_modality = ModalityConfig(
             delta_indices=self.observation_indices,
             modality_keys=self.video_keys,
@@ -477,7 +481,7 @@ class Libero4in1DataConfig:
             modality_keys=self.state_keys,
         )
         action_modality = ModalityConfig(
-            delta_indices=self.action_indices,
+            delta_indices=action_indices,
             modality_keys=self.action_keys,
         )
         language_modality = ModalityConfig(

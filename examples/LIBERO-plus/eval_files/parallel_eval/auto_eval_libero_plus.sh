@@ -12,6 +12,15 @@ export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYTHONPATH="${PYTHONPATH:-}:${LIBERO_HOME}"
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
+# numba JIT-compiles on first use and writes its cache INTO the installed package
+# dir by default. With many server/worker processes (servers_per_gpu * workers_per_gpu
+# * num_gpus, times num_nodes) all importing it near-simultaneously against a
+# shared NFS-mounted conda env, that turns into a write race NFS handles badly:
+# "Stale file handle" errors on numba/* and Bus errors (mmap'd cache pages going
+# invalid mid-access) under load. Redirect to node-local /tmp so it's never a
+# shared write target across processes/nodes.
+export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${TMPDIR:-/tmp}/starvla_numba_cache}"
+
 LIBERO_PLUS_CONDA_ENV="${LIBERO_PLUS_CONDA_ENV:-libero-plus}"
 POLICY_SERVER_CONDA_ENV="${POLICY_SERVER_CONDA_ENV:-starVLA}"
 your_ckpt="${your_ckpt:-path_to_checkpoint}"
@@ -24,15 +33,27 @@ server_idle_timeout="${server_idle_timeout:--1}"
 
 task_suite_name="${1:-libero_goal}"
 num_gpus="${2:-4}"
-tasks_per_gpu="${3:-10}"
+# 0 (default) = auto: size tasks_per_gpu from the suite's true length so this
+# partition's [start_idx,end_idx) covers exactly its 1/num_partitions share
+# (see suite_size lookup below). Pass a positive value to override.
+tasks_per_gpu="${3:-0}"
 workers_per_gpu="${4:-1}"
 partition_idx="${5:-0}"
 num_trials_per_task="${6:-1}"
 gpu_ids_csv="${7:-}"
-
-
-workers_per_gpu=1
-
+# Policy servers per GPU. Each costs one full copy of the model in that GPU's
+# memory but gives real inference concurrency to workers sharing that GPU
+# (the server runs inference synchronously per request). Best throughput when
+# workers_per_gpu is a multiple of servers_per_gpu.
+servers_per_gpu="${8:-1}"
+# Total independent partitions this suite is split into -- i.e. total nodes
+# when driven multi-node by eval_libero_plus_slurm.sh (partition_idx is then
+# that node's rank). 1 = single partition covering the whole suite, as before.
+num_partitions="${9:-1}"
+# Set by the multi-node wrapper: each node would otherwise redundantly
+# aggregate a partial (racy) snapshot of the shared output_dir; the wrapper
+# does one aggregation itself after every partition has finished instead.
+skip_aggregate="${SKIP_AGGREGATE:-false}"
 
 if [ "${your_ckpt}" = "path_to_checkpoint" ]; then
     echo "[ERROR] Please set your_ckpt to a real checkpoint path."
@@ -62,7 +83,11 @@ cleanup() {
 wait_for_port() {
     local _host="$1"
     local port="$2"
-    local attempts=60
+    # Server load is slow: full dataset-registry scan + ~1.7GB ckpt, and with
+    # servers_per_gpu > 1 several server processes do this concurrently on the
+    # same node (I/O + GPU-init contention). 60s (the old default) isn't enough
+    # once more than ~1 server/GPU is loading at once.
+    local attempts="${WAIT_FOR_PORT_ATTEMPTS:-600}"
 
     for ((attempt=1; attempt<=attempts; attempt++)); do
         if ss -ltnH "( sport = :${port} )" 2>/dev/null | grep -q ":${port}"; then
@@ -116,6 +141,13 @@ case "${task_suite_name}" in
         ;;
 esac
 
+# Auto-size tasks_per_gpu from the true suite length so num_partitions
+# partitions (nodes) cover the suite exactly once between them, each getting
+# ceil(suite_size / (num_partitions * num_gpus)) tasks per GPU.
+if [ "${tasks_per_gpu}" -le 0 ]; then
+    tasks_per_gpu=$(( (suite_size + num_partitions * num_gpus - 1) / (num_partitions * num_gpus) ))
+fi
+
 tasks_per_partition=$((num_gpus * tasks_per_gpu))
 start_idx=$((partition_idx * tasks_per_partition))
 end_idx=$((start_idx + tasks_per_partition))
@@ -128,6 +160,8 @@ if [ "${start_idx}" -ge "${suite_size}" ]; then
     exit 1
 fi
 
+num_servers=$((num_gpus * servers_per_gpu))
+
 echo "=========================================="
 echo " LIBERO-plus Auto Eval"
 echo "=========================================="
@@ -139,27 +173,40 @@ echo " Server env       : ${POLICY_SERVER_CONDA_ENV}"
 echo " GPUs             : ${gpu_ids_csv}"
 echo " Tasks / GPU      : ${tasks_per_gpu}"
 echo " Workers / GPU    : ${workers_per_gpu}"
-echo " Partition index  : ${partition_idx}"
+echo " Servers / GPU    : ${servers_per_gpu}  (total servers: ${num_servers}, ports ${base_port}..$((base_port + num_servers - 1)))"
+echo " Partition index  : ${partition_idx} / ${num_partitions}"
 echo " Trials / task    : ${num_trials_per_task}"
 echo " Task range       : [${start_idx}, ${end_idx}) of ${suite_size}"
 echo " Server host      : ${server_host}"
 echo " Base port        : ${base_port}"
 echo "=========================================="
 
+if [ "${workers_per_gpu}" -lt "${servers_per_gpu}" ]; then
+    echo "[WARN] workers_per_gpu=${workers_per_gpu} < servers_per_gpu=${servers_per_gpu}: some servers will idle."
+fi
+
 server_log_dir="${output_dir}/server_logs"
 mkdir -p "${server_log_dir}"
 
-for ((i=0; i<num_gpus; i++)); do
-    gpu_id=${gpu_ids[$i]}
-    port=$((base_port + i))
-    log_file="${server_log_dir}/gpu_${gpu_id}_port_${port}.log"
-    server_logs+=("${log_file}")
-    echo "Launching policy server on gpu=${gpu_id}, port=${port}, log=${log_file}"
-    setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} CUDA_LAUNCH_BLOCKING=1 conda run --no-capture-output -n \"${POLICY_SERVER_CONDA_ENV}\" python deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\"" > "${log_file}" 2>&1 &
-    server_pids+=($!)
+for ((g=0; g<num_gpus; g++)); do
+    gpu_id=${gpu_ids[$g]}
+    for ((s=0; s<servers_per_gpu; s++)); do
+        port=$((base_port + g * servers_per_gpu + s))
+        # Prefixed with partition_idx: gpu_id/port are LOCAL to each node, so under
+        # the multi-node wrapper every node reuses the same gpu_id/port values and
+        # would otherwise collide on this filename in the shared (NFS) output_dir --
+        # multiple nodes' processes writing the "same" log file concurrently produces
+        # interleaved/corrupted content, not an error, so it silently misleads
+        # debugging. partition_idx (this node's rank) makes it unique per node.
+        log_file="${server_log_dir}/partition${partition_idx}_gpu_${gpu_id}_port_${port}.log"
+        server_logs+=("${log_file}")
+        echo "Launching policy server on gpu=${gpu_id}, port=${port}, log=${log_file}"
+        setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} CUDA_LAUNCH_BLOCKING=1 conda run --no-capture-output -n \"${POLICY_SERVER_CONDA_ENV}\" python deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\"" > "${log_file}" 2>&1 &
+        server_pids+=($!)
+    done
 done
 
-for ((i=0; i<num_gpus; i++)); do
+for ((i=0; i<num_servers; i++)); do
     port=$((base_port + i))
     if ! wait_for_port "${server_host}" "${port}"; then
         echo "[ERROR] Policy server on port ${port} did not become ready."
@@ -183,7 +230,13 @@ bash "${SCRIPT_PATH}" \
     "${gpu_ids_csv}" \
     "${base_port}" \
     "${server_host}" \
-    "true"
+    "true" \
+    "${servers_per_gpu}"
 
-python "${AGGREGATE_SCRIPT}" --root_path "${output_dir}"
-echo "Aggregated results written to ${output_dir}/overall_results.json"
+if [ "${skip_aggregate}" != "true" ]; then
+    # Suite-scoped (writes <output_dir>/<suite>/overall_results.json), not the
+    # shared combined file -- so aggregating one suite can never race with or
+    # overwrite another suite's results. Combine explicitly across suites with:
+    #   python examples/LIBERO-plus/eval_files/parallel_eval/aggregate_results.py --root_path <output_dir>
+    python "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${task_suite_name}"
+fi

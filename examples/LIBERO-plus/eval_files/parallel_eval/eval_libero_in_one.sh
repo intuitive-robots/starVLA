@@ -12,6 +12,11 @@ export CUDA_DEVICE_ORDER="${CUDA_DEVICE_ORDER:-PCI_BUS_ID}"
 export PYTHONPATH="${PYTHONPATH:-}:${LIBERO_HOME}" # let eval_libero find the LIBERO tools
 export PYTHONPATH="$(pwd):${PYTHONPATH}" # let LIBERO find the websocket tools from main repo
 
+# See auto_eval_libero_plus.sh: keep numba's JIT cache off shared NFS -- many
+# concurrent sim workers importing it at once otherwise races on the shared
+# conda env path (observed as "Stale file handle" / Bus error under load).
+export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${TMPDIR:-/tmp}/starvla_numba_cache}"
+
 LIBERO_PLUS_CONDA_ENV="${LIBERO_PLUS_CONDA_ENV:-libero-plus}"
 your_ckpt="${your_ckpt:-path_to_checkpoint}"
 output_dir="${output_dir:-path_to_output_dir}"
@@ -29,6 +34,9 @@ gpu_ids_csv=${8:-}
 base_port=${9:-10093}
 server_host=${10:-127.0.0.1}
 use_server=${11:-true}
+# Policy servers per GPU (see auto_eval_libero_plus.sh). Workers on a GPU
+# round-robin over that GPU's servers instead of all sharing a single one.
+servers_per_gpu=${12:-1}
 
 conda activate "${LIBERO_PLUS_CONDA_ENV}"
 
@@ -79,10 +87,11 @@ for ((i=0; i<num_workers; i++)); do
     fi
 
     gpu_slot=$((i / workers_per_gpu))
-    worker_slot=$((i % workers_per_gpu))
+    local_worker=$((i % workers_per_gpu))
+    server_slot=$((local_worker % servers_per_gpu))
     gpu_id=${gpu_ids[$gpu_slot]}
-    worker_port=$((base_port + gpu_slot))
-    echo "Part $((i)): gpu=${gpu_id}, worker=${worker_slot}, start=$current_start, end=$current_end ([$current_start, $current_end)), host=${server_host}, port=${worker_port}, use_server=${use_server}"
+    worker_port=$((base_port + gpu_slot * servers_per_gpu + server_slot))
+    echo "Part $((i)): gpu=${gpu_id}, worker=${local_worker}, start=$current_start, end=$current_end ([$current_start, $current_end)), host=${server_host}, port=${worker_port}, use_server=${use_server}"
     # Stagger EGL init: NVIDIA libnvidia-eglcore.so has a global-state race when
     # multiple processes call eglGetPlatformDisplayEXT simultaneously (driver 590.x).
     # A 2s gap per worker serializes the init window without meaningful throughput loss.

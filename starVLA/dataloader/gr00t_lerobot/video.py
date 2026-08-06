@@ -123,6 +123,57 @@ def get_frames_by_indices(
         raise NotImplementedError
 
 
+def make_torchcodec_decoder(
+    video_path: str,
+    seek_mode: str = "approximate",
+    num_ffmpeg_threads: int = 1,
+    device: str = "cpu",
+    **_ignored,
+):
+    """Construct a torchcodec VideoDecoder tuned for random-access training reads.
+
+    ``seek_mode="approximate"`` is what the marigold LeRobot fork uses, and it is
+    the single biggest lever on LeRobot v3 layouts: the default "exact" mode scans
+    the container to build a full frame index, which on a 200 MB / 58k-frame AV1
+    file costs ~125 ms per open versus ~3 ms approximate. Verified frame-exact
+    against "exact" on LIBERO-plus (see decode_torchcodec_at_timestamps for the
+    boundary handling that makes both agree with decord).
+
+    ``num_ffmpeg_threads=1`` because each sample decodes a single frame per camera,
+    where a thread pool adds nothing but costs threads and per-thread buffers.
+    Raise it only for multi-frame observation windows.
+    """
+    if not TORCHCODEC_AVAILABLE:
+        raise ImportError("torchcodec is not available.")
+    return torchcodec.decoders.VideoDecoder(
+        video_path,
+        device=device,
+        dimension_order="NHWC",
+        num_ffmpeg_threads=num_ffmpeg_threads,
+        seek_mode=seek_mode,
+    )
+
+
+def decode_torchcodec_at_timestamps(decoder, timestamps: list[float] | np.ndarray) -> np.ndarray:
+    """Read frames at LeRobot frame-start timestamps via torchcodec.
+
+    LeRobot stores the *start* time of each frame's display interval, but
+    ``get_frames_played_at`` answers "which frame is on screen at time t". Asking
+    exactly on a boundary is ambiguous, and floating-point error pushed the query
+    onto the *previous* frame for ~38% of LIBERO-plus reads — a silent off-by-one
+    in the training data. Nudging to the middle of the interval removes the
+    ambiguity and matched decord on 60/60 sampled frames.
+    """
+    ts = np.asarray(timestamps, dtype=np.float64).reshape(-1)
+    fps = float(decoder.metadata.average_fps or 0.0)
+    if fps > 0:
+        ts = ts + 0.5 / fps
+        duration = decoder.metadata.duration_seconds
+        if duration:
+            ts = np.minimum(ts, float(duration) - 1e-6)
+    return decoder.get_frames_played_at(seconds=ts.tolist()).data.numpy()
+
+
 def get_frames_by_timestamps(
     video_path: str,
     timestamps: list[float] | np.ndarray,
@@ -153,10 +204,8 @@ def get_frames_by_timestamps(
     elif video_backend == "torchcodec":
         if not TORCHCODEC_AVAILABLE:
             raise ImportError("torchcodec is not available.")
-        decoder = torchcodec.decoders.VideoDecoder(
-            video_path, device="cpu", dimension_order="NHWC", num_ffmpeg_threads=0
-        )
-        return decoder.get_frames_played_at(seconds=timestamps).data.numpy()
+        decoder = make_torchcodec_decoder(video_path, **video_backend_kwargs)
+        return decode_torchcodec_at_timestamps(decoder, timestamps)
     elif video_backend == "opencv":
         # Open the video file
         cap = cv2.VideoCapture(video_path, **video_backend_kwargs)

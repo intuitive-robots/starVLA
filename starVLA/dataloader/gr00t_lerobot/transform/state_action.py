@@ -96,7 +96,7 @@ class RotationTransform:
 
 
 class Normalizer:
-    valid_modes = ["q99", "mean_std", "min_max", "binary"]
+    valid_modes = ["q99", "mean_std", "min_max", "binary", "binary_invert"]
 
     def __init__(self, mode: str, statistics: dict, binary_threshold: float = 0.5):
         self.mode = mode
@@ -186,6 +186,20 @@ class Normalizer:
         elif self.mode == "binary":
             # Range of binary is [0, 1]
             normalized = (x > self.binary_threshold).to(x.dtype)
+
+        elif self.mode == "binary_invert":
+            # Range is [0, 1], but INVERTED relative to "binary": the low raw value
+            # maps to 1 and the high raw value maps to 0.
+            #
+            # Motivation (LIBERO): raw actions store gripper as {-1 = open, +1 = close}.
+            # "binary" would yield {0 = open, 1 = close}; this yields {1 = open, 0 = close},
+            # matching the older LEROBOT_LIBERO_DATA (*_no_noops) convention while keeping
+            # the width-1 target range (which halves the gripper's L1 loss weight relative
+            # to the min_max-normalized motion dims).
+            #
+            # Unlike "binary", this mode has a TRUE inverse (see below): it maps back into
+            # raw {min, max} space, so downstream consumers keep seeing raw LIBERO actions.
+            normalized = (x < self.binary_threshold).to(x.dtype)
         else:
             raise ValueError(f"Invalid normalization mode: {self.mode}")
 
@@ -209,6 +223,15 @@ class Normalizer:
             return (x + 1) / 2 * (max - min) + min
         elif self.mode == "binary":
             return (x > self.binary_threshold).to(x.dtype)
+        elif self.mode == "binary_invert":
+            # True inverse of the forward pass: binarize the (possibly continuous) model
+            # output, then map 1 -> statistics.min and 0 -> statistics.max, i.e. back into
+            # raw action space. For LIBERO ({-1 = open, +1 = close}) this restores
+            # 1 (open) -> -1 and 0 (close) -> +1, so consumers see raw LIBERO actions.
+            min = self.statistics["min"].to(x.dtype)
+            max = self.statistics["max"].to(x.dtype)
+            b = (x > self.binary_threshold).to(x.dtype)
+            return max - (max - min) * b
         else:
             raise ValueError(f"Invalid normalization mode: {self.mode}")
 

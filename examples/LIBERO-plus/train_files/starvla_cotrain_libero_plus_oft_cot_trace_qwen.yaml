@@ -1,0 +1,121 @@
+# LIBERO-plus + OFT action head + trace-style CoT supervision (selection_mode=ours).
+#
+# QwenOFT_CoT lives in starVLA/model/framework/VLM4A/QwenOFT_CoT.py: QwenOFT plus a
+# cot_resolver, and with action_tokens_after_cot: true it emits the <action> block at
+# the END of the assistant turn so the action queries attend over the reasoning.
+#
+# CoT source: data/cot_mappings/libero_plus_ours_trace.jsonl (1.44M entries /
+# 9538 trajectories). The detection counterpart is
+# starvla_cotrain_libero_plus_oft_cot_trace_det_qwen.yaml.
+run_id: libero_plus_qwen08b_oft_cot_trace_ours
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: niblank
+wandb_project: starvla_libero_plus
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenOFT_CoT
+  cot:
+    generate_at_inference: true
+    max_new_tokens: 160
+    # Place the <action> token block AFTER the CoT
+    # answer so the action queries can attend to the reasoning. With false, CoT
+    # is only an auxiliary VLM loss and does NOT condition the action head.
+    action_tokens_after_cot: true
+
+  qwenvl:
+    base_vlm: /e/home/jusers/blank4/jupiter/blank4/code/train_downstream/train/outputs/ours_t097_fsd_rp_llov2_qwen35_0_8b_128/2026-05-17_01-57-08/checkpoints/checkpoint-9056
+    attn_implementation: sdpa
+    vl_hidden_dim: 2048
+
+  # Unchanged from the plain-OFT base config: parallel continuous decoding via an
+  # MLP head over the gathered <action> token hidden states.
+  action_model:
+    action_dim: 7
+    action_horizon: 8
+    action_model_type: MLP
+
+datasets:
+  vlm_data:
+    dataset_py: vlm_datasets
+    dataformat: llava_json
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    data_flatten: false
+    base_interval: 2
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    per_device_batch_size: 4
+    num_workers: 4
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0
+    data_mix: libero_plus
+    action_type: delta_qpos
+    sequential_step_sampling: False
+
+    # MUST match the human prompt baked into the mapping file, or
+    # assert_cot_prompt_consistent() fails at startup.
+    CoT_prompt: "Your task is {instruction}. Generate the 2D trajectory the object should follow to complete the task. Output exactly 5 points."
+
+    cot:
+      source: mapping
+      mapping_path: data/cot_mappings/libero_plus_ours_trace.jsonl
+      loss_scale: 0.1
+
+    per_device_batch_size: 32
+    load_all_data_for_training: true
+    video_backend: torchcodec
+    # See base config: per-worker LRU of open decord readers. Without it, LIBERO-plus's
+    # 200 MB AV1 files are re-opened and re-indexed per sample (~1 step in 8 stalls
+    # 15-27 s). Applies to decord and torchcodec; 0 disables.
+    # See starvla_cotrain_libero_plus_base_qwen.yaml for the measurements behind these.
+    video_seek_mode: approximate
+    video_num_threads: 1
+    video_reader_cache_size: 80
+    # See starvla_cotrain_libero_plus_base_qwen.yaml for why this matters on NFS.
+    video_prefetch_page_cache: true
+    lerobot_version: "v3.0"
+    num_workers: 8
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    include_state: false
+
+trainer:
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  save_interval: 5000
+  eval_interval: 1000
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+    cot: 0.1
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 100
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08

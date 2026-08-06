@@ -60,12 +60,20 @@ DATASET_NAMED_MIXTURES = {
     "droid_lerobot_resized": [
         ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
     ],
+    "droid_lerobot_resized_success": [
+        ("droid_resized_success", 1.0, "droid_lerobot_resized_joint_pos"),
+    ],
     "libero_goal": [
         ("libero_goal_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
     ],
     "libero_mixed": [
         ("libero", 1.0, "libero_franka"),
     ],
+
+    "libero_plus": [
+        ("libero_plus.0.0_lerobot", 1.0, "libero_franka"),
+    ],
+
 
     "bridge": [
         ("bridge_orig_1.0.0_lerobot", 1.0, "oxe_bridge"),

@@ -46,6 +46,17 @@ class WebsocketPolicyServer:
             self._port,
             compression=None,
             max_size=None,
+            # The default 20s ping_interval/ping_timeout assumes a responsive event
+            # loop, but `_handler` runs `policy.predict_action` SYNCHRONOUSLY inline
+            # (GPU inference blocks the loop -- it can't answer keepalive pings on
+            # ANY connection while a request is in flight). Under GPU contention
+            # (e.g. multiple policy servers sharing one GPU) a single inference call
+            # can legitimately take 30-50s+, which blows past a 20s ping_timeout and
+            # gets otherwise-healthy connections killed with "keepalive ping
+            # timeout". 300s gives real headroom without masking an actually-dead
+            # server for long.
+            ping_interval=300,
+            ping_timeout=300,
         ) as server:
             if self._idle_timeout > 0:
                 await self._idle_watchdog(server)

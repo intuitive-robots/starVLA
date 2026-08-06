@@ -4,6 +4,7 @@
 # Modified by [Jinhui YE/ HKUST University] in [2025]. 
 # Modification: [suport topdowm processing, suport param from config].
 
+import inspect
 from pathlib import Path
 from typing import Sequence
 from omegaconf import OmegaConf
@@ -91,7 +92,11 @@ def make_LeRobotSingleDataset(
         merged_data_cfg = dict(default_data_cfg)
         merged_data_cfg.update(data_cfg)
         data_cfg = merged_data_cfg
-    modality_config = data_config.modality_config()
+    action_horizon_override = data_cfg.get("action_horizon") if data_cfg else None
+    if action_horizon_override and "action_horizon" in inspect.signature(data_config.modality_config).parameters:
+        modality_config = data_config.modality_config(action_horizon=int(action_horizon_override))
+    else:
+        modality_config = data_config.modality_config()
     transforms = data_config.transform()
     dataset_path = data_root_dir / data_name
     if robot_type not in ROBOT_TYPE_TO_EMBODIMENT_TAG:

@@ -178,7 +178,10 @@ class _QWen_VL_Interface(nn.Module):
         Returns:
             GenerateOutput | Model-dependent generation return.
         """
-        with torch.autocast("cuda", dtype=torch.float16):
+        # bf16, not fp16: weights are cast to bf16 elsewhere (matches forward()'s
+        # autocast). An fp16 autocast here forces every op to cast bf16 weights to
+        # fp16 and back each decode step -- pure overhead, no accuracy upside.
+        with torch.autocast("cuda", dtype=torch.bfloat16):
             generation_output = self.model.generate(
                 **kwargs,
             )

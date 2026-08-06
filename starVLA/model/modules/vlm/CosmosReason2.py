@@ -57,7 +57,7 @@ class _CosmosReason2_Interface(nn.Module):
         self,
         **kwargs,
     ):
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast("cuda", dtype=torch.bfloat16):
             generation_output = self.model.generate(
                 **kwargs,
             )

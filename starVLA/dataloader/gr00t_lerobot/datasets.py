@@ -42,7 +42,6 @@ import torch.distributed as dist
 
 from starVLA.dataloader.gr00t_lerobot import video as video_utils
 from starVLA.dataloader.gr00t_lerobot.video import get_all_frames, get_frames_by_timestamps
-
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
 from starVLA.dataloader.gr00t_lerobot.schema import (
     DatasetMetadata,
@@ -67,6 +66,37 @@ LE_ROBOT_DATA_FILENAME = "data/*/*.parquet"
 LE_ROBOT_STEPS_FILENAME = "meta/steps.pkl"
 LE_ROBOT_STATS_FORMAT_VERSION = 2
 EPSILON = 5e-4
+
+
+def _prefetch_into_page_cache(path: Path, chunk_bytes: int = 4 << 20) -> None:
+    """Read an mp4 once, sequentially, to warm the OS page cache.
+
+    On NFS-backed datasets the decoder's seek/read pattern is many small random
+    reads scattered through a large file, and every one of them is a network
+    round trip. LeRobot v3 packs ~380 LIBERO-plus episodes into a single 200 MB
+    AV1 file, so random-frame access is pathological. Reading the file through
+    once up front costs one sequential streaming read and moves every later
+    decoder read to RAM.
+
+    The bytes are not retained on the Python heap — they live only in the OS
+    page cache, which is shared by every worker on the node, so the redundant
+    reads other workers issue for the same file are served locally.
+
+    Best-effort: any IO error is swallowed, since the decoder open that follows
+    will surface a clearer error.
+    """
+    try:
+        with open(path, "rb") as f:
+            if hasattr(os, "posix_fadvise"):
+                try:
+                    os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+                    os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_WILLNEED)
+                except OSError:
+                    pass
+            while f.read(chunk_bytes):
+                pass
+    except OSError:
+        pass
 
 #  LeRobot v3.0 dataset file names 
 LE_ROBOT3_TASKS_FILENAME = "meta/tasks.parquet"
@@ -240,7 +270,14 @@ def _load_v3_episode_filter_metadata(
         required_columns.append(success_indicator_key)
 
     for episode_file in episode_files:
-        episode_df = pd.read_parquet(episode_file, columns=required_columns)
+        try:
+            episode_df = pd.read_parquet(episode_file, columns=required_columns)
+        except Exception as exc:
+            if include_keep_ranges and "keep_ranges" in str(exc):
+                available_columns = [col for col in required_columns if col != "keep_ranges"]
+                episode_df = pd.read_parquet(episode_file, columns=available_columns)
+            else:
+                raise
         for _, row in episode_df.iterrows():
             episode_index = _coerce_int_index(row["episode_index"], "episode_index")
             episode_meta = metadata_by_episode.setdefault(episode_index, {})
@@ -291,6 +328,7 @@ def _filter_dataframe_for_statistics(
         if use_keep_ranges:
             keep_ranges = _normalize_keep_ranges_value(episode_meta.get("keep_ranges"))
             if not keep_ranges:
+                filtered_groups.append(episode_df)
                 continue
             if "frame_index" in episode_df.columns:
                 local_index = episode_df["frame_index"].to_numpy()
@@ -824,6 +862,27 @@ class LeRobotSingleDataset(Dataset):
         self.modality_configs = modality_configs
         self.video_backend = video_backend
         self.video_backend_kwargs = video_backend_kwargs if video_backend_kwargs is not None else {}
+        # decord defaults to one decode thread pool per reader sized to the host
+        # core count: on a 288-core Grace node that is 73 threads and ~42 MB of
+        # per-thread buffers for EVERY open reader. With a reader cache across
+        # many workers that explodes into six-figure thread counts and blows
+        # through `ulimit -u` (4096 here) — avcodec_open2 then fails with
+        # "Cannot allocate memory" and the retry loop silently resamples.
+        # Single-threaded costs 0.7 MB / 1 thread per reader with *identical*
+        # decode latency, because each sample reads one frame per camera
+        # (observation_indices == [0]). Raise this only if you widen the
+        # observation window: multi-frame get_batch does scale with threads.
+        _vid_threads = int((self.data_cfg or {}).get("video_num_threads", 1))
+        if self.video_backend == "decord" and "num_threads" not in self.video_backend_kwargs:
+            self.video_backend_kwargs["num_threads"] = _vid_threads
+        elif self.video_backend == "torchcodec":
+            self.video_backend_kwargs.setdefault("num_ffmpeg_threads", _vid_threads)
+            # "approximate" skips the full-container index scan that "exact"
+            # performs on every open: ~3 ms vs ~125 ms on a 58k-frame AV1 file,
+            # and verified frame-identical on LIBERO-plus.
+            self.video_backend_kwargs.setdefault(
+                "seek_mode", (self.data_cfg or {}).get("video_seek_mode", "approximate")
+            )
         self.transforms = (
             transforms if transforms is not None else ComposedModalityTransform(transforms=[])
         )
@@ -852,6 +911,16 @@ class LeRobotSingleDataset(Dataset):
         self._missing_success_indicator_keys_warned: set[str] = set()
         self._video_reader_cache: OrderedDict[str, tuple[object, np.ndarray]] = OrderedDict()
         self._video_reader_cache_size = int(self.data_cfg.get("video_reader_cache_size", 0)) if self.data_cfg else 0
+        # Warm each mp4 into the OS page cache the first time this worker touches
+        # it. Unbounded on purpose: the set holds paths, not bytes, and the page
+        # cache itself is what bounds memory (the kernel evicts under pressure).
+        self._prefetched_video_paths: set[str] = set()
+        prefetch_cfg = (
+            self.data_cfg.get("video_prefetch_page_cache", os.getenv("STARVLA_PREFETCH_MP4", "0"))
+            if self.data_cfg
+            else os.getenv("STARVLA_PREFETCH_MP4", "0")
+        )
+        self._video_prefetch_page_cache = str(prefetch_cfg).strip().lower() in {"1", "true", "yes", "on"}
         self._worker_debug_enabled = False
         self._worker_debug_interval = 0
         self._worker_debug_counter = 0
@@ -891,16 +960,24 @@ class LeRobotSingleDataset(Dataset):
         # Check if the dataset is valid
         self._check_integrity()
 
-    def _get_cached_decord_reader(self, video_path: Path) -> tuple[object, np.ndarray]:
-        """Reuse decord readers per worker to avoid repeated mp4 open/init costs."""
+    def _get_cached_reader(self, video_path: Path):
+        """Reuse video readers per worker to avoid repeated mp4 open/init costs.
+
+        For decord the cached entry is ``(reader, frame_timestamps)`` because the
+        timestamp index has to be precomputed to map times onto frame indices. For
+        torchcodec it is ``(decoder, None)`` — the decoder resolves timestamps
+        itself.
+        """
         cache_key = video_path.as_posix()
         cached = self._video_reader_cache.pop(cache_key, None)
         if cached is None:
-            if not video_utils.DECORD_AVAILABLE:
-                raise ImportError("decord is not available.")
-            video_reader = video_utils.decord.VideoReader(cache_key, **self.video_backend_kwargs)
-            frame_timestamps = video_reader.get_frame_timestamp(range(len(video_reader)))
-            cached = (video_reader, frame_timestamps)
+            if self.video_backend == "torchcodec":
+                cached = (video_utils.make_torchcodec_decoder(cache_key, **self.video_backend_kwargs), None)
+            else:
+                if not video_utils.DECORD_AVAILABLE:
+                    raise ImportError("decord is not available.")
+                video_reader = video_utils.decord.VideoReader(cache_key, **self.video_backend_kwargs)
+                cached = (video_reader, video_reader.get_frame_timestamp(range(len(video_reader))))
         self._video_reader_cache[cache_key] = cached
 
         while len(self._video_reader_cache) > self._video_reader_cache_size:
@@ -908,13 +985,28 @@ class LeRobotSingleDataset(Dataset):
 
         return cached
 
+    def _maybe_prefetch_video(self, video_path: Path) -> None:
+        """Warm an mp4 into the page cache once per worker, before first decode."""
+        if not self._video_prefetch_page_cache:
+            return
+        cache_key = video_path.as_posix()
+        if cache_key in self._prefetched_video_paths:
+            return
+        self._prefetched_video_paths.add(cache_key)
+        _prefetch_into_page_cache(video_path)
+
     def _get_frames_by_timestamps_cached(
         self,
         video_path: Path,
         timestamps: np.ndarray,
     ) -> np.ndarray:
-        """Fetch frames with a cached decord reader when possible."""
-        if self.video_backend != "decord" or self._video_reader_cache_size <= 0:
+        """Fetch frames with a cached reader when the backend supports one."""
+        # Applies to every backend, not just decord: the win is in the OS page
+        # cache, below whichever decoder ends up reading the file.
+        self._maybe_prefetch_video(video_path)
+
+        cacheable = self.video_backend in ("decord", "torchcodec")
+        if not cacheable or self._video_reader_cache_size <= 0:
             return get_frames_by_timestamps(
                 video_path.as_posix(),
                 timestamps,
@@ -922,10 +1014,12 @@ class LeRobotSingleDataset(Dataset):
                 video_backend_kwargs=self.video_backend_kwargs,
             )
 
-        video_reader, frame_timestamps = self._get_cached_decord_reader(video_path)
+        reader, frame_timestamps = self._get_cached_reader(video_path)
+        if self.video_backend == "torchcodec":
+            return video_utils.decode_torchcodec_at_timestamps(reader, timestamps)
+
         indices = np.abs(frame_timestamps[:, :1] - timestamps).argmin(axis=0)
-        frames = video_reader.get_batch(indices)
-        return frames.asnumpy()
+        return reader.get_batch(indices).asnumpy()
 
     @property
     def dataset_path(self) -> Path:
@@ -1626,7 +1720,7 @@ class LeRobotSingleDataset(Dataset):
 
         keep_ranges = self._get_keep_ranges_for_trajectory(trajectory_id)
         if not keep_ranges:
-            return []
+            return list(range(int(trajectory_length)))
 
         valid_base_indices: list[int] = []
         for start, end in keep_ranges:

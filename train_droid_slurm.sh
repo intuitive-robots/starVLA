@@ -50,6 +50,7 @@ set -u
 export LD_LIBRARY_PATH=/home/hk-project-sustainebot/bm3844/miniconda3/envs/vlm/lib/python3.12/site-packages/nvidia/nvjitlink/lib:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 export TORCH_USE_CUDA_DSA=1
+export PYTHONPATH="$(pwd):/e/home/jusers/blank4/jupiter/blank4/code/marigold_data:/e/home/jusers/blank4/jupiter/blank4/code/marigold_train:${PYTHONPATH:-}"
 
 # ── HuggingFace / cache dirs ──────────────────────────────────────────────────
 export HF_HOME=/e/home/jusers/blank4/jupiter/blank4/cache
@@ -66,7 +67,7 @@ export TRANSFORMERS_OFFLINE=1
 export WANDB_MODE=offline
 export DISABLE_VERSION_CHECK=1
 export ACCELERATE_USE_DEEPSPEED=true
-export ACCELERATE_DEEPSPEED_CONFIG_FILE=./starVLA/config/deepseeds/ds_config.yaml
+export ACCELERATE_DEEPSPEED_CONFIG_FILE=./starVLA/config/deepseeds/ds_config_accumulate.yaml
 
 #Recommended env vars for NFS performance (add to launch script):
 export LEROBOT_PARQUET_CACHE_SIZE=128

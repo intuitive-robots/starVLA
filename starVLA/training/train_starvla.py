@@ -14,6 +14,7 @@ Conventions:
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Tuple
@@ -80,6 +81,50 @@ def _read_proc_ppid_and_name(pid: int) -> tuple[int | None, str | None]:
     except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
         return None, None
     return ppid, name
+
+
+class StepTimeAccumulator:
+    """Aggregate per-step data/model wall time across a logging window.
+
+    ``timing/data`` used to be the cost of the single step that happened to
+    land on the logging boundary. That step almost always finds the prefetch
+    queue full, so it reads ~0.001s even when the dataloader is stalling on
+    most other steps — on LIBERO-plus it reported 0.001s/step against a real
+    3.1s/step wall clock. Reporting mean/max/p90 over the whole window instead
+    makes a starved input pipeline visible in the logs.
+    """
+
+    def __init__(self):
+        self._data: list[float] = []
+        self._model: list[float] = []
+
+    def add(self, data_time: float, model_time: float) -> None:
+        self._data.append(data_time)
+        self._model.append(model_time)
+
+    def summary(self) -> dict:
+        """Return aggregated timings for the window and start a new one."""
+        if not self._data:
+            return {}
+
+        data = np.asarray(self._data, dtype=np.float64)
+        model = np.asarray(self._model, dtype=np.float64)
+        self._data, self._model = [], []
+
+        total = float(data.sum() + model.sum())
+        return {
+            # Mean, not instantaneous — keeps the existing key meaningful.
+            "timing/data": float(data.mean()),
+            "timing/data_max": float(data.max()),
+            "timing/data_p90": float(np.percentile(data, 90)),
+            "timing/model": float(model.mean()),
+            "timing/model_max": float(model.max()),
+            # Share of wall time spent waiting on the input pipeline. This is
+            # the number to watch: >0.2 means the GPUs are input-starved.
+            "timing/data_fraction": float(data.sum() / total) if total > 0 else 0.0,
+            "timing/step": float((data + model).mean()),
+            "timing/window_steps": int(data.size),
+        }
 
 
 class MemoryMonitor:
@@ -299,6 +344,110 @@ def setup_directories(cfg) -> Path:
     return output_dir
 
 
+def _latest_model_checkpoint(checkpoint_dir: str | Path) -> tuple[str | None, int]:
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        return None, 0
+
+    checkpoints = []
+    for path in checkpoint_dir.iterdir():
+        match = re.match(r"steps_(\d+)_(?:pytorch_model\.pt|model\.safetensors)$", path.name)
+        if match and path.is_file():
+            checkpoints.append((path, int(match.group(1))))
+    if not checkpoints:
+        return None, 0
+
+    checkpoints.sort(key=lambda item: item[1])
+    latest_path, completed_steps = checkpoints[-1]
+    return str(latest_path), completed_steps
+
+
+def _dataloader_state_path(checkpoint_path: str | Path) -> Path:
+    name = Path(checkpoint_path).name
+    match = re.match(r"(steps_\d+)_(?:pytorch_model\.pt|model\.safetensors)$", name)
+    stem = match.group(1) if match else Path(checkpoint_path).stem
+    return Path(checkpoint_path).with_name(f"{stem}_dataloader_state.json")
+
+
+def _prune_old_checkpoints(checkpoint_dir: str | Path, save_total_limit: int | None, logger_fn=logger.info) -> None:
+    if save_total_limit is None or save_total_limit <= 0:
+        return
+
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoints_by_step: dict[int, list[Path]] = {}
+    for path in checkpoint_dir.iterdir():
+        match = re.match(r"steps_(\d+)_(?:pytorch_model\.pt|model\.safetensors)$", path.name)
+        if match and path.is_file():
+            checkpoints_by_step.setdefault(int(match.group(1)), []).append(path)
+
+    steps = sorted(checkpoints_by_step)
+    old_steps = steps[: max(0, len(steps) - save_total_limit)]
+    for step in old_steps:
+        for model_path in checkpoints_by_step[step]:
+            state_path = _dataloader_state_path(model_path)
+            for path in (model_path, state_path):
+                if path.exists():
+                    path.unlink()
+                    logger_fn("Deleted old checkpoint file: %s", path)
+
+
+def _estimated_resume_batches(cfg, completed_steps: int) -> int:
+    grad_accum = int(getattr(cfg.trainer, "gradient_accumulation_steps", 1))
+    eval_interval = int(getattr(cfg.trainer, "eval_interval", 0) or 0)
+    eval_batches = completed_steps // eval_interval if eval_interval > 0 else 0
+    return completed_steps * grad_accum + eval_batches
+
+
+def configure_dataloader_resume(cfg, output_dir: Path) -> None:
+    """Populate VLA data config with deterministic resume controls before workers fork."""
+    data_cfg = cfg.datasets.vla_data
+    if "seed" not in data_cfg or getattr(data_cfg, "seed", None) is None:
+        data_cfg.seed = int(getattr(cfg, "seed", 0))
+
+    data_cfg.marigold_resume_batches_per_rank = 0
+    data_cfg.marigold_resume_steps = 0
+
+    if getattr(data_cfg, "dataset_py", "") != "marigold_data_datasets":
+        return
+    if not bool(getattr(cfg.trainer, "is_resume", False)):
+        return
+
+    checkpoint_path, completed_steps = _latest_model_checkpoint(output_dir / "checkpoints")
+    if checkpoint_path is None:
+        logger.warning("[marigold_data] Resume requested, but no model checkpoint found for dataloader resume.")
+        return
+
+    state_path = _dataloader_state_path(checkpoint_path)
+    resume_batches = None
+    if state_path.exists():
+        try:
+            with state_path.open("r", encoding="utf-8") as f:
+                state = json.load(f)
+            resume_batches = int(state.get("dataloader_batches_consumed", 0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("[marigold_data] Could not read dataloader state %s: %s", state_path, exc)
+
+    if resume_batches is None:
+        resume_batches = _estimated_resume_batches(cfg, completed_steps)
+        logger.warning(
+            "[marigold_data] No dataloader sidecar found at %s; estimating consumed batches as %s "
+            "from completed_steps=%s.",
+            state_path,
+            resume_batches,
+            completed_steps,
+        )
+
+    data_cfg.marigold_resume_batches_per_rank = max(0, int(resume_batches))
+    data_cfg.marigold_resume_steps = int(completed_steps)
+    logger.warning(
+        "[marigold_data] Dataloader resume configured from %s: completed_steps=%s, "
+        "resume_batches_per_rank=%s",
+        checkpoint_path,
+        completed_steps,
+        data_cfg.marigold_resume_batches_per_rank,
+    )
+
+
 def prepare_data(cfg, accelerator, output_dir) -> DataLoader:
     """Prepare VLA training data."""
     logger.info(f"Creating VLA Dataset with Mixture `{cfg.datasets.vla_data.data_mix}`")
@@ -348,8 +497,13 @@ class VLATrainer(TrainerUtils):
         self.lr_scheduler = lr_scheduler
         self.accelerator = accelerator
         self.memory_monitor = MemoryMonitor(cfg, accelerator)
+        self.step_timers = StepTimeAccumulator()
+        self._last_timing_flush_step = -1
 
         self.completed_steps = 0
+        self.dataloader_batches_consumed = int(
+            getattr(self.config.datasets.vla_data, "marigold_resume_batches_per_rank", 0) or 0
+        )
         self.total_batch_size = self._calculate_total_batch_size()
 
     def prepare_training(self):
@@ -507,7 +661,28 @@ class VLATrainer(TrainerUtils):
             summary_data = {"steps": self.completed_steps}
             with open(os.path.join(self.config.output_dir, "summary.jsonl"), "a") as f:
                 f.write(json.dumps(summary_data) + "\n")
+
+            dataloader_state = {
+                "steps": self.completed_steps,
+                "dataloader_batches_consumed": self.dataloader_batches_consumed,
+                "per_device_batch_size": int(self.config.datasets.vla_data.per_device_batch_size),
+                "gradient_accumulation_steps": int(getattr(self.config.trainer, "gradient_accumulation_steps", 1)),
+                "eval_interval": int(getattr(self.config.trainer, "eval_interval", 0) or 0),
+                "num_workers": int(getattr(self.config.datasets.vla_data, "num_workers", 0)),
+                "world_size": int(self.accelerator.num_processes),
+            }
+            state_path = _dataloader_state_path(checkpoint_path + "_pytorch_model.pt")
+            if save_format == "safetensors":
+                state_path = _dataloader_state_path(checkpoint_path + "_model.safetensors")
+            with state_path.open("w", encoding="utf-8") as f:
+                json.dump(dataloader_state, f, indent=2)
+                f.write("\n")
             self.accelerator.print(f"✅ Checkpoint saved at {checkpoint_path}")
+            _prune_old_checkpoints(
+                self.checkpoint_dir,
+                getattr(self.config.trainer, "save_total_limit", None),
+                logger_fn=logger.info,
+            )
 
             if isinstance(self.config, AccessTrackedConfig):
                 logger.info("📊 Saving accessed configuration...")
@@ -548,6 +723,7 @@ class VLATrainer(TrainerUtils):
             )
             batch_vla = next(self.vla_iter)
 
+        self.dataloader_batches_consumed += 1
         return batch_vla
 
     def _log_first_batch_startup(self):
@@ -615,8 +791,16 @@ class VLATrainer(TrainerUtils):
             if self.completed_steps % self.config.trainer.eval_interval == 0:
                 step_metrics = self.eval_action_model(step_metrics)
 
-            step_metrics["timing/data"] = t_end_data - t_start_data
-            step_metrics["timing/model"] = t_end_model - t_start_model
+            self.step_timers.add(t_end_data - t_start_data, t_end_model - t_start_model)
+            # Flush once per logging window. Under gradient accumulation several
+            # consecutive micro-steps share the same completed_steps, so guard on
+            # the last flushed step rather than the modulo alone.
+            if (
+                self.completed_steps % self.config.trainer.logging_frequency == 0
+                and self.completed_steps != self._last_timing_flush_step
+            ):
+                self._last_timing_flush_step = self.completed_steps
+                step_metrics.update(self.step_timers.summary())
             step_metrics.update(self.memory_monitor.collect(self.completed_steps, self.vla_iter))
             self._log_metrics(step_metrics)
 
@@ -913,6 +1097,7 @@ def main(cfg, accelerator: Accelerator) -> None:
 
     output_dir = setup_directories(cfg=cfg)
     vla = build_framework(cfg)
+    configure_dataloader_resume(cfg, output_dir)
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)
 

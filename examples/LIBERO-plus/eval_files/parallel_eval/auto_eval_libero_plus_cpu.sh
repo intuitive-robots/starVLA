@@ -22,6 +22,9 @@ export LP_NUM_THREADS="${LP_NUM_THREADS:-8}"
 export PYTHONPATH="${PYTHONPATH:-}:${LIBERO_HOME}"
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
+# See auto_eval_libero_plus.sh: keep numba's JIT cache off shared NFS.
+export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${TMPDIR:-/tmp}/starvla_numba_cache}"
+
 LIBERO_PLUS_CONDA_ENV="${LIBERO_PLUS_CONDA_ENV:-libero-plus}"
 POLICY_SERVER_CONDA_ENV="${POLICY_SERVER_CONDA_ENV:-starVLA}"
 your_ckpt="${your_ckpt:-path_to_checkpoint}"
@@ -72,7 +75,9 @@ cleanup() {
 wait_for_port() {
     local _host="$1"
     local port="$2"
-    local attempts=60
+    # See auto_eval_libero_plus.sh: server load is slow (registry scan + ckpt),
+    # and multiple servers/GPU load concurrently, so 60s isn't enough.
+    local attempts="${WAIT_FOR_PORT_ATTEMPTS:-600}"
 
     for ((attempt=1; attempt<=attempts; attempt++)); do
         if ss -ltnH "( sport = :${port} )" 2>/dev/null | grep -q ":${port}"; then
@@ -162,7 +167,9 @@ mkdir -p "${server_log_dir}"
 for ((i=0; i<num_gpus; i++)); do
     gpu_id=${gpu_ids[$i]}
     port=$((base_port + i))
-    log_file="${server_log_dir}/gpu_${gpu_id}_port_${port}.log"
+    # partition_idx prefix: see auto_eval_libero_plus.sh -- avoids cross-node
+    # filename collisions in the shared output_dir under multi-node runs.
+    log_file="${server_log_dir}/partition${partition_idx}_gpu_${gpu_id}_port_${port}.log"
     server_logs+=("${log_file}")
     echo "Launching policy server on gpu=${gpu_id}, port=${port}, log=${log_file}"
     setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} CUDA_LAUNCH_BLOCKING=1 conda run --no-capture-output -n \"${POLICY_SERVER_CONDA_ENV}\" python deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\"" > "${log_file}" 2>&1 &

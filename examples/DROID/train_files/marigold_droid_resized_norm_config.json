@@ -1,0 +1,37 @@
+{
+  "target_fps": 15,
+  "num_proprio": 1,
+  "proprio_frame_stride": 1,
+  "num_actions": 20,
+  "action_frame_stride": 1,
+  "image_relative_frames": [0],
+  "frame_stride_train": 1,
+  "frame_stride_eval": 64,
+  "videos_hw": {
+    "camera_wrist": [180, 320],
+    "camera_external_left": [180, 320],
+    "camera_external_right": [180, 320]
+  },
+  "camera_decode_groups": [
+    ["camera_external_left", "camera_external_right"],
+    ["camera_wrist"]
+  ],
+  "image_augmentation": {
+    "camera_wrist": [],
+    "camera_external_left": [],
+    "camera_external_right": []
+  },
+  "datasets": [
+    {
+      "root": "/e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/DROID",
+      "dataset_type": "DROIDResized",
+      "embodiment_key": "franka_robotiq_gripper",
+      "weight_default": 1.0,
+      "include": ["droid_resized_success"],
+      "exclude": [],
+      "weights": {},
+      "filter_successful_trajectories": true,
+      "success_indicator_key": "stats/is_episode_successful/min"
+    }
+  ]
+}

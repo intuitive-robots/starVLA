@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=07:30:00
+#SBATCH --time=09:30:00
 #SBATCH --output=slurm_logs/starvla_%j.out
 #SBATCH --error=slurm_logs/starvla_%j.err
 #SBATCH --partition=booster
