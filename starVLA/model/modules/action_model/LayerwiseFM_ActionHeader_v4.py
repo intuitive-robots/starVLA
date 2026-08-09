@@ -1,4 +1,4 @@
-"""QwenPI_v4 action head backed by the fixed dual-attention DiT."""
+"""QwenPI_v4 action head backed by the fused self/cross-attention DiT."""
 
 import torch
 from torch import nn
@@ -15,7 +15,7 @@ from starVLA.model.modules.action_model.flow_matching_head.cross_attention_dit_v
 
 
 class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
-    """Layer-wise flow-matching head with QwenPI_v4's fixed DiT.
+    """Layer-wise flow-matching head with QwenPI_v4's fused DiT.
 
     The sampling and loss code is shared with the existing layer-wise head,
     while construction is intentionally separate so QwenPI_v4 cannot fall
