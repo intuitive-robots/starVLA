@@ -2,17 +2,20 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The fixed dual-attention DiT used by :mod:`QwenPI_v4`.
+"""The fused self/cross-attention DiT used by :mod:`QwenPI_v4`.
 
 This module deliberately has its own implementation instead of extending the
-legacy DiT.  A QwenPI_v4 transformer block always runs the same sequence:
+legacy DiT.  A QwenPI_v4 transformer block uses action/state tokens as the
+query and concatenates them with the VLM tokens for the key/value sequence:
 
-    self-attention -> VLM cross-attention -> feed-forward
+    query = action/state tokens
+    key/value = [action/state tokens, VLM tokens]
 
-There is no interleaving/mode flag in this implementation.  The
-``encoder_attention_mask`` is passed to the VLM cross-attention in every
-block; the self-attention has its own optional mask and never consumes the
-VLM encoder mask.
+This fuses action-token self-attention and VLM cross-attention into one
+attention operation per block.  The action-token portion of the key/value
+mask is all valid, while the VLM portion uses ``encoder_attention_mask``.
+There is no interleaving/mode flag in this implementation and the VLM model
+itself is not changed.
 """
 
 from typing import Optional
@@ -72,7 +75,7 @@ class QwenPIv4AdaLayerNorm(nn.Module):
 
 
 class QwenPIv4TransformerBlock(nn.Module):
-    """One fixed self-attention + cross-attention + FFN transformer block."""
+    """One fused action/VLM attention block followed by an FFN."""
 
     def __init__(
         self,
@@ -125,26 +128,14 @@ class QwenPIv4TransformerBlock(nn.Module):
                 elementwise_affine=norm_elementwise_affine,
             )
 
-        # This attention is always self-attention.  In particular, it never
-        # receives encoder_attention_mask from the VLM.
-        self.self_attn = Attention(
-            query_dim=dim,
-            heads=num_attention_heads,
-            dim_head=attention_head_dim,
-            dropout=dropout,
-            bias=attention_bias,
-            cross_attention_dim=None,
-            upcast_attention=upcast_attention,
-            out_bias=attention_out_bias,
+        # A single cross-attention module receives action/state tokens and VLM
+        # tokens as its KV sequence.  If a GR00T-style configuration keeps a
+        # different cross-attention input dimension, project action/state KV
+        # tokens to that dimension before concatenation.
+        self.action_kv_proj = (
+            nn.Identity() if cross_attention_dim == dim else nn.Linear(dim, cross_attention_dim)
         )
-
-        self.norm2 = nn.LayerNorm(
-            dim,
-            eps=norm_eps,
-            elementwise_affine=norm_elementwise_affine,
-        )
-        # This attention is always VLM cross-attention.
-        self.cross_attn = Attention(
+        self.fused_cross_attn = Attention(
             query_dim=dim,
             heads=num_attention_heads,
             dim_head=attention_head_dim,
@@ -173,7 +164,6 @@ class QwenPIv4TransformerBlock(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        self_attention_mask: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         temb: Optional[torch.Tensor] = None,
@@ -181,7 +171,9 @@ class QwenPIv4TransformerBlock(nn.Module):
         if encoder_hidden_states is None:
             raise ValueError("QwenPI_v4 requires VLM encoder states in every transformer block.")
 
-        # 1. Self-attention over action/state/future tokens.
+        # 1. Fused attention: action/state queries attend to both action/state
+        # keys and valid VLM keys.  The action-token mask is deliberately all
+        # ones; only VLM padding positions are masked out.
         if self.norm_type == "ada_norm":
             norm_hidden_states = self.norm1(hidden_states, temb)
         else:
@@ -189,37 +181,67 @@ class QwenPIv4TransformerBlock(nn.Module):
         if self.pos_embed is not None:
             norm_hidden_states = self.pos_embed(norm_hidden_states)
 
-        self_output = self.self_attn(
+        action_kv = self.action_kv_proj(norm_hidden_states)
+        fused_encoder_hidden_states = torch.cat(
+            [action_kv, encoder_hidden_states],
+            dim=1,
+        )
+        fused_attention_mask = self._build_fused_attention_mask(
+            encoder_attention_mask,
+            batch_size=hidden_states.shape[0],
+            action_length=hidden_states.shape[1],
+            device=hidden_states.device,
+        )
+        attn_output = self.fused_cross_attn(
             norm_hidden_states,
-            encoder_hidden_states=None,
-            attention_mask=self_attention_mask,
+            encoder_hidden_states=fused_encoder_hidden_states,
+            attention_mask=fused_attention_mask,
         )
         if self.final_dropout is not None:
-            self_output = self.final_dropout(self_output)
-        hidden_states = hidden_states + self_output
+            attn_output = self.final_dropout(attn_output)
+        hidden_states = hidden_states + attn_output
 
-        # 2. Cross-attention over the VLM tokens.  The VLM token mask is kept
-        # separate from the self-attention mask and is applied at every layer.
-        norm_hidden_states = self.norm2(hidden_states)
-        cross_output = self.cross_attn(
-            norm_hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            attention_mask=encoder_attention_mask,
-        )
-        if self.final_dropout is not None:
-            cross_output = self.final_dropout(cross_output)
-        hidden_states = hidden_states + cross_output
-
-        # 3. Feed-forward network.
+        # 2. Feed-forward network.
         ff_output = self.ff(self.norm3(hidden_states))
         hidden_states = hidden_states + ff_output
         if hidden_states.ndim == 4:
             hidden_states = hidden_states.squeeze(1)
         return hidden_states
 
+    @staticmethod
+    def _build_fused_attention_mask(
+        encoder_attention_mask: Optional[torch.Tensor],
+        batch_size: int,
+        action_length: int,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        """Prefix the VLM padding mask with an all-valid action-token mask."""
+        if encoder_attention_mask is None:
+            return None
+        if encoder_attention_mask.ndim != 2:
+            raise ValueError(
+                "QwenPI_v4 fused attention expects a 2D VLM padding mask "
+                "with shape (batch, vlm_tokens)."
+            )
+        if encoder_attention_mask.shape[0] != batch_size:
+            raise ValueError(
+                "QwenPI_v4 fused attention mask batch size does not match "
+                f"hidden_states: {encoder_attention_mask.shape[0]} vs {batch_size}."
+            )
+        action_attention_mask = torch.ones(
+            batch_size,
+            action_length,
+            dtype=encoder_attention_mask.dtype,
+            device=device,
+        )
+        return torch.cat(
+            [action_attention_mask, encoder_attention_mask.to(device=device)],
+            dim=1,
+        )
+
 
 class QwenPIv4DiT(ModelMixin, ConfigMixin):
-    """Independent fixed dual-attention DiT for QwenPI_v4."""
+    """Independent fused self/cross-attention DiT for QwenPI_v4."""
 
     _supports_gradient_checkpointing = True
 
@@ -297,15 +319,15 @@ class QwenPIv4DiT(ModelMixin, ConfigMixin):
         encoder_hidden_states: torch.Tensor,
         timestep: Optional[torch.LongTensor] = None,
         return_all_hidden_states: bool = False,
-        self_attention_mask: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         return_pre_output: bool = False,
     ):
-        """Run every block with self-attention followed by VLM cross-attention.
+        """Run every block with fused action/VLM attention.
 
         ``encoder_hidden_states`` may be one tensor shared by all blocks or a
         list/tuple with one VLM hidden state tensor per block.  In both cases,
-        ``encoder_attention_mask`` is forwarded to every block's cross-attn.
+        ``encoder_attention_mask`` masks only the VLM segment of every block's
+        concatenated key/value sequence.  Action/state keys are always valid.
         """
         if timestep is None:
             raise ValueError("QwenPI_v4 requires a timestep tensor.")
@@ -331,7 +353,6 @@ class QwenPIv4DiT(ModelMixin, ConfigMixin):
             )
             hidden_states = block(
                 hidden_states,
-                self_attention_mask=self_attention_mask,
                 encoder_hidden_states=block_encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
                 temb=temb,

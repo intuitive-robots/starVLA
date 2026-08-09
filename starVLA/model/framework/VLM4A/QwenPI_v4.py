@@ -1,9 +1,9 @@
-"""QwenPI_v4: Qwen VLM with a fixed dual-attention layer-wise DiT.
+"""QwenPI_v4: Qwen VLM with a fused self/cross-attention layer-wise DiT.
 
 QwenPI_v4 keeps the QwenPI_v3 VLM input, layer selection, projectors, flow
 matching loss, sampler, and VLM-token masking.  Its action head is separate:
-every DiT block always performs self-attention followed by VLM cross-attention
-and then an FFN.
+every DiT block uses action/state tokens as queries and the concatenation of
+action/state and VLM tokens as keys/values, followed by an FFN.
 """
 
 from dataclasses import dataclass, field
@@ -59,7 +59,7 @@ class QwenPI_v4DefaultConfig(QwenPI_v3DefaultConfig):
 
 @FRAMEWORK_REGISTRY.register("QwenPI_v4")
 class Qwen_PI_v4(Qwen_PI_v3):
-    """Qwen VLM + independent fixed self/cross-attention DiT action head."""
+    """Qwen VLM + independent fused self/cross-attention DiT action head."""
 
     def __init__(self, config: Optional[dict] = None, **kwargs) -> None:
         # QwenPI_v3's methods are reused for the VLM-side data flow, but its
