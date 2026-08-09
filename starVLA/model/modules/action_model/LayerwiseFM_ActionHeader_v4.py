@@ -1,5 +1,6 @@
 """QwenPI_v4 action head backed by the fixed dual-attention DiT."""
 
+import torch
 from torch import nn
 
 from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader import (
@@ -92,6 +93,75 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
         )
         self.num_timestep_buckets = action_config.num_timestep_buckets
         self.config = action_config
+
+    def _normalize_encoder_states(self, vl_embs):
+        """Accept QwenPI layer-wise states and GR00T single-layer states.
+
+        QwenPI supplies one encoder hidden-state tensor per DiT block.  The
+        GR00T action head supplies one tensor (the final VLM layer), which is
+        reused by every DiT block.  Keep the broadcast as a list of references
+        so the DiT sees the same fixed per-block interface without copying the
+        encoder activations.
+        """
+        if isinstance(vl_embs, torch.Tensor):
+            return [vl_embs] * len(self.model.transformer_blocks)
+        if isinstance(vl_embs, (list, tuple)):
+            return list(vl_embs)
+        raise TypeError(
+            "QwenPI_v4 expects VLM encoder states as a tensor or a list/tuple "
+            f"of tensors, got {type(vl_embs).__name__}."
+        )
+
+    def forward(
+        self,
+        vl_embs_list,
+        actions: torch.Tensor,
+        state: torch.Tensor = None,
+        encoder_attention_mask=None,
+    ):
+        return super().forward(
+            self._normalize_encoder_states(vl_embs_list),
+            actions,
+            state,
+            encoder_attention_mask=encoder_attention_mask,
+        )
+
+    @torch.no_grad()
+    def predict_action(
+        self,
+        vl_embs_list,
+        state: torch.Tensor = None,
+        encoder_attention_mask=None,
+    ) -> torch.Tensor:
+        return super().predict_action(
+            self._normalize_encoder_states(vl_embs_list),
+            state,
+            encoder_attention_mask=encoder_attention_mask,
+        )
+
+    def predict_action_realtime(
+        self,
+        vl_embs_list,
+        state: torch.Tensor = None,
+        prev_action_chunk: torch.Tensor = None,
+        inference_delay: int = 1,
+        mode: str = "pigdm",
+        suffix_length: int | None = None,
+        prefix_attention_schedule: str = "exp",
+        max_guidance_weight: float = 10.0,
+        encoder_attention_mask=None,
+    ) -> torch.Tensor:
+        return super().predict_action_realtime(
+            self._normalize_encoder_states(vl_embs_list),
+            state,
+            prev_action_chunk,
+            inference_delay,
+            mode,
+            suffix_length,
+            prefix_attention_schedule,
+            max_guidance_weight,
+            encoder_attention_mask=encoder_attention_mask,
+        )
 
 
 def get_action_model_v4(config=None):
