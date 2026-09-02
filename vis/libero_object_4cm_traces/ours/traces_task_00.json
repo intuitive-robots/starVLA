@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 0,
+    "episode_idx": 0,
+    "description": "pick up the alphabet soup and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "alphabet_soup_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "alphabet_soup_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "alphabet_soup_1_joint0",
+          "before_xyz": [
+            -0.12,
+            -0.24000000000000002,
+            0.015
+          ],
+          "delta_xy": [
+            0.024526257392779385,
+            -0.031598460378681976
+          ],
+          "after_xyz": [
+            -0.09547374260722061,
+            -0.271598460378682,
+            0.015
+          ]
+        },
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            0.014834922415791669,
+            0.25214198819840145,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.010240531858412763,
+            0.03866693040903083
+          ],
+          "after_xyz": [
+            0.0045943905573789055,
+            0.2908089186074323,
+            0.034999999999999996
+          ]
+        }
+      ]
+    },
+    "model": "ours",
+    "cot_text": "<|trace|>{\"trace_2d\": [[389, 504], [346, 491], [358, 504], [366, 521], [422, 529]]}<|/trace|><|/trace|>",
+    "trace_2d": [
+      [
+        389.0,
+        504.0
+      ],
+      [
+        346.0,
+        491.0
+      ],
+      [
+        358.0,
+        504.0
+      ],
+      [
+        366.0,
+        521.0
+      ],
+      [
+        422.0,
+        529.0
+      ]
+    ]
+  }
+]

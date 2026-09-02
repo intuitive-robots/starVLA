@@ -126,6 +126,7 @@ Tasks (positional):
 
 Optional flags:
   -s, --seed              Eval seed (default: 0, env: ROBOTWIN_SEED)
+  -t, --num-trials        Rollouts per task (default: 100, env: ROBOTWIN_NUM_TRIALS)
   -j, --jobs-per-gpu      Concurrent jobs per GPU (default: 1, env: ROBOTWIN_JOBS_PER_GPU)
   -p, --base-port         First port to allocate (default: 5694, env: ROBOTWIN_BASE_PORT)
       --server-timeout    Seconds to wait for server (default: 600, env: ROBOTWIN_SERVER_TIMEOUT)
@@ -406,6 +407,7 @@ TASK_CONFIG=""
 POLICY_NAME=""
 CKPT_PATH=""
 opt_seed=""
+opt_trials=""
 opt_jobs=""
 opt_port=""
 opt_timeout=""
@@ -417,6 +419,7 @@ while (( $# > 0 )); do
         -n|--name)          POLICY_NAME="$2"; shift 2 ;;
         -c|--ckpt)          CKPT_PATH="$2"; shift 2 ;;
         -s|--seed)          opt_seed="$2"; shift 2 ;;
+        -t|--num-trials)    opt_trials="$2"; shift 2 ;;
         -j|--jobs-per-gpu)  opt_jobs="$2"; shift 2 ;;
         -p|--base-port)     opt_port="$2"; shift 2 ;;
         --server-timeout)   opt_timeout="$2"; shift 2 ;;
@@ -450,6 +453,7 @@ if (( $# == 0 )); then
 fi
 
 ROBOTWIN_SEED="${opt_seed:-${ROBOTWIN_SEED:-0}}"
+ROBOTWIN_NUM_TRIALS="${opt_trials:-${ROBOTWIN_NUM_TRIALS:-100}}"
 ROBOTWIN_JOBS_PER_GPU="${opt_jobs:-${ROBOTWIN_JOBS_PER_GPU:-1}}"
 ROBOTWIN_BASE_PORT="${opt_port:-${ROBOTWIN_BASE_PORT:-5694}}"
 ROBOTWIN_SERVER_TIMEOUT="${opt_timeout:-${ROBOTWIN_SERVER_TIMEOUT:-600}}"
@@ -460,6 +464,7 @@ fi
 STARVLA_PYTHON="$(resolve_python "${STARVLA_PYTHON:-}" "${ROBOTWIN_STARVLA_ENV:-starvla}")"
 ROBOTWIN_PYTHON="$(resolve_python "${ROBOTWIN_PYTHON:-}" "${ROBOTWIN_ENV:-robotwin}")"
 export STARVLA_PYTHON ROBOTWIN_PYTHON
+export ROBOTWIN_NUM_TRIALS
 
 echo "[INFO] starvla python: ${STARVLA_PYTHON}"
 echo "[INFO] robotwin python: ${ROBOTWIN_PYTHON}"
@@ -498,7 +503,7 @@ for gpu_id in "${CUDA_DEVICES[@]}"; do
     done
 done
 
-echo "[INFO] mode=${TASK_CONFIG}  name=${POLICY_NAME}  seed=${ROBOTWIN_SEED}"
+echo "[INFO] mode=${TASK_CONFIG}  name=${POLICY_NAME}  seed=${ROBOTWIN_SEED}  trials_per_task=${ROBOTWIN_NUM_TRIALS}"
 echo "[INFO] ckpt=${CKPT_PATH}"
 echo "[INFO] logs=${LOG_DIR}"
 echo "[INFO] gpus=$(join_arr ',' "${CUDA_DEVICES[@]}")  jobs_per_gpu=${JOBS_PER_GPU}  slots=${TOTAL_SLOTS}"

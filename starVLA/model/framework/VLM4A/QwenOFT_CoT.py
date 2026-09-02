@@ -67,13 +67,43 @@ class _ForceSuffixLogitsProcessor(LogitsProcessor):
     emitted its real, final EOS (same semantics HF's own early-stopping gives).
     """
 
-    def __init__(self, suffix_ids: List[int], eos_token_id: int, cot_budget: int):
+    def __init__(self, suffix_ids: List[int], eos_token_ids, cot_budget: int):
+        """``eos_token_ids``: the model's OWN recognized stop id(s) -- i.e.
+        ``model.generation_config.eos_token_id`` (int or list), NOT
+        ``tokenizer.eos_token_id``. The two can differ (e.g. Qwen-family models
+        often have ``tokenizer.eos_token_id`` pointing at ``<|im_end|>`` while
+        ``generation_config.eos_token_id`` is ``<|endoftext|>`` or a list
+        containing both). HF's own `generate()` loop marks a row "finished" -- and
+        silently overwrites every subsequent token with `pad_token_id`, regardless
+        of what any LogitsProcessor forces -- the moment the SAMPLED token matches
+        `generation_config.eos_token_id`. If we only watch for
+        `tokenizer.eos_token_id` here, a natural emission of the OTHER real eos id
+        during free "cot" generation finishes the row via HF's own bookkeeping
+        without ever reaching our forcing logic, silently discarding the entire
+        forced suffix. Watching the same id(s) HF itself watches closes that gap.
+        """
         self.suffix_ids = suffix_ids
-        self.eos_token_id = eos_token_id
+        self.eos_token_ids = {eos_token_ids} if isinstance(eos_token_ids, int) else set(eos_token_ids)
+        self.eos_token_id = next(iter(self.eos_token_ids))  # canonical id used to force the actual close
         self.cot_budget = max(1, cot_budget)
         self._mode: List[str] = []  # per-row: "cot" | "suffix" | "done"
         self._suffix_pos: List[int] = []
         self._cot_steps: List[int] = []
+
+    def reset(self) -> None:
+        """Clear per-row progress so the next call starts a fresh sequence.
+
+        Required because this object is stateful across steps of ONE generate()
+        call, but callers that retry generate() (e.g. QWen3_5._generate_compiled
+        falling back to eager after a failed compile) may reuse the same kwargs
+        dict -- and therefore the same processor instance -- for the retry. Without
+        an explicit reset, the retry would resume from wherever the aborted first
+        attempt left off instead of the retry's own (fresh) token sequence,
+        silently forcing the wrong tokens at the wrong steps.
+        """
+        self._mode = []
+        self._suffix_pos = []
+        self._cot_steps = []
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
         batch_size = scores.shape[0]
@@ -86,7 +116,7 @@ class _ForceSuffixLogitsProcessor(LogitsProcessor):
         for i in range(batch_size):
             if self._mode[i] == "cot":
                 self._cot_steps[i] += 1
-                wants_to_stop = int(torch.argmax(scores[i]).item()) == self.eos_token_id
+                wants_to_stop = int(torch.argmax(scores[i]).item()) in self.eos_token_ids
                 if wants_to_stop or self._cot_steps[i] >= self.cot_budget:
                     self._mode[i] = "suffix"
                     self._suffix_pos[i] = 0
@@ -108,6 +138,13 @@ class QwenOFT_CoT(Qwenvl_OFT):
     def __init__(self, config: Optional[dict] = None, is_inference: bool = False, **kwargs) -> None:
         super().__init__(config=config, **kwargs)
         self.is_inference = is_inference
+        vla_data_cfg = getattr(getattr(self.config, "datasets", None), "vla_data", None)
+        data_cot_cfg = getattr(vla_data_cfg, "cot", None) if vla_data_cfg is not None else None
+        self.cot_source = str(
+            data_cot_cfg.get("source", "none")
+            if hasattr(data_cot_cfg, "get")
+            else getattr(data_cot_cfg, "source", "none")
+        ).lower()
 
         # Step-based CoT resolver — NullCoTResolver when cot.source is absent/none.
         self.cot_resolver = build_cot_resolver(self.config, is_inference=self.is_inference)
@@ -146,11 +183,32 @@ class QwenOFT_CoT(Qwenvl_OFT):
 
     def _resolve_cot(self, examples: List[dict]) -> Tuple[Optional[list], float]:
         """Resolve per-sample CoT conversations; returns (conversations_or_None, coverage)."""
-        cot_conversations = [
-            self.cot_resolver.resolve(ex.get("trajectory_name", ""), ex.get("frame_index", 0)) for ex in examples
-        ]
+        cot_from_workers = all("cot_conversation" in ex for ex in examples)
+        if cot_from_workers:
+            cot_conversations = [ex.get("cot_conversation") for ex in examples]
+            available = [
+                bool(ex.get("cot_available", conversation is not None))
+                for ex, conversation in zip(examples, cot_conversations)
+            ]
+        else:
+            cot_conversations = [
+                self.cot_resolver.resolve(
+                    ex.get("trajectory_name", ""), ex.get("frame_index", 0)
+                )
+                for ex in examples
+            ]
+            available = [conversation is not None for conversation in cot_conversations]
         has_cot = any(c is not None for c in cot_conversations)
-        coverage = sum(c is not None for c in cot_conversations) / max(len(cot_conversations), 1)
+        if (
+            not has_cot
+            and getattr(self, "training", False)
+            and getattr(self, "cot_source", "none") in {"mapping", "sparc_sqlite"}
+        ):
+            raise RuntimeError(
+                "mapping-backed CoT training reached forward() without a local CoT target; "
+                "the dataloader collator must retain at least one target per rank"
+            )
+        coverage = sum(available) / max(len(available), 1)
         return (cot_conversations if has_cot else None), coverage
 
     def _build_inputs(self, batch_images, instructions, cot_conversations):
@@ -309,18 +367,22 @@ class QwenOFT_CoT(Qwenvl_OFT):
             )
             pred_actions = self.action_model.predict_action(action_queries)
 
-        # Occasional timing log: which pass is actually eating the latency
-        # (CoT generation vs. the single forward + action head).
+        # Timing log: which pass is actually eating the latency (CoT generation
+        # vs. the single forward + action head).
         self._infer_call_count += 1
-        if self._infer_call_count % 5 == 1:
-            t_end = time.time()
-            logger.info(
-                f"[QwenOFT_CoT] predict_action call #{self._infer_call_count}: "
-                f"cot_gen={t_after_cot - t_start:.3f}s, forward+head={t_end - t_after_cot:.3f}s, "
-                f"total={t_end - t_start:.3f}s, batch_size={len(instructions)}"
-            )
+        t_end = time.time()
+        logger.info(
+            f"[QwenOFT_CoT] predict_action call #{self._infer_call_count}: "
+            f"cot_gen={t_after_cot - t_start:.3f}s, forward+head={t_end - t_after_cot:.3f}s, "
+            f"total={t_end - t_start:.3f}s, batch_size={len(instructions)}"
+        )
 
-        return {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        result = {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        # Preserve the generated reasoning for evaluation/debugging. The model
+        # server slices this list per request when serving a batched call.
+        if self.action_tokens_after_cot:
+            result["cot_text"] = cot_text
+        return result
 
     @torch.inference_mode()
     def _predict_action_fast(self, batch_images: list, instructions: list) -> dict:
@@ -345,9 +407,17 @@ class QwenOFT_CoT(Qwenvl_OFT):
         """
         max_new = self._cot_cfg_get("max_new_tokens", 128)
         tokenizer = self.qwen_vl_interface.processor.tokenizer
-        eos_token_id = tokenizer.eos_token_id
-        if eos_token_id is None:
-            raise RuntimeError("fast_action_decode requires tokenizer.eos_token_id to be set.")
+        # NOT tokenizer.eos_token_id: HF's generate() loop uses
+        # model.generation_config.eos_token_id for its own native stopping
+        # bookkeeping, and the two can differ (e.g. tokenizer.eos_token_id may be
+        # <|im_end|> while generation_config's is <|endoftext|>, or a list of
+        # both). See _ForceSuffixLogitsProcessor's docstring for why using the
+        # wrong one silently discards the whole forced suffix.
+        eos_token_ids = self.qwen_vl_interface.model.generation_config.eos_token_id
+        if eos_token_ids is None:
+            eos_token_ids = tokenizer.eos_token_id
+        if eos_token_ids is None:
+            raise RuntimeError("fast_action_decode requires generation_config.eos_token_id to be set.")
 
         if self._suffix_ids is None:
             self._suffix_ids = tokenizer(self._action_prompt_suffix(), add_special_tokens=False)["input_ids"]
@@ -355,7 +425,7 @@ class QwenOFT_CoT(Qwenvl_OFT):
         prompt_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
         prompt_len = prompt_inputs["input_ids"].shape[1]
         cot_budget = max_new - len(self._suffix_ids) - 1  # leave room for suffix + final EOS
-        processor = _ForceSuffixLogitsProcessor(self._suffix_ids, eos_token_id, cot_budget)
+        processor = _ForceSuffixLogitsProcessor(self._suffix_ids, eos_token_ids, cot_budget)
 
         t0 = time.time()
         with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -394,15 +464,22 @@ class QwenOFT_CoT(Qwenvl_OFT):
             pred_actions = self.action_model.predict_action(action_queries)
 
         self._infer_call_count += 1
-        if self._infer_call_count % 5 == 1:
-            logger.info(
-                f"[QwenOFT_CoT] fast predict_action call #{self._infer_call_count}: "
-                f"{elapsed:.3f}s single-pass (cot+action, no re-encode), "
-                f"cot_lens={processor._cot_steps}, gen_len={input_ids.shape[1] - prompt_len}, "
-                f"batch_size={len(instructions)}"
-            )
+        logger.info(
+            f"[QwenOFT_CoT] fast predict_action call #{self._infer_call_count}: "
+            f"{elapsed:.3f}s single-pass (cot+action, no re-encode), "
+            f"cot_lens={processor._cot_steps}, gen_len={input_ids.shape[1] - prompt_len}, "
+            f"batch_size={len(instructions)}"
+        )
 
-        return {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        # Decode only the freely generated CoT prefix, excluding the forced
+        # action-token suffix used by this opt-in fast path.
+        cot_text = []
+        for row, cot_len in zip(input_ids[:, prompt_len:], processor._cot_steps):
+            cot_text.append(tokenizer.decode(row[:cot_len], skip_special_tokens=True))
+        return {
+            "normalized_actions": pred_actions.detach().cpu().numpy(),
+            "cot_text": cot_text,
+        }
 
     def _cot_human_prompt(self) -> str:
         """The configured CoT prompt (``{instruction}`` is substituted downstream)."""

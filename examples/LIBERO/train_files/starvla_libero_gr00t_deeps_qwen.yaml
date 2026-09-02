@@ -1,0 +1,116 @@
+# Plain GR00T (NO CoT) trained on base LIBERO -- the baseline cell that was
+# missing from the 2x2. Every other base-LIBERO GR00T checkpoint is a CoT
+# variant, and the only non-CoT base-LIBERO runs are QwenOFT, so "GR00T without
+# reasoning on base LIBERO" has never actually been measured.
+#
+# Derived from starvla_cotrain_libero_gr00t_cot_trace_ours_qwen.yaml with the
+# CoT machinery removed: framework QwenGR00T_CoT -> QwenGR00T, and the
+# framework.cot / datasets.vla_data.cot / CoT_prompt / trainer.loss_scale.cot
+# blocks dropped.
+# LIBERO (libero_mixed) + GR00T DiT-B flow-matching action head, no reasoning.
+#
+# vs starvla_cotrain_libero.yaml (plain OFT base): action head MLP -> DiT-B.
+# State is dropped (state_dim 0 / include_state false), matching the other
+# GR00T configs in this directory.
+run_id: libero_qwen08b_gr00t_deeps
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: niblank
+wandb_project: starvla_libero
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenGR00T
+
+  readout_tokens:
+    enabled:    false
+    num_tokens: 32
+    num_layers: 2
+    num_heads:  8
+    ffn_dim:    0
+    dropout:    0.0
+
+  qwenvl:
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
+    attn_implementation: sdpa
+    vl_hidden_dim: 2048
+  action_model:
+    action_dim: 7          # LIBERO delta eef (6) + gripper (1)
+    state_dim: 0
+    action_horizon: 8
+    action_model_type: DiT-B
+    hidden_size: 768
+    action_hidden_dim: 768
+    add_pos_embed: True
+    max_seq_len: 1024
+    diffusion_model_cfg:
+      num_layers: 12
+      output_dim: 768
+      dropout: 0.1
+
+datasets:
+  vlm_data:
+    dataset_py: vlm_datasets
+    dataformat: llava_json
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    data_flatten: false
+    base_interval: 2
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    per_device_batch_size: 4
+    num_workers: 4
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/libero_lerobot
+    data_mix: libero_mixed
+    action_type: delta_qpos
+    sequential_step_sampling: False
+
+
+
+    per_device_batch_size: 32
+    load_all_data_for_training: true
+    video_backend: decord
+    lerobot_version: "v3.0"
+    num_workers: 8
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    include_state: false
+
+trainer:
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  save_interval: 5000
+  eval_interval: 1000
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 100
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08

@@ -35,7 +35,14 @@ def main() -> None:
 
         for f in shard_files:
             with open(f, encoding="utf-8") as fh:
-                d = json.load(fh)
+                try:
+                    d = json.load(fh)
+                except json.JSONDecodeError:
+                    # Stray/empty/truncated file (e.g. debris from a killed
+                    # prior run, or a still-in-flight write) -- skip it rather
+                    # than crashing the whole aggregation over one shard.
+                    print(f"  [WARN] {suite_dir.name}: unreadable shard {f.name}, skipping")
+                    continue
             total += d["total_count"]
             success += d["success_count"]
             covered.append((d["start_idx"], d["end_idx"]))
@@ -79,8 +86,13 @@ def main() -> None:
               f"{grand_success / grand_total * 100:.1f}% ===" if grand_total else "")
 
     out = root / "overall_results.json"
+    merged = {}
+    if out.is_file():
+        with open(out, encoding="utf-8") as f:
+            merged = json.load(f)
+    merged.update(overall)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump(overall, f, indent=2)
+        json.dump(merged, f, indent=2)
     print(f"\nWrote {out}")
 
 

@@ -23,6 +23,7 @@ import math
 import os
 import pathlib
 import random
+import re
 import time
 from pathlib import Path
 
@@ -58,6 +59,17 @@ from vla_arena.vla_arena.utils.utils import (
 
 VLA_ARENA_DUMMY_ACTION = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]
 VLA_ARENA_ENV_RESOLUTION = 256  # resolution used to render environment images
+
+# How many times to rebuild the env when the GL context returns blank frames.
+# Default 1: rebuilding does not in practice recover a context that is broken at
+# the process level, and each retry re-runs a full 300-step episode. At 3 this
+# turned "a few bad episodes" into whole units timing out and dying without
+# writing a shard. Override with STARVLA_RENDER_MAX_RETRIES.
+RENDER_MAX_RETRIES = int(os.environ.get("STARVLA_RENDER_MAX_RETRIES", "1"))
+
+# Resume support: skip a unit whose shard already exists and parses. Env-driven
+# so re-running a partially complete job needs no harness change.
+RESUME_EVAL = os.environ.get("STARVLA_EVAL_RESUME", "").lower() in ("1", "true", "yes")
 
 # Task suites available in VLA-Arena
 VLA_ARENA_SUITES = [
@@ -123,6 +135,83 @@ def _binarize_gripper_open(open_val: np.ndarray | float) -> np.ndarray:
     return np.asarray([bin_val], dtype=np.float32)
 
 
+_TRACE_RE = re.compile(r"<\|trace\|>(.*?)<\|/trace\|>", re.DOTALL)
+
+
+def _parse_trace(cot_text: str | None) -> list[tuple[float, float]]:
+    """Pull the 2D trace out of a CoT string as normalized 0-1 coordinates.
+
+    Training targets encode points in a 0-1000 grid over the image the model was
+    shown, so dividing by 1000 makes them resolution-independent. Returns [] for
+    anything unparseable -- overlay is diagnostic and must never break a rollout.
+    """
+    if not cot_text:
+        return []
+    m = _TRACE_RE.search(cot_text)
+    if not m:
+        return []
+    arr = re.search(r"\[\s*\[.*?\]\s*\]", m.group(1), re.DOTALL)
+    if not arr:
+        return []
+    nums = re.findall(r"-?\d+(?:\.\d+)?", arr.group(0))
+    return [
+        (float(nums[i]) / 1000.0, float(nums[i + 1]) / 1000.0)
+        for i in range(0, len(nums) - 1, 2)
+    ]
+
+
+def _overlay_trace(frame: np.ndarray, points, fresh: bool = False) -> np.ndarray:
+    """Draw a predicted trace on a copy of `frame`. Never mutates the input.
+
+    The frame handed to the policy must stay pixel-identical, so this always
+    copies. Points are colour-graded start (green) -> end (red) so the direction
+    of the predicted motion is readable, and the frame where the chunk was
+    re-predicted gets a white border.
+    """
+    if not points:
+        return frame
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return frame
+
+    img = Image.fromarray(frame.copy())
+    draw = ImageDraw.Draw(img)
+    h, w = frame.shape[:2]
+    px = [(max(0.0, min(1.0, x)) * (w - 1), max(0.0, min(1.0, y)) * (h - 1)) for x, y in points]
+
+    n = max(len(px) - 1, 1)
+    for i in range(len(px) - 1):
+        f = i / n
+        draw.line([px[i], px[i + 1]], fill=(int(255 * f), int(255 * (1 - f)), 40), width=2)
+    for i, (x, y) in enumerate(px):
+        f = i / max(len(px) - 1, 1)
+        r = 3.5 if i in (0, len(px) - 1) else 2.0
+        draw.ellipse([x - r, y - r, x + r, y + r],
+                     fill=(int(255 * f), int(255 * (1 - f)), 40), outline=(255, 255, 255))
+    if fresh:
+        draw.rectangle([0, 0, w - 1, h - 1], outline=(255, 255, 255), width=2)
+    return np.asarray(img)
+
+
+_TRACE_WARNED = [False]
+
+
+def _warn_if_no_trace(cot_text, points) -> None:
+    """Overlay silently produces plain video when no trace reaches the client --
+    e.g. a non-CoT checkpoint, or a client that drops the server's cot_text.
+    Say so once instead of leaving the user to notice from the mp4s."""
+    if _TRACE_WARNED[0]:
+        return
+    if not cot_text:
+        logging.warning("[overlay_trace] enabled but the policy returned no cot_text -- "
+                        "video will be unannotated. Needs framework.cot.generate_at_inference=true.")
+        _TRACE_WARNED[0] = True
+    elif not points:
+        logging.warning("[overlay_trace] cot_text has no parseable <|trace|> block: %r", cot_text[:120])
+        _TRACE_WARNED[0] = True
+
+
 def _get_vla_arena_env(task, resolution: int, add_noise: bool, adjust_light: bool,
                        randomize_color: bool, camera_offset: bool):
     """Initialise a VLA-Arena OffScreenRenderEnv for the given task."""
@@ -170,6 +259,14 @@ class Args:
     num_trials_per_task: int = 10
     """Number of rollout episodes per task."""
 
+    task_start: int = 0
+    """First task index to run (inclusive). Lets the parallel harness split a
+    suite across workers instead of one worker owning a whole (suite, level)."""
+
+    task_end: int = -1
+    """Last task index to run (EXCLUSIVE). -1 = run through the end of the suite.
+    Clamped to the suite's task count, so an over-wide range is safe."""
+
     env_img_res: int = 256
     """Resolution for rendering environment images."""
 
@@ -204,6 +301,17 @@ class Args:
     save_video_mode: str = "first_success_failure"
     """'all' | 'first_success_failure' | 'none'"""
 
+    overlay_trace: bool = False
+    """Draw the model's generated 2D trace on the saved rollout video. The trace
+    is re-predicted once per action chunk and held for the frames in between;
+    the frame where it was regenerated is marked with a white border. Requires
+    an explicit-CoT checkpoint (framework.cot.generate_at_inference=true) --
+    silently a no-op otherwise, since no trace comes back from the server."""
+
+    results_json: str = ""
+    """Write per-suite results to this JSON path. Required for the parallel/
+    multi-node harness, which merges one shard file per worker. Empty = don't write."""
+
     use_wandb: bool = False
     wandb_entity: str = "your-wandb-entity"
     wandb_project: str = "starVLA_VLA_Arena"
@@ -227,8 +335,11 @@ def _run_episode(
     episode_idx: int,
     suite_name: str,
     task_level: int,
-) -> tuple[bool, list, float]:
-    """Run a single rollout episode and return (success, replay_images, cost)."""
+) -> tuple[bool, list, float, bool]:
+    """Run one rollout episode -> (success, replay_images, cost, render_ok).
+
+    render_ok is False when the offscreen GL context handed us blank frames; the
+    caller must discard the episode and retry rather than record a failure."""
 
     # Reset env and set initial state
     env.reset()
@@ -278,7 +389,24 @@ def _run_episode(
 
             # Rotate 180° to match training pre-processing
             img = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
-            replay_images.append(img)
+            wrist_img = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
+            # Appended after the policy call below when overlaying, so the frame
+            # can carry the trace that was generated from it.
+            if not args.overlay_trace:
+                replay_images.append(img)
+
+            # A broken offscreen GL context returns all-black frames with no error,
+            # and this same array is what the policy sees -- the episode would burn
+            # every step and score as an ordinary failure. Bail out on the first
+            # real observation instead: the caller rebuilds the env and retries, so
+            # a bad context costs one reset rather than a fabricated failure.
+            if step == 0 and float(img.mean()) < 1.0:
+                logging.error(
+                    "[RENDER] first observation is essentially black (mean=%.4f) -- the "
+                    "GL context is broken. Aborting episode for retry.",
+                    float(img.mean()),
+                )
+                return False, [], 0.0, False
 
             state = np.concatenate((
                 obs["robot0_eef_pos"],
@@ -286,13 +414,27 @@ def _run_episode(
                 obs["robot0_gripper_qpos"],
             ))
 
+            # Both streams are required: VLAArenaFrankaDataConfig.video_keys is
+            # ["video.primary_image", "video.wrist_image"], so a policy trained on
+            # this config expects agentview AND wrist, in that order (same as
+            # examples/LIBERO/eval_files/eval_libero.py). Sending only agentview
+            # is a train/test mismatch that silently drives success rate to 0.
             example_dict = {
-                "image": [img],
+                "image": [img, wrist_img],
                 "lang": effective_description,
             }
 
             response = client_model.step(example=example_dict, step=step)
             raw_action = response["raw_action"]
+
+            if args.overlay_trace:
+                # `img` itself is never modified -- _overlay_trace copies -- so the
+                # observation the policy just consumed stays byte-identical.
+                _pts = _parse_trace(response.get("cot_text"))
+                _warn_if_no_trace(response.get("cot_text"), _pts)
+                replay_images.append(
+                    _overlay_trace(img, _pts, fresh=bool(response.get("cot_is_fresh")))
+                )
 
             world_vector = np.asarray(raw_action["world_vector"], dtype=np.float32).reshape(-1)
             rotation_delta = np.asarray(raw_action["rotation_delta"], dtype=np.float32).reshape(-1)
@@ -333,7 +475,7 @@ def _run_episode(
         traceback.print_exc()
         logging.warning(f"Episode error: {exc}")
 
-    return success, replay_images, cost
+    return success, replay_images, cost, True
 
 
 def eval_vla_arena(args: Args) -> dict:
@@ -343,6 +485,24 @@ def eval_vla_arena(args: Args) -> dict:
     )
     logger = logging.getLogger(__name__)
     logger.info(f"Arguments: {json.dumps(dataclasses.asdict(args), indent=4)}")
+
+    # Resume: a unit whose shard already exists and parses is done. Checked before
+    # the env/benchmark is built so a skipped unit costs no GPU and no MuJoCo
+    # startup -- which is what makes re-running a partially complete job cheap.
+    if RESUME_EVAL and args.results_json:
+        existing = pathlib.Path(args.results_json)
+        if existing.exists():
+            try:
+                with open(existing) as f:
+                    done = json.load(f)
+                if done:
+                    logger.info(
+                        f"[resume] {existing.name} already has {len(done)} result(s) -- skipping unit"
+                    )
+                    return done
+                logger.warning(f"[resume] {existing.name} is empty -- re-running")
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning(f"[resume] {existing.name} unreadable ({exc}) -- re-running")
 
     set_seed_everywhere(args.seed)
 
@@ -402,12 +562,27 @@ def eval_vla_arena(args: Args) -> dict:
         # long_horizon at level 0 has 10 tasks; all other suites have 5 per level
         num_tasks = 10 if (suite_name == "long_horizon" and task_level == 0) else 5
 
+        # Optional task slice, so several workers can share one (suite, level).
+        # Clamped rather than validated: partitioners deal fixed-width ranges and
+        # the last one routinely overhangs the end of a short suite.
+        t_start = max(0, args.task_start)
+        t_end = num_tasks if args.task_end < 0 else min(args.task_end, num_tasks)
+        task_ids = list(range(t_start, t_end))
+        if not task_ids:
+            logger.warning(
+                f"[{suite_name}] task range [{t_start}, {t_end}) is empty for "
+                f"{num_tasks} tasks – skipping suite"
+            )
+            continue
+        if (t_start, t_end) != (0, num_tasks):
+            logger.info(f"[{suite_name}] running task slice [{t_start}, {t_end}) of {num_tasks}")
+
         total_episodes = 0
         total_successes = 0
         total_costs = 0.0
         rng = np.random.default_rng(args.seed)
 
-        for task_id in tqdm.tqdm(range(num_tasks), desc=f"{suite_name} tasks"):
+        for task_id in tqdm.tqdm(task_ids, desc=f"{suite_name} tasks"):
             task = task_suite.get_task_by_level_id(task_level, task_id)
             if task is None:
                 logger.warning(f"Task level={task_level} id={task_id} not found – skipping")
@@ -464,17 +639,47 @@ def eval_vla_arena(args: Args) -> dict:
                 logger.info(f"Starting episode {task_episodes + 1}...")
                 start_time = time.time()
 
-                success, replay_images, cost = _run_episode(
-                    env=env,
-                    task_description=task_description,
-                    client_model=client_model,
-                    args=args,
-                    replacements_dict=replacements_dict,
-                    initial_state=initial_state,
-                    episode_idx=episode_idx,
-                    suite_name=suite_name,
-                    task_level=task_level,
-                )
+                # Offscreen GL contexts occasionally come up broken and hand back
+                # blank frames -- observed as a burst shortly after many workers
+                # start at once. Rebuilding the env gets a fresh context; without
+                # this the episode would run blind and be recorded as a failure.
+                for attempt in range(RENDER_MAX_RETRIES + 1):
+                    success, replay_images, cost, render_ok = _run_episode(
+                        env=env,
+                        task_description=task_description,
+                        client_model=client_model,
+                        args=args,
+                        replacements_dict=replacements_dict,
+                        initial_state=initial_state,
+                        episode_idx=episode_idx,
+                        suite_name=suite_name,
+                        task_level=task_level,
+                    )
+                    if render_ok:
+                        break
+                    if attempt == RENDER_MAX_RETRIES:
+                        logger.error(
+                            f"[RENDER] {suite_name} task {task_id} ep {episode_idx}: still blank "
+                            f"after {RENDER_MAX_RETRIES} rebuilds -- recording as failure. "
+                            f"This result is NOT trustworthy."
+                        )
+                        break
+                    logger.warning(
+                        f"[RENDER] rebuilding env (attempt {attempt + 1}/{RENDER_MAX_RETRIES})"
+                    )
+                    try:
+                        env.close()
+                    except Exception:
+                        pass
+                    time.sleep(2.0 * (attempt + 1))
+                    env = _get_vla_arena_env(
+                        task,
+                        resolution=args.env_img_res,
+                        add_noise=args.add_noise,
+                        adjust_light=args.adjust_light,
+                        randomize_color=args.randomize_color,
+                        camera_offset=args.camera_offset,
+                    )
 
                 elapsed = time.time() - start_time
                 logger.info(
@@ -556,11 +761,31 @@ def eval_vla_arena(args: Args) -> dict:
             "num_episodes": total_episodes,
             "num_successes": total_successes,
             "task_level": task_level,
+            "task_start": t_start,
+            "task_end": t_end,
         }
 
     if args.use_wandb:
         import wandb
         wandb.finish()
+
+    if args.results_json:
+        # One shard file per worker; the parallel harness merges them. Keys are
+        # "<suite>/L<level>" (whole suite) or "<suite>/L<level>/T<start>-<end>"
+        # (task slice). The task segment is essential: without it two workers
+        # sharing a (suite, level) emit the same key and the aggregator, which
+        # keeps the first of any duplicate, would silently discard one of them.
+        out = pathlib.Path(args.results_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {}
+        for suite, res in all_results.items():
+            key = f"{suite}/L{res.get('task_level', args.task_level)}"
+            if (args.task_start, args.task_end) != (0, -1):
+                key += f"/T{res['task_start']}-{res['task_end']}"
+            payload[key] = res
+        with open(out, "w") as f:
+            json.dump(payload, f, indent=2)
+        logger.info(f"Wrote results shard -> {out}")
 
     return all_results
 

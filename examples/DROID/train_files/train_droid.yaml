@@ -90,6 +90,9 @@ datasets:
     worker_torch_num_threads: 1
     include_state: true
     obs_image_size: [180, 320]
+    # Joint 0.95 crop, resize, +/-5 degree rotation and color jitter. If a
+    # coordinate-bearing cot.mapping is configured, its labels are rewritten too.
+    augmentation: crop_photometric
     sample_language: true
     sample_video_groups:
       - [video.exterior_1_left, video.exterior_2_left]

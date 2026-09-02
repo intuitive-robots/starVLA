@@ -16,10 +16,12 @@ from starVLA.dataloader.gr00t_lerobot.transform.state_action import (
 from starVLA.dataloader.gr00t_lerobot.transform.video import (
     VideoColorJitter,
     VideoCrop,
+    VideoRandomRotation,
     VideoResize,
     VideoToNumpy,
     VideoToTensor,
 )
+from starVLA.dataloader.cot_augmentation import CoTVideoAugment
 # from gr00t.model.transforms import GR00TTransform
 
 
@@ -513,6 +515,115 @@ class Libero4in1DataConfig:
         ),
         ]
 
+        return ComposedModalityTransform(transforms=transforms)
+
+###########################################################################################
+
+class VLABenchFrankaDataConfig:
+    """Official VLABench LeRobot-v3 post-training data.
+
+    The seven action values are absolute robot-frame EEF xyz/euler plus binary gripper,
+    unlike LIBERO's delta EEF actions.  Flow matching still uses the same 7-D/16-step head;
+    only the dataset semantics and normalization statistics differ.
+    """
+
+    video_keys = [
+        "video.primary_image",
+        "video.wrist_image",
+    ]
+    state_keys = [
+        "state.x",
+        "state.y",
+        "state.z",
+        "state.roll",
+        "state.pitch",
+        "state.yaw",
+        "state.gripper",
+    ]
+    action_keys = [
+        "action.x",
+        "action.y",
+        "action.z",
+        "action.roll",
+        "action.pitch",
+        "action.yaw",
+        "action.gripper",
+    ]
+    language_keys = ["annotation.human.action.task_description"]
+    observation_indices = [0]
+    action_indices = list(range(16))
+    state_indices = list(range(-16, 0))
+
+    def modality_config(self, action_horizon: int | None = None):
+        action_indices = list(range(action_horizon)) if action_horizon else self.action_indices
+        return {
+            "video": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.video_keys,
+            ),
+            "state": ModalityConfig(
+                delta_indices=self.state_indices,
+                modality_keys=self.state_keys,
+            ),
+            "action": ModalityConfig(
+                delta_indices=action_indices,
+                modality_keys=self.action_keys,
+            ),
+            "language": ModalityConfig(
+                delta_indices=self.observation_indices,
+                modality_keys=self.language_keys,
+            ),
+        }
+
+    def transform(self, data_cfg: dict | None = None):
+        """Use the same OpenPI-style worker augmentation as the LIBERO ERVLA arms."""
+        data_cfg = data_cfg or {}
+        augmentation = str(data_cfg.get("augmentation", "none")).lower()
+        allowed = {"none", "photometric", "crop_photometric"}
+        if augmentation not in allowed:
+            raise ValueError(
+                f"unknown VLABench augmentation {augmentation!r}; expected one of {sorted(allowed)}"
+            )
+        transforms = []
+        if augmentation != "none":
+            transforms.extend(
+                [
+                    # This transform also handles conversation=None, ensuring the B baseline
+                    # gets the exact same sampled visual transform as D/G. In eval mode it
+                    # skips crop/rotation/jitter for every arm.
+                    CoTVideoAugment(
+                        apply_to=self.video_keys,
+                        mode=augmentation,
+                        crop_scale=0.95,
+                    ),
+                    # Native VLABench is 480x480. Match the LIBERO ERVLA 256x256 visual
+                    # token budget after jointly rewriting normalized CoT coordinates.
+                    VideoToTensor(apply_to=self.video_keys),
+                    VideoResize(
+                        apply_to=self.video_keys,
+                        height=256,
+                        width=256,
+                        interpolation="linear",
+                    ),
+                    VideoToNumpy(apply_to=self.video_keys),
+                ]
+            )
+        transforms.extend(
+            [
+                StateActionToTensor(apply_to=self.action_keys),
+                StateActionTransform(
+                    apply_to=self.action_keys,
+                    normalization_modes={
+                        "action.x": "min_max",
+                        "action.y": "min_max",
+                        "action.z": "min_max",
+                        "action.roll": "min_max",
+                        "action.pitch": "min_max",
+                        "action.yaw": "min_max",
+                    },
+                ),
+            ]
+        )
         return ComposedModalityTransform(transforms=transforms)
 
 ###########################################################################################
@@ -1236,6 +1347,7 @@ class VLAArenaFrankaDataConfig:
 
 ROBOT_TYPE_CONFIG_MAP = {
     "libero_franka": Libero4in1DataConfig(),
+    "vlabench_franka": VLABenchFrankaDataConfig(),
     "oxe_droid": OxeDroidDataConfig(),
     "oxe_bridge": OxeBridgeDataConfig(),
     "oxe_rt1": OxeRT1DataConfig(),

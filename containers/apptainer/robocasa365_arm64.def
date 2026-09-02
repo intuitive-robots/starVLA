@@ -1,0 +1,156 @@
+Bootstrap: docker
+From: nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+%files
+    /tmp/starvla-robocasa365-assets-main/textures.zip /opt/robocasa-assets/textures.zip
+    /tmp/starvla-robocasa365-assets-main/generative_textures.zip /opt/robocasa-assets/generative_textures.zip
+    /tmp/starvla-robocasa365-assets-main/fixtures.zip /opt/robocasa-assets/fixtures.zip
+    /tmp/starvla-robocasa365-assets-main/objaverse.zip /opt/robocasa-assets/objaverse.zip
+    /tmp/starvla-robocasa365-assets-main/aigen_objs.zip /opt/robocasa-assets/aigen_objs.zip
+    /tmp/starvla-robocasa365-assets-main/lightwheel.zip /opt/robocasa-assets/lightwheel.zip
+    /tmp/starvla-robocasa365-assets-main/SHA256SUMS /opt/robocasa-assets/SHA256SUMS
+
+%labels
+    org.opencontainers.image.title starVLA RoboCasa365 simulator environment
+    org.opencontainers.image.source https://github.com/robocasa/robocasa
+    org.opencontainers.image.version main-at-build-time
+    starvla.robocasa.ref main
+    starvla.robosuite.ref master
+
+%environment
+    export PATH=/opt/conda/envs/robocasa365/bin:/opt/conda/bin:$PATH
+    export PYTHONNOUSERSITE=1
+    export PYOPENGL_PLATFORM=egl
+    export EGL_PLATFORM=device
+    export MUJOCO_GL=egl
+    export NVIDIA_DRIVER_CAPABILITIES=all
+    export ROBOCASA_ROOT=/app/robocasa365
+    export NUMBA_CACHE_DIR=/tmp/robocasa365-numba
+    export MPLCONFIGDIR=/tmp/robocasa365-mpl
+
+%post
+    set -eu
+
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/conda/bin:$PATH
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        ffmpeg \
+        git \
+        libegl1 \
+        libegl1-mesa-dev \
+        libexpat1 \
+        libfontconfig1 \
+        libgl1 \
+        libgl1-mesa-glx \
+        libgles2 \
+        libglew-dev \
+        libglfw3 \
+        libglib2.0-0 \
+        libglvnd-dev \
+        libhidapi-dev \
+        libosmesa6 \
+        libosmesa6-dev \
+        libsm6 \
+        libusb-1.0-0-dev \
+        libvulkan1 \
+        libxext6 \
+        libxkbcommon-x11-0 \
+        libxrender1 \
+        libxcb-xinerama0 \
+        mesa-vulkan-drivers \
+        pkg-config \
+        unzip \
+        wget
+    rm -rf /var/lib/apt/lists/*
+
+    mkdir -p /usr/share/vulkan/icd.d /usr/share/glvnd/egl_vendor.d
+    if [ ! -s /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+        printf '%s\n' '{"file_format_version":"1.0.0","ICD":{"library_path":"libGLX_nvidia.so.0","api_version":"1.2.155"}}' \
+            > /usr/share/vulkan/icd.d/nvidia_icd.json
+    fi
+    if [ ! -s /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then
+        printf '%s\n' '{"file_format_version":"1.0.0","ICD":{"library_path":"libEGL_nvidia.so.0"}}' \
+            > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    fi
+
+    wget -qO /tmp/miniforge.sh \
+        https://github.com/conda-forge/miniforge/releases/download/26.3.2-0/Miniforge3-Linux-aarch64.sh
+    bash /tmp/miniforge.sh -b -p /opt/conda
+    rm /tmp/miniforge.sh
+
+    /opt/conda/bin/conda create -n robocasa365 python=3.11 pip -y
+    /opt/conda/bin/conda clean -afy
+    /opt/conda/bin/python -m pip install --no-cache-dir uv==0.11.25
+
+    ROBOCASA_PYTHON=/opt/conda/envs/robocasa365/bin/python
+    UV=/opt/conda/bin/uv
+
+    # RoboCasa's current installation guide requires RoboSuite master.
+    git clone --depth 1 --branch master \
+        https://github.com/ARISE-Initiative/robosuite.git /app/robosuite
+    git -C /app/robosuite rev-parse HEAD > /tmp/robosuite-revision
+    "$UV" pip install --python "$ROBOCASA_PYTHON" --no-cache -e /app/robosuite
+
+    # Deliberately follow current upstream main instead of pinning v1.0.1.
+    git clone --depth 1 --branch main \
+        https://github.com/robocasa/robocasa.git /app/robocasa365
+    git -C /app/robocasa365 rev-parse HEAD > /tmp/robocasa-revision
+
+    "$UV" pip install --python "$ROBOCASA_PYTHON" --no-cache -e /app/robocasa365
+
+    # Dependencies used by StarVLA's simulator client and video wrappers.
+    "$UV" pip install --python "$ROBOCASA_PYTHON" --no-cache \
+        av \
+        msgpack \
+        opencv-python \
+        tyro \
+        'websockets>=13'
+
+    "$ROBOCASA_PYTHON" /app/robosuite/robosuite/scripts/setup_macros.py
+    cd /app/robocasa365
+    "$ROBOCASA_PYTHON" -m robocasa.scripts.setup_macros
+
+    cd /opt/robocasa-assets
+    sha256sum -c SHA256SUMS
+    unzip -qo textures.zip -d /app/robocasa365/robocasa/models/assets
+    unzip -qo generative_textures.zip -d /app/robocasa365/robocasa/models/assets
+    unzip -qo fixtures.zip -d /app/robocasa365/robocasa/models/assets
+    mkdir -p /app/robocasa365/robocasa/models/assets/objects
+    unzip -qo objaverse.zip -d /app/robocasa365/robocasa/models/assets/objects
+    unzip -qo aigen_objs.zip -d /app/robocasa365/robocasa/models/assets/objects
+    unzip -qo lightwheel.zip -d /app/robocasa365/robocasa/models/assets/objects
+    rm -rf /opt/robocasa-assets
+
+    mkdir -p /opt/starvla-build-info
+    mv /tmp/robocasa-revision /opt/starvla-build-info/robocasa-revision
+    mv /tmp/robosuite-revision /opt/starvla-build-info/robosuite-revision
+    "$ROBOCASA_PYTHON" -c \
+        'from importlib.metadata import version; print(version("robocasa"))' \
+        > /opt/starvla-build-info/robocasa-version
+    "$ROBOCASA_PYTHON" -c \
+        'from importlib.metadata import version; print(version("robosuite"))' \
+        > /opt/starvla-build-info/robosuite-version
+
+    rm -rf /app/robocasa365/.git /app/robosuite/.git
+    rm -rf /root/.cache /opt/conda/pkgs/*
+
+%runscript
+    exec /opt/conda/envs/robocasa365/bin/python "$@"
+
+%test
+    set -eu
+    export MUJOCO_GL=egl
+    export PYOPENGL_PLATFORM=egl
+    export NUMBA_CACHE_DIR=/tmp/robocasa365-numba-test
+    mkdir -p "$NUMBA_CACHE_DIR"
+    /opt/conda/envs/robocasa365/bin/python -c \
+        "import gymnasium, mujoco, robocasa, robosuite; print(robocasa.__file__, robosuite.__version__, mujoco.__version__)"
+    test -s /opt/starvla-build-info/robocasa-revision
+    test -s /opt/starvla-build-info/robosuite-revision
+    test "$(find /app/robocasa365/robocasa/models/assets -type f | wc -l)" -gt 1000

@@ -310,7 +310,9 @@ def log_eval_backend_banner(cfg, accelerator: Accelerator) -> None:
         return
 
     attn_impl = str(getattr(cfg.framework.qwenvl, "attn_implementation", "unknown")).strip()
-    open_loop_disabled = "flash_attention" in attn_impl.lower()
+    open_loop_disabled_by_config = not bool(getattr(cfg.trainer, "open_loop_eval", True))
+    open_loop_disabled_by_backend = "flash_attention" in attn_impl.lower()
+    open_loop_disabled = open_loop_disabled_by_config or open_loop_disabled_by_backend
 
     banner_lines = [
         "",
@@ -318,7 +320,7 @@ def log_eval_backend_banner(cfg, accelerator: Accelerator) -> None:
         "STARTUP CONFIG",
         f"Attention backend: {attn_impl}",
         (
-            "Open-loop eval: DISABLED because Flash Attention backend is configured"
+            "Open-loop eval: DISABLED by trainer.open_loop_eval or attention backend"
             if open_loop_disabled
             else "Open-loop eval: ENABLED"
         ),
@@ -499,6 +501,7 @@ class VLATrainer(TrainerUtils):
         self.memory_monitor = MemoryMonitor(cfg, accelerator)
         self.step_timers = StepTimeAccumulator()
         self._last_timing_flush_step = -1
+        self._stopped_for_preemption = False
 
         self.completed_steps = 0
         self.dataloader_batches_consumed = int(
@@ -567,10 +570,14 @@ class VLATrainer(TrainerUtils):
                 "cot_loss",
                 "train/cot_coverage",
                 "cot_coverage",
+                "train/cot_keep_rate",
+                "cot_keep_rate",
                 "eval/cot_loss",
                 "eval_cot_loss",
                 "eval/cot_coverage",
                 "eval_cot_coverage",
+                "eval/cot_keep_rate",
+                "eval_cot_keep_rate",
             ):
                 wandb.define_metric(metric_name)
 
@@ -652,11 +659,22 @@ class VLATrainer(TrainerUtils):
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
-                save_file(state_dict, checkpoint_path + "_model.safetensors")
+                model_path = Path(checkpoint_path + "_model.safetensors")
+                partial_model_path = model_path.with_name(
+                    f"{model_path.name}.partial.{os.getpid()}"
+                )
+                save_file(state_dict, partial_model_path)
             elif save_format == "pt":
-                torch.save(state_dict, checkpoint_path + "_pytorch_model.pt")
+                model_path = Path(checkpoint_path + "_pytorch_model.pt")
+                partial_model_path = model_path.with_name(
+                    f"{model_path.name}.partial.{os.getpid()}"
+                )
+                torch.save(state_dict, partial_model_path)
             else:
                 raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
+            # A killed writer must never leave a filename that the automatic
+            # resume scanner mistakes for a complete checkpoint.
+            os.replace(partial_model_path, model_path)
 
             summary_data = {"steps": self.completed_steps}
             with open(os.path.join(self.config.output_dir, "summary.jsonl"), "a") as f:
@@ -671,12 +689,14 @@ class VLATrainer(TrainerUtils):
                 "num_workers": int(getattr(self.config.datasets.vla_data, "num_workers", 0)),
                 "world_size": int(self.accelerator.num_processes),
             }
-            state_path = _dataloader_state_path(checkpoint_path + "_pytorch_model.pt")
-            if save_format == "safetensors":
-                state_path = _dataloader_state_path(checkpoint_path + "_model.safetensors")
-            with state_path.open("w", encoding="utf-8") as f:
+            state_path = _dataloader_state_path(model_path)
+            partial_state_path = state_path.with_name(
+                f"{state_path.name}.partial.{os.getpid()}"
+            )
+            with partial_state_path.open("w", encoding="utf-8") as f:
                 json.dump(dataloader_state, f, indent=2)
                 f.write("\n")
+            os.replace(partial_state_path, state_path)
             self.accelerator.print(f"✅ Checkpoint saved at {checkpoint_path}")
             _prune_old_checkpoints(
                 self.checkpoint_dir,
@@ -699,7 +719,15 @@ class VLATrainer(TrainerUtils):
             for i, group in enumerate(self.optimizer.param_groups):
                 group_name = group.get("name", str(i))
                 metrics[f"learning_rate/{group_name}"] = last_lrs[i] if i < len(last_lrs) else last_lrs[-1]
-            metrics["epoch"] = round(self.completed_steps / len(self.vla_train_dataloader), 2)
+            # Infinite/iterable loaders (including Marigold's
+            # MainProcessBatchLoader) deliberately have no meaningful length.
+            # Logging must not turn that into a training failure.
+            try:
+                dataloader_length = len(self.vla_train_dataloader)
+            except (TypeError, NotImplementedError):
+                dataloader_length = None
+            if dataloader_length:
+                metrics["epoch"] = round(self.completed_steps / dataloader_length, 2)
             wandb.log(metrics, step=self.completed_steps)
             logger.info(f"Step {self.completed_steps}, Loss: {metrics})")
 
@@ -769,6 +797,8 @@ class VLATrainer(TrainerUtils):
                 batch_vla = self._get_next_batch()
             t_end_data = time.perf_counter()
 
+            self._maybe_stage_decoder()
+
             t_start_model = time.perf_counter()
             step_metrics = self._train_step(batch_vla)
             t_end_model = time.perf_counter()
@@ -779,6 +809,21 @@ class VLATrainer(TrainerUtils):
             if sync:
                 progress_bar.update(1)
                 self.completed_steps += 1
+
+            # Slurm's early-warning signal is translated by the batch launcher
+            # into a shared-filesystem flag. Check it only after a synchronized
+            # optimizer step, then agree across ranks before entering checkpoint
+            # collectives. Saving directly inside a Unix signal handler would be
+            # unsafe and could leave a partial distributed checkpoint.
+            if sync and self._preemption_requested():
+                if self.accelerator.is_main_process:
+                    logger.warning(
+                        "Pre-time-limit checkpoint requested at completed step %s.",
+                        self.completed_steps,
+                    )
+                self._save_checkpoint()
+                self._stopped_for_preemption = True
+                break
 
             if self.accelerator.is_main_process:
                 progress_bar.set_postfix(
@@ -812,6 +857,23 @@ class VLATrainer(TrainerUtils):
 
         self._finalize_training()
 
+    def _preemption_requested(self) -> bool:
+        flag_path = os.environ.get("STARVLA_PREEMPT_FLAG")
+        if not flag_path:
+            return False
+        poll_steps = max(1, int(os.environ.get("STARVLA_PREEMPT_POLL_STEPS", "10")))
+        if self.completed_steps % poll_steps != 0:
+            return False
+        local_request = Path(flag_path).exists()
+        request = torch.tensor(
+            int(local_request),
+            device=self.accelerator.device,
+            dtype=torch.int32,
+        )
+        if dist.is_initialized():
+            dist.all_reduce(request, op=dist.ReduceOp.MAX)
+        return bool(request.item())
+
     def eval_action_model(self, step_metrics: dict = None) -> float:
         """Run simple action-eval on current batch and attach score to metrics."""
         step_metrics = step_metrics or {}
@@ -828,7 +890,7 @@ class VLATrainer(TrainerUtils):
             score = TrainerUtils.euclidean_distance(normalized_actions, actions)
             step_metrics["mse_score"] = score / num_pots
             if self._should_skip_open_loop_eval():
-                logger.info("Skipping open-loop eval because Flash Attention backend is configured.")
+                logger.info("Skipping open-loop eval because it is disabled by config or attention backend.")
             else:
                 open_loop_metrics = self._eval_open_loop_trajectories()
                 step_metrics.update(open_loop_metrics)
@@ -845,6 +907,22 @@ class VLATrainer(TrainerUtils):
             if eval_cot_coverage is not None and self.accelerator.is_main_process:
                 step_metrics["eval/cot_coverage"] = float(eval_cot_coverage)
                 step_metrics["eval_cot_coverage"] = float(eval_cot_coverage)
+            eval_cot_keep_rate = eval_fwd.get("cot_keep_rate", None)
+            if eval_cot_keep_rate is not None and self.accelerator.is_main_process:
+                step_metrics["eval/cot_keep_rate"] = float(eval_cot_keep_rate)
+                step_metrics["eval_cot_keep_rate"] = float(eval_cot_keep_rate)
+            if self.accelerator.is_main_process:
+                for key in (
+                    "choice_loss", "score_loss", "choice_min_error",
+                    "choice_score_mae", "choice_diversity",
+                ):
+                    value = eval_fwd.get(key)
+                    if value is not None:
+                        step_metrics[f"eval/{key}"] = float(value)
+                winner_histogram = eval_fwd.get("choice_winner_histogram")
+                if winner_histogram is not None:
+                    for idx, value in enumerate(winner_histogram):
+                        step_metrics[f"eval/choice_winner_{idx}"] = float(value)
 
         del examples
         dist.barrier()
@@ -943,7 +1021,9 @@ class VLATrainer(TrainerUtils):
         return metrics
 
     def _should_skip_open_loop_eval(self) -> bool:
-        """Skip stitched open-loop eval for Flash Attention based configs."""
+        """Skip stitched open-loop eval when explicitly disabled or unsupported."""
+        if not bool(getattr(self.config.trainer, "open_loop_eval", True)):
+            return True
         attn_impl = str(getattr(self.config.framework.qwenvl, "attn_implementation", "")).strip().lower()
         return "flash_attention" in attn_impl
 
@@ -999,6 +1079,167 @@ class VLATrainer(TrainerUtils):
             logger.info(f"  Gradient accumulation steps = {self.accelerator.gradient_accumulation_steps}")
             logger.info(f"  Total batch size = {self.total_batch_size}")
 
+    def _maybe_stage_decoder(self):
+        """Two-stage schedule for the auxiliary-reasoning decoder (experiment arm E).
+
+        Stage 1 (steps < `cot.decoder_unfreeze_step`): the pretrained 2B decoder core is
+        frozen. The encoder, vision tower, and DiT train. Merged attention is implemented
+        inside those decoder blocks, so its weights are frozen too, but its fixed operations
+        still pass the CoT-loss gradient back to the encoder. The decoder already knows
+        language; freezing it forces the ENCODER to supply the physical content rather than
+        letting the decoder absorb the task.
+        Stage 2: the decoder trains too, at the reduced LR its own param group specifies
+        (`trainer.learning_rate.<decoder path>`), so it acts as a supervision head rather
+        than the place new embodied knowledge is stored.
+
+        NOTE `lm.layers` are the DECODER blocks; `lm.encoder_layers` are the encoder. In
+        `full_duplicate` the encoder is a separate deepcopy, so freezing/unfreezing
+        `lm.layers` does not touch the encoder -- and unfreezing the wrong one trains
+        nothing at all.
+        """
+        cot_cfg = getattr(getattr(self.config.datasets, "vla_data", None), "cot", None)
+        step_at = None
+        if cot_cfg is not None:
+            step_at = (cot_cfg.get("decoder_unfreeze_step") if hasattr(cot_cfg, "get")
+                       else getattr(cot_cfg, "decoder_unfreeze_step", None))
+        if not step_at:
+            return
+        want_frozen = self.completed_steps < int(step_at)
+        if getattr(self, "_decoder_frozen", None) is want_frozen:
+            return
+        blocks = self._decoder_blocks()
+        if blocks is None:
+            if self.accelerator.is_main_process:
+                logger.warning("decoder_unfreeze_step set but no decoder stack found; "
+                               "the staged schedule is a no-op")
+            self._decoder_frozen = want_frozen
+            return
+        modules = [blocks]
+        stage_private_io = bool(
+            cot_cfg.get("stage_private_decoder_io", False)
+            if hasattr(cot_cfg, "get")
+            else getattr(cot_cfg, "stage_private_decoder_io", False)
+        )
+        if stage_private_io:
+            model = self.accelerator.unwrap_model(self.model)
+            itf = getattr(model, "qwen_vl_interface", None)
+            lm = itf._text_model() if itf is not None and hasattr(itf, "_text_model") else None
+            for name in ("decoder_embed_tokens", "decoder_norm"):
+                module = getattr(lm, name, None) if lm is not None else None
+                if module is not None:
+                    modules.append(module)
+            outer = getattr(itf, "model", None) if itf is not None else None
+            lm_head = getattr(outer, "lm_head", None)
+            if lm_head is not None:
+                modules.append(lm_head)
+
+        n = 0
+        seen = set()
+        for prm in (prm for module in modules for prm in module.parameters()):
+            if id(prm) in seen:
+                continue
+            seen.add(id(prm))
+            prm.requires_grad = not want_frozen
+            n += prm.numel()
+        self._decoder_frozen = want_frozen
+        if self.accelerator.is_main_process:
+            scope = "core + private embedding/norm/head" if stage_private_io else "core"
+            logger.info(f"[stage] step {self.completed_steps}: decoder {scope} "
+                        f"{'FROZEN' if want_frozen else 'UNFROZEN'} ({n/1e6:.0f}M params)")
+
+    def _decoder_blocks(self):
+        """The causal decoder stack of the enc-dec backbone, or None."""
+        model = self.accelerator.unwrap_model(self.model)
+        itf = getattr(model, "qwen_vl_interface", None)
+        if itf is None or not hasattr(itf, "_text_model"):
+            return None
+        lm = itf._text_model()
+        if hasattr(lm, "encoder_layers"):
+            return getattr(lm, "layers", None)
+        # In parameter-matched layer-split mode the two stacks share one ModuleList,
+        # partitioned at n_encoder_layers. Freeze/stage only the causal suffix.
+        if hasattr(lm, "n_encoder_layers"):
+            return lm.layers[int(lm.n_encoder_layers):]
+        return None
+
+    def _log_encoder_grad_split(
+        self, action_loss, cot_loss, metrics, choice_loss=None, score_loss=None,
+        cot_scale=1.0, choice_scale=1.0, score_scale=1.0,
+    ):
+        """Report how hard each loss pulls on the shared encoder.
+
+        The CE term scales with the number of supervised tokens, so it can dominate the
+        flow loss for reasons that have nothing to do with the hypothesis. Logging the two
+        norms separately is what tells us whether `loss_scale.cot` needs rescaling; the
+        target is the same order of magnitude. Only run at the logging interval -- it costs
+        two extra backward passes through the encoder.
+        """
+        blocks = None
+        # After ``accelerator.prepare`` self.model is a DeepSpeed/DDP wrapper.  Looking
+        # directly on that wrapper silently returned None, so all completed distributed
+        # runs skipped this diagnostic.  Always inspect the underlying framework model.
+        unwrapped = self.accelerator.unwrap_model(self.model)
+        itf = getattr(unwrapped, "qwen_vl_interface", None)
+        if itf is not None and hasattr(itf, "_text_model"):
+            lm = itf._text_model()
+            blocks = getattr(lm, "encoder_layers", None)
+            if blocks is None and hasattr(lm, "n_encoder_layers"):
+                blocks = lm.layers[:int(lm.n_encoder_layers)]
+        if blocks is None:
+            return
+        # A full-encoder autograd probe materializes gradients for ~1.4B encoder
+        # parameters and needs another ~4.6 GiB at the production micro-batch,
+        # even though the ordinary backward fits.  Use one fixed, representative
+        # matrix from the final encoder block instead.  Ratios across objectives
+        # remain directly comparable, and the diagnostic no longer perturbs the
+        # memory envelope of the actual training step.
+        last_block = blocks[-1]
+        named_probe = [
+            (name, prm) for name, prm in last_block.named_parameters()
+            if prm.requires_grad and name.endswith("self_attn.q_proj.weight")
+        ]
+        if not named_probe:
+            named_probe = [
+                (name, prm) for name, prm in last_block.named_parameters()
+                if prm.requires_grad
+            ][:1]
+        params = [prm for _, prm in named_probe]
+        if not params:
+            return
+        metrics["grad/enc_probe_numel"] = float(sum(prm.numel() for prm in params))
+
+        def norm(loss):
+            g = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
+            return float(sum((x.detach() ** 2).sum() for x in g if x is not None) ** 0.5)
+
+        try:
+            metrics["grad/enc_from_flow"] = norm(action_loss)
+            if cot_loss is not None:
+                metrics["grad/enc_from_reason"] = norm(cot_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/reason_over_flow"] = (
+                        metrics["grad/enc_from_reason"] / metrics["grad/enc_from_flow"])
+                    metrics["grad/weighted_reason_over_flow"] = (
+                        float(cot_scale) * metrics["grad/reason_over_flow"])
+            if choice_loss is not None:
+                metrics["grad/enc_from_choice"] = norm(choice_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/choice_over_flow"] = (
+                        metrics["grad/enc_from_choice"] / metrics["grad/enc_from_flow"])
+                    metrics["grad/weighted_choice_over_flow"] = (
+                        float(choice_scale) * metrics["grad/choice_over_flow"])
+            if score_loss is not None:
+                metrics["grad/enc_from_score"] = norm(score_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/score_over_flow"] = (
+                        metrics["grad/enc_from_score"] / metrics["grad/enc_from_flow"])
+                    metrics["grad/weighted_score_over_flow"] = (
+                        float(score_scale) * metrics["grad/score_over_flow"])
+        except RuntimeError as exc:
+            # Graph already freed (e.g. under DeepSpeed); diagnostics must never
+            # take down a training run.
+            logger.warning(f"encoder grad split unavailable: {exc}")
+
     def _train_step(self, batch_vla, batch_vlm=None):
         """Execute single training step."""
         grad_accum = self.accelerator.gradient_accumulation_steps
@@ -1014,9 +1255,48 @@ class VLATrainer(TrainerUtils):
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 output_dict = self.model.forward(batch_vla)
-                action_loss = output_dict["action_loss"] / grad_accum
+                action_loss = output_dict["action_loss"]
+                cot_loss = output_dict.get("cot_loss", None)
+                structured_aux_loss = output_dict.get("structured_aux_loss", None)
+                choice_loss = output_dict.get("choice_loss", None)
+                score_loss = output_dict.get("score_loss", None)
 
-            self.accelerator.backward(action_loss)
+                loss_scale = getattr(self.config.trainer, "loss_scale", None)
+                cot_scale = getattr(loss_scale, "cot", 0.1)
+                structured_aux_scale = getattr(loss_scale, "structured_aux", 1.0)
+                choice_scale = getattr(loss_scale, "choice", 1.0)
+                score_scale = getattr(loss_scale, "score", 1.0)
+                total_loss = action_loss
+                if cot_loss is not None:
+                    total_loss = total_loss + cot_scale * cot_loss
+                if structured_aux_loss is not None:
+                    total_loss = total_loss + structured_aux_scale * structured_aux_loss
+                if choice_loss is not None:
+                    total_loss = total_loss + choice_scale * choice_loss
+                if score_loss is not None:
+                    total_loss = total_loss + score_scale * score_loss
+
+            # Probe the final micro-step only: every micro-step builds an equivalent
+            # graph, while probing all of them needlessly repeats the extra autograd
+            # work. This must happen before backward while the graph is still alive.
+            grad_split = {}
+            if (
+                self._ds_sync_gradients
+                and self.config.trainer.logging_frequency
+                and self.completed_steps % self.config.trainer.logging_frequency == 0
+            ):
+                self._log_encoder_grad_split(
+                    action_loss,
+                    cot_loss,
+                    grad_split,
+                    choice_loss=choice_loss,
+                    score_loss=score_loss,
+                    cot_scale=cot_scale,
+                    choice_scale=choice_scale,
+                    score_scale=score_scale,
+                )
+
+            self.accelerator.backward(total_loss / grad_accum)
 
             if self._ds_sync_gradients:
                 if self.config.trainer.gradient_clipping is not None:
@@ -1025,7 +1305,41 @@ class VLATrainer(TrainerUtils):
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-            return {"action_dit_loss": action_loss.item() * grad_accum}
+            metrics = {"action_dit_loss": action_loss.item()}
+            metrics.update(grad_split)
+            if cot_loss is not None:
+                metrics["train/cot_loss"] = cot_loss.item()
+                metrics["train_cot_loss"] = cot_loss.item()
+                metrics["cot_loss"] = cot_loss.item()
+            if structured_aux_loss is not None:
+                metrics["train/structured_aux_loss"] = structured_aux_loss.item()
+                metrics["structured_aux_loss"] = structured_aux_loss.item()
+                for key, value in output_dict.items():
+                    if key.startswith("structured_aux/"):
+                        metrics[f"train/{key}"] = float(value)
+            if choice_loss is not None:
+                metrics["train/choice_loss"] = choice_loss.item()
+                metrics["choice_loss"] = choice_loss.item()
+            if score_loss is not None:
+                metrics["train/score_loss"] = score_loss.item()
+                metrics["score_loss"] = score_loss.item()
+            for key in ("choice_min_error", "choice_score_mae", "choice_diversity"):
+                value = output_dict.get(key)
+                if value is not None:
+                    metrics[f"train/{key}"] = float(value)
+            winner_histogram = output_dict.get("choice_winner_histogram")
+            if winner_histogram is not None:
+                for idx, value in enumerate(winner_histogram):
+                    metrics[f"train/choice_winner_{idx}"] = float(value)
+            cot_coverage = output_dict.get("cot_coverage", None)
+            if cot_coverage is not None:
+                metrics["train/cot_coverage"] = float(cot_coverage)
+                metrics["cot_coverage"] = float(cot_coverage)
+            cot_keep_rate = output_dict.get("cot_keep_rate", None)
+            if cot_keep_rate is not None:
+                metrics["train/cot_keep_rate"] = float(cot_keep_rate)
+                metrics["cot_keep_rate"] = float(cot_keep_rate)
+            return metrics
 
         with self.accelerator.accumulate(self.model):
             self.optimizer.zero_grad()
@@ -1034,11 +1348,40 @@ class VLATrainer(TrainerUtils):
                 output_dict = self.model.forward(batch_vla)
                 action_loss = output_dict["action_loss"]
                 cot_loss = output_dict.get("cot_loss", None)
+                structured_aux_loss = output_dict.get("structured_aux_loss", None)
+                choice_loss = output_dict.get("choice_loss", None)
+                score_loss = output_dict.get("score_loss", None)
 
                 cot_scale = getattr(getattr(self.config.trainer, "loss_scale", None), "cot", 0.1)
+                structured_aux_scale = getattr(
+                    getattr(self.config.trainer, "loss_scale", None), "structured_aux", 1.0
+                )
+                choice_scale = getattr(
+                    getattr(self.config.trainer, "loss_scale", None), "choice", 1.0
+                )
+                score_scale = getattr(
+                    getattr(self.config.trainer, "loss_scale", None), "score", 1.0
+                )
                 total_loss = action_loss
                 if cot_loss is not None:
                     total_loss = total_loss + cot_scale * cot_loss
+                if structured_aux_loss is not None:
+                    total_loss = total_loss + structured_aux_scale * structured_aux_loss
+                if choice_loss is not None:
+                    total_loss = total_loss + choice_scale * choice_loss
+                if score_loss is not None:
+                    total_loss = total_loss + score_scale * score_loss
+
+            # Must run BEFORE backward(): it needs the graph both losses still hold.
+            grad_split = {}
+            if (self.config.trainer.logging_frequency
+                    and self.completed_steps % self.config.trainer.logging_frequency == 0):
+                self._log_encoder_grad_split(
+                    action_loss, cot_loss, grad_split,
+                    choice_loss=choice_loss, score_loss=score_loss,
+                    cot_scale=cot_scale, choice_scale=choice_scale,
+                    score_scale=score_scale,
+                )
 
             self.accelerator.backward(total_loss)
 
@@ -1055,19 +1398,55 @@ class VLATrainer(TrainerUtils):
                 self.lr_scheduler.step()
 
         metrics = {"action_dit_loss": action_loss.item()}
+        metrics.update(grad_split)
         if cot_loss is not None:
             metrics["train/cot_loss"] = cot_loss.item()
             metrics["train_cot_loss"] = cot_loss.item()
             metrics["cot_loss"] = cot_loss.item()
+        if structured_aux_loss is not None:
+            metrics["train/structured_aux_loss"] = structured_aux_loss.item()
+            metrics["structured_aux_loss"] = structured_aux_loss.item()
+            for key, value in output_dict.items():
+                if key.startswith("structured_aux/"):
+                    metrics[f"train/{key}"] = float(value)
+        if choice_loss is not None:
+            metrics["train/choice_loss"] = choice_loss.item()
+            metrics["choice_loss"] = choice_loss.item()
+        if score_loss is not None:
+            metrics["train/score_loss"] = score_loss.item()
+            metrics["score_loss"] = score_loss.item()
+        for key in ("choice_min_error", "choice_score_mae", "choice_diversity"):
+            value = output_dict.get(key)
+            if value is not None:
+                metrics[f"train/{key}"] = float(value)
+        winner_histogram = output_dict.get("choice_winner_histogram")
+        if winner_histogram is not None:
+            for idx, value in enumerate(winner_histogram):
+                metrics[f"train/choice_winner_{idx}"] = float(value)
         cot_coverage = output_dict.get("cot_coverage", None)
         if cot_coverage is not None:
             metrics["train/cot_coverage"] = float(cot_coverage)
             metrics["cot_coverage"] = float(cot_coverage)
+        cot_keep_rate = output_dict.get("cot_keep_rate", None)
+        if cot_keep_rate is not None:
+            metrics["train/cot_keep_rate"] = float(cot_keep_rate)
+            metrics["cot_keep_rate"] = float(cot_keep_rate)
         return metrics
 
     def _finalize_training(self):
         """Training end processing."""
-        if self.accelerator.is_main_process:
+        if self._stopped_for_preemption:
+            if self.accelerator.is_main_process:
+                logger.info(
+                    "Training stopped cleanly after the pre-time-limit checkpoint at step %s.",
+                    self.completed_steps,
+                )
+                wandb.finish()
+            self.accelerator.wait_for_everyone()
+            return
+
+        save_final_checkpoint = bool(getattr(self.config.trainer, "save_final_checkpoint", True))
+        if self.accelerator.is_main_process and save_final_checkpoint:
             save_format = getattr(self.config.trainer, "save_format", "pt")
             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
             os.makedirs(final_checkpoint, exist_ok=True)
@@ -1081,6 +1460,8 @@ class VLATrainer(TrainerUtils):
             else:
                 raise ValueError(f"Unsupported save_format `{save_format}`. Expected `pt` or `safetensors`.")
             logger.info(f"Training complete. Final model saved at {final_checkpoint}")
+        elif self.accelerator.is_main_process:
+            logger.info("Training complete. Final checkpoint disabled by config.")
 
         if self.accelerator.is_main_process:
             wandb.finish()

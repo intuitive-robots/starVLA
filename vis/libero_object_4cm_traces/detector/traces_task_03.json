@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 3,
+    "episode_idx": 0,
+    "description": "pick up the bbq sauce and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "bbq_sauce_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            -0.00430040173818806,
+            0.25443745934532547,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.027146110211546417,
+            0.029378371302415242
+          ],
+          "after_xyz": [
+            -0.031446511949734475,
+            0.2838158306477407,
+            0.034999999999999996
+          ]
+        },
+        {
+          "name": "bbq_sauce_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "bbq_sauce_1_joint0",
+          "before_xyz": [
+            0.04312957258175951,
+            -0.09009850396987874,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.003308277047560786,
+            0.03986295652578447
+          ],
+          "after_xyz": [
+            0.03982129553419872,
+            -0.050235547444094274,
+            0.034999999999999996
+          ]
+        }
+      ]
+    },
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[620, 180], [548, 135], [435, 111], [324, 151], [647, 428]]}<|/trace|>><|/trace",
+    "trace_2d": [
+      [
+        620.0,
+        180.0
+      ],
+      [
+        548.0,
+        135.0
+      ],
+      [
+        435.0,
+        111.0
+      ],
+      [
+        324.0,
+        151.0
+      ],
+      [
+        647.0,
+        428.0
+      ]
+    ]
+  }
+]

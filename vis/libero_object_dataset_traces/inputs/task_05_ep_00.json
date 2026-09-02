@@ -1,0 +1,8 @@
+{
+  "task_id": 5,
+  "episode_idx": 0,
+  "dataset_episode_idx": 7,
+  "description": "pick up the milk and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 135.66666666666666
+}

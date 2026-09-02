@@ -59,13 +59,33 @@ class _QWen3_5_VL_Interface(nn.Module):
         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3.5-VL-4B-Instruct")
         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
 
-        # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
+        # Fallback to sdpa if flash_attention_2 is requested but the `flash_attn` (FA2)
+        # package isn't installed -- but try FlashAttention-3 first: Hopper/GH200-class
+        # GPUs often have `flash-attn-3` (import name `flash_attn_interface`) instead,
+        # which transformers exposes as a separate attn_implementation string, not as
+        # an automatic upgrade path from "flash_attention_2".
         if attn_implementation == "flash_attention_2":
             try:
                 import flash_attn  # noqa: F401
             except ImportError:
-                print("[WARNING] flash_attn not installed, falling back to sdpa")
-                attn_implementation = "sdpa"
+                from transformers.utils import is_flash_attn_3_available
+
+                if is_flash_attn_3_available():
+                    print("[INFO] flash_attn (FA2) not installed but FlashAttention-3 is; using flash_attention_3")
+                    attn_implementation = "flash_attention_3"
+                else:
+                    print("[WARNING] flash_attn not installed, falling back to sdpa")
+                    attn_implementation = "sdpa"
+
+        # No explicit request (the "sdpa" default): silently upgrade to FA3 if it's
+        # available, since it's a strict speed win with no downside. Opt out with
+        # STARVLA_DISABLE_FA3=1 (e.g. for debugging/numerics comparisons against sdpa).
+        if attn_implementation == "sdpa" and os.environ.get("STARVLA_DISABLE_FA3", "") != "1":
+            from transformers.utils import is_flash_attn_3_available
+
+            if is_flash_attn_3_available():
+                print("[INFO] FlashAttention-3 available; upgrading default sdpa -> flash_attention_3")
+                attn_implementation = "flash_attention_3"
 
         model = Qwen3_5ForConditionalGeneration.from_pretrained(
             model_id,
@@ -212,6 +232,16 @@ class _QWen3_5_VL_Interface(nn.Module):
                 exc_info=True,
             )
             self.model.forward = original_forward
+            # The aborted attempt may have partially advanced any STATEFUL
+            # logits_processor (e.g. QwenOFT_CoT's _ForceSuffixLogitsProcessor
+            # tracks per-step progress across calls). Since we're about to reuse
+            # the same `kwargs` -- and therefore the same processor objects -- for
+            # this fresh retry, reset them first or the retry silently resumes
+            # from wherever the failed attempt left off instead of its own start.
+            for lp in kwargs.get("logits_processor", []) or []:
+                reset_fn = getattr(lp, "reset", None)
+                if callable(reset_fn):
+                    reset_fn()
             return self.model.generate(
                 **{k: v for k, v in kwargs.items() if k != "cache_implementation"},
             )

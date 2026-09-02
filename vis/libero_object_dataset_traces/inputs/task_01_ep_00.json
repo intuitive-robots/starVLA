@@ -1,0 +1,8 @@
+{
+  "task_id": 1,
+  "episode_idx": 0,
+  "dataset_episode_idx": 1,
+  "description": "pick up the ketchup and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 135.0
+}

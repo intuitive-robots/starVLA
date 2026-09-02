@@ -54,6 +54,10 @@ class ModelClient:
         self.gripper_action_repeat = 0
         self.sticky_gripper_action = 0.0
         self.previous_gripper_action = None
+        # Reasoning string that conditioned the current action chunk, refreshed
+        # only when a new chunk is predicted. None for non-CoT models.
+        self.last_cot_text = None
+        self.cot_is_fresh = False
 
         self.task_description = None
         self.image_history = deque(maxlen=self.horizon)
@@ -80,6 +84,10 @@ class ModelClient:
         self.gripper_action_repeat = 0
         self.sticky_gripper_action = 0.0
         self.previous_gripper_action = None
+        # Reasoning string that conditioned the current action chunk, refreshed
+        # only when a new chunk is predicted. None for non-CoT models.
+        self.last_cot_text = None
+        self.cot_is_fresh = False
 
     def step(
         self,
@@ -114,10 +122,15 @@ class ModelClient:
         vla_input["unnorm_key"] = self.unnorm_key
 
         action_chunk_size = self.action_chunk_size
+        self.cot_is_fresh = False
         if step % action_chunk_size == 0:
             response = self.client.predict_action(vla_input)
             # server already un-normalized via training-time transform
             self.raw_actions = np.array(response["data"]["actions"][0])  # (chunk, D)
+            cot = response["data"].get("cot_text")
+            if cot:
+                self.last_cot_text = cot[0] if isinstance(cot, (list, tuple)) else cot
+                self.cot_is_fresh = True
 
         raw_actions = self.raw_actions[step % action_chunk_size][None]
 
@@ -127,7 +140,13 @@ class ModelClient:
             "open_gripper": np.array(raw_actions[0, 6:7]),  # [0,1]; 1=open, 0=close
         }
 
-        return {"raw_action": raw_action}
+        return {
+            "raw_action": raw_action,
+            # Held across the chunk so every frame can be annotated, with a flag
+            # marking the step where the reasoning was actually (re)generated.
+            "cot_text": self.last_cot_text,
+            "cot_is_fresh": self.cot_is_fresh,
+        }
 
     def _resize_image(self, image: np.ndarray) -> np.ndarray:
         return cv.resize(image, tuple(self.image_size), interpolation=cv.INTER_AREA)

@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 1,
+    "episode_idx": 0,
+    "description": "pick up the cream cheese and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "cream_cheese_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            -0.008780921605762436,
+            0.2672733804567752,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.03784600045463872,
+            -0.012949140882216317
+          ],
+          "after_xyz": [
+            -0.04662692206040116,
+            0.25432423957455885,
+            0.034999999999999996
+          ]
+        },
+        {
+          "name": "cream_cheese_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "cream_cheese_1_joint0",
+          "before_xyz": [
+            0.04607199348123641,
+            -0.10264932772423524,
+            0.0
+          ],
+          "delta_xy": [
+            0.029060212651311767,
+            0.027486433756683307
+          ],
+          "after_xyz": [
+            0.07513220613254817,
+            -0.07516289396755194,
+            0.0
+          ]
+        }
+      ]
+    },
+    "model": "ours",
+    "cot_text": "<|trace|>{\"trace_2d\": [[500, 599], [497, 614], [494, 628], [491, 643], [487, 659]]}<|/trace|>><|/trace|",
+    "trace_2d": [
+      [
+        500.0,
+        599.0
+      ],
+      [
+        497.0,
+        614.0
+      ],
+      [
+        494.0,
+        628.0
+      ],
+      [
+        491.0,
+        643.0
+      ],
+      [
+        487.0,
+        659.0
+      ]
+    ]
+  }
+]

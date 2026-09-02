@@ -202,10 +202,12 @@ class VLAMTrainer(TrainerUtils):
             for i, group in enumerate(self.optimizer.param_groups):
                 group_name = group.get("name", str(i))
                 metrics[f"learning_rate/{group_name}"] = last_lrs[i] if i < len(last_lrs) else last_lrs[-1]
-            if hasattr(self.vlm_train_dataloader, "__len__"):
+            try:
                 dataloader_length = len(self.vlm_train_dataloader)
-                if dataloader_length:
-                    metrics["epoch"] = round(self.completed_steps / dataloader_length, 2)
+            except (TypeError, NotImplementedError):
+                dataloader_length = None
+            if dataloader_length:
+                metrics["epoch"] = round(self.completed_steps / dataloader_length, 2)
             wandb.log(metrics, step=self.completed_steps)
             logger.info(f"Step {self.completed_steps}, Metrics: {metrics}")
 

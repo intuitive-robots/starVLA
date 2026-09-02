@@ -88,8 +88,9 @@ echo "policy_port: ${policy_port}"
 
 PYTHONWARNINGS=ignore::UserWarning \
 "${robotwin_python}" script/eval_policy.py --config "${runtime_deploy_policy}" \
-    --policy_ckpt_path "${policy_ckpt_path}" \
     --overrides \
+    --policy_ckpt_path "${policy_ckpt_path}" \
+    --num_trials "${ROBOTWIN_NUM_TRIALS:-100}" \
     --task_name "${task_name}" \
     --task_config "${task_config}" \
     --ckpt_setting "${ckpt_setting}" \

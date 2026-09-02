@@ -1,0 +1,8 @@
+{
+  "task_id": 2,
+  "episode_idx": 0,
+  "dataset_episode_idx": 3,
+  "description": "pick up the cream cheese and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 135.66666666666666
+}

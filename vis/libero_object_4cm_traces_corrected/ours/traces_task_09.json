@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 9,
+    "episode_idx": 0,
+    "description": "pick up the orange juice and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "orange_juice_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            -0.004096254454554903,
+            0.25071288167945627,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.010834739817498074,
+            0.03850465443406968
+          ],
+          "after_xyz": [
+            -0.014930994272052977,
+            0.28921753611352596,
+            0.034999999999999996
+          ]
+        },
+        {
+          "name": "orange_juice_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "orange_juice_1_joint0",
+          "before_xyz": [
+            0.05,
+            -0.1,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            0.020601795531766293,
+            0.034286528270842685
+          ],
+          "after_xyz": [
+            0.07060179553176629,
+            -0.06571347172915731,
+            0.034999999999999996
+          ]
+        }
+      ]
+    },
+    "model": "ours",
+    "cot_text": "<|trace|>{\"trace_2d\": [[399, 504], [400, 504], [402, 504], [403, 504], [404, 504]]}<|/trace|>",
+    "trace_2d": [
+      [
+        399.0,
+        504.0
+      ],
+      [
+        400.0,
+        504.0
+      ],
+      [
+        402.0,
+        504.0
+      ],
+      [
+        403.0,
+        504.0
+      ],
+      [
+        404.0,
+        504.0
+      ]
+    ]
+  }
+]

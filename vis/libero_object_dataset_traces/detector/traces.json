@@ -1,0 +1,322 @@
+[
+  {
+    "task_id": 0,
+    "episode_idx": 0,
+    "dataset_episode_idx": 0,
+    "description": "pick up the orange juice and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.0,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[618, 541], [582, 367], [402, 337], [222, 315], [227, 475]]}<|/trace|><|trace|",
+    "trace_2d": [
+      [
+        618.0,
+        541.0
+      ],
+      [
+        582.0,
+        367.0
+      ],
+      [
+        402.0,
+        337.0
+      ],
+      [
+        222.0,
+        315.0
+      ],
+      [
+        227.0,
+        475.0
+      ]
+    ]
+  },
+  {
+    "task_id": 1,
+    "episode_idx": 0,
+    "dataset_episode_idx": 1,
+    "description": "pick up the ketchup and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.0,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[733, 591], [724, 592], [715, 593], [706, 594], [199, 521]]}<|/trace|>], [201,",
+    "trace_2d": [
+      [
+        733.0,
+        591.0
+      ],
+      [
+        724.0,
+        592.0
+      ],
+      [
+        715.0,
+        593.0
+      ],
+      [
+        706.0,
+        594.0
+      ],
+      [
+        199.0,
+        521.0
+      ]
+    ]
+  },
+  {
+    "task_id": 2,
+    "episode_idx": 0,
+    "dataset_episode_idx": 3,
+    "description": "pick up the cream cheese and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.66666666666666,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[743, 605], [733, 585], [723, 565], [733, 585], [214, 581]]}<|/trace|><|/trace|",
+    "trace_2d": [
+      [
+        743.0,
+        605.0
+      ],
+      [
+        733.0,
+        585.0
+      ],
+      [
+        723.0,
+        565.0
+      ],
+      [
+        733.0,
+        585.0
+      ],
+      [
+        214.0,
+        581.0
+      ]
+    ]
+  },
+  {
+    "task_id": 3,
+    "episode_idx": 0,
+    "dataset_episode_idx": 4,
+    "description": "pick up the bbq sauce and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 134.66666666666666,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[68, 618], [81, 586], [142, 589], [184, 618], [201, 656]]}<|/trace|>\n<|trace|>",
+    "trace_2d": [
+      [
+        68.0,
+        618.0
+      ],
+      [
+        81.0,
+        586.0
+      ],
+      [
+        142.0,
+        589.0
+      ],
+      [
+        184.0,
+        618.0
+      ],
+      [
+        201.0,
+        656.0
+      ]
+    ]
+  },
+  {
+    "task_id": 4,
+    "episode_idx": 0,
+    "dataset_episode_idx": 6,
+    "description": "pick up the alphabet soup and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 134.66666666666666,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[603, 147], [635, 266], [551, 135], [390, 138], [249, 515]]}<|/trace|><|/trace|>",
+    "trace_2d": [
+      [
+        603.0,
+        147.0
+      ],
+      [
+        635.0,
+        266.0
+      ],
+      [
+        551.0,
+        135.0
+      ],
+      [
+        390.0,
+        138.0
+      ],
+      [
+        249.0,
+        515.0
+      ]
+    ]
+  },
+  {
+    "task_id": 5,
+    "episode_idx": 0,
+    "dataset_episode_idx": 7,
+    "description": "pick up the milk and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.66666666666666,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[620, 149], [627, 203], [483, 161], [317, 153], [197, 517]]}<|/trace|><|trace|>",
+    "trace_2d": [
+      [
+        620.0,
+        149.0
+      ],
+      [
+        627.0,
+        203.0
+      ],
+      [
+        483.0,
+        161.0
+      ],
+      [
+        317.0,
+        153.0
+      ],
+      [
+        197.0,
+        517.0
+      ]
+    ]
+  },
+  {
+    "task_id": 6,
+    "episode_idx": 0,
+    "dataset_episode_idx": 9,
+    "description": "pick up the salad dressing and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 134.66666666666666,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[618, 541], [534, 401], [377, 335], [203, 362], [206, 484]]}<|/trace|><|/trace|>",
+    "trace_2d": [
+      [
+        618.0,
+        541.0
+      ],
+      [
+        534.0,
+        401.0
+      ],
+      [
+        377.0,
+        335.0
+      ],
+      [
+        203.0,
+        362.0
+      ],
+      [
+        206.0,
+        484.0
+      ]
+    ]
+  },
+  {
+    "task_id": 7,
+    "episode_idx": 0,
+    "dataset_episode_idx": 12,
+    "description": "pick up the butter and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.0,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[591, 151], [646, 289], [573, 145], [413, 131], [183, 513]]}<|/trace|>> [573,",
+    "trace_2d": [
+      [
+        591.0,
+        151.0
+      ],
+      [
+        646.0,
+        289.0
+      ],
+      [
+        573.0,
+        145.0
+      ],
+      [
+        413.0,
+        131.0
+      ],
+      [
+        183.0,
+        513.0
+      ]
+    ]
+  },
+  {
+    "task_id": 8,
+    "episode_idx": 0,
+    "dataset_episode_idx": 14,
+    "description": "pick up the tomato sauce and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 135.0,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[616, 574], [554, 443], [394, 396], [239, 369], [208, 511]]}<|/trace|>><|trace|",
+    "trace_2d": [
+      [
+        616.0,
+        574.0
+      ],
+      [
+        554.0,
+        443.0
+      ],
+      [
+        394.0,
+        396.0
+      ],
+      [
+        239.0,
+        369.0
+      ],
+      [
+        208.0,
+        511.0
+      ]
+    ]
+  },
+  {
+    "task_id": 9,
+    "episode_idx": 0,
+    "dataset_episode_idx": 16,
+    "description": "pick up the chocolate pudding and place it in the basket",
+    "input_source": "LIBERO-object training demonstration, first frame",
+    "agent_mean": 134.33333333333334,
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[69, 608], [94, 586], [134, 571], [170, 567], [197, 559]]}<|/trace|><|trace|>",
+    "trace_2d": [
+      [
+        69.0,
+        608.0
+      ],
+      [
+        94.0,
+        586.0
+      ],
+      [
+        134.0,
+        571.0
+      ],
+      [
+        170.0,
+        567.0
+      ],
+      [
+        197.0,
+        559.0
+      ]
+    ]
+  }
+]

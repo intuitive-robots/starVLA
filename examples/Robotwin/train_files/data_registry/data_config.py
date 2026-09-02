@@ -3,6 +3,8 @@
 from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
 from starVLA.dataloader.gr00t_lerobot.transform.base import ComposedModalityTransform
 from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionToTensor, StateActionTransform
+from starVLA.dataloader.gr00t_lerobot.transform.video import VideoResize, VideoToNumpy, VideoToTensor
+from starVLA.dataloader.cot_augmentation import CoTVideoAugment
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
 
 
@@ -56,8 +58,49 @@ class AgilexDataConfig:
 class AgilexData50Config(AgilexDataConfig):
     action_indices = list(range(50))
 
-    def transform(self):
-        return ComposedModalityTransform(transforms=[
+    def modality_config(self, action_horizon: int | None = None):
+        """Build the action chunk requested by the experiment YAML.
+
+        Keep 50 as the legacy ``robotwin_all_50`` default, but allow the consolidated
+        LeRobot-v3 clean subset to match StarVLA's standard 16-step RoboTwin recipe.
+        """
+        action_indices = list(range(action_horizon)) if action_horizon else self.action_indices
+        return {
+            "video": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.video_keys),
+            "state": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.state_keys),
+            "action": ModalityConfig(delta_indices=action_indices, modality_keys=self.action_keys),
+            "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
+        }
+
+    def transform(self, data_cfg: dict | None = None):
+        data_cfg = data_cfg or {}
+        augmentation = str(data_cfg.get("augmentation", "none")).lower()
+        allowed = {"none", "photometric", "crop_photometric"}
+        if augmentation not in allowed:
+            raise ValueError(
+                f"unknown RoboTwin augmentation {augmentation!r}; expected one of {sorted(allowed)}"
+            )
+        transforms = []
+        if augmentation != "none":
+            transforms.extend([
+                # One sampled crop/rotation/jitter is shared by cam1/cam2/cam3.  The
+                # transform rewrites cam1 <trajectory> coordinates and deliberately
+                # leaves metric <trajectory3d> wrist-frame coordinates unchanged.
+                CoTVideoAugment(
+                    apply_to=self.video_keys,
+                    mode=augmentation,
+                    crop_scale=0.95,
+                ),
+                VideoToTensor(apply_to=self.video_keys),
+                VideoResize(
+                    apply_to=self.video_keys,
+                    height=256,
+                    width=256,
+                    interpolation="linear",
+                ),
+                VideoToNumpy(apply_to=self.video_keys),
+            ])
+        transforms.extend([
             StateActionToTensor(apply_to=self.state_keys),
             StateActionTransform(
                 apply_to=self.state_keys,
@@ -77,6 +120,7 @@ class AgilexData50Config(AgilexDataConfig):
                 },
             ),
         ])
+        return ComposedModalityTransform(transforms=transforms)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +180,12 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
 # Mixtures
 # ---------------------------------------------------------------------------
 DATASET_NAMED_MIXTURES = {
+    # Exact StarVLA 50-demo subset from the consolidated LeRobot v3 release:
+    # 50 tasks x 50 clean Aloha-AgileX trajectories = 2,500 episodes.
+    # This avoids materialising the legacy per-task directory layout.
+    "robotwin_aloha_clean50_v3": [
+        ("aloha_agilex_clean", 1.0, "robotwin50"),
+    ],
     "robotwin_all": [
         ("Clean/adjust_bottle", 1.0, "robotwin"), ("Randomized/adjust_bottle", 1.0, "robotwin"),
         ("Clean/beat_block_hammer", 1.0, "robotwin"), ("Randomized/beat_block_hammer", 1.0, "robotwin"),

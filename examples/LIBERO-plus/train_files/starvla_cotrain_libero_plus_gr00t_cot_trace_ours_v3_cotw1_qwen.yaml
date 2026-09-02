@@ -1,0 +1,148 @@
+# LIBERO-plus + GR00T DiT action head + trace-style CoT supervision (selection_mode=ours, centroid trace).
+#
+# First LIBERO-plus run where "ours" and "detection" traces are extracted the
+# SAME way, so the comparison isolates candidate selection alone.
+#
+# History: robog-dataset-pipeline published object.track from the annotator's
+# single-selected-point export while baselines.detector.track came from
+# lightweight_scoring.compute_centroid_traces (the visible-point centroid).
+# Legacy flat annotations (real-robot ambiguity run) carried centroid_traces in
+# the arrays blob, so create_cot_mapping.py's tier-1 path rebuilt "ours" from
+# the centroid there -- 735/735 rows -- which is why real robot compared ours
+# vs det fairly (30% vs 10%) while LIBERO-plus did not (75.3% vs 76.1%, ours
+# handicapped by a noisier single-point trace).
+#
+# Fixed in robog-dataset-pipeline 400daa4 (+19fe791): both tracks now come from
+# centroid_traces via one shared helper, differing only in candidate index.
+# Verified on the regenerated annotations: on the 5131 rows where the winner and
+# the detector argmax are the same candidate, the two published tracks are
+# byte-identical (arc/spread ratio 1.0000, was 0.912).
+#
+# CoT source: data/cot_mappings/libero_plus_full_ours_trace.jsonl, built with
+#   python scripts/create_cot_mapping.py \
+#       --annotations ~/datasets/lerobot_3_0/libero_plus_boxes.jsonl \
+#       --output      data/cot_mappings/libero_plus_centroid.jsonl \
+#       --trace_format --selection_mode ours
+# Detection counterpart: starvla_cotrain_libero_plus_gr00t_cot_trace_det_centroid_qwen.yaml
+run_id: libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw1
+run_root_dir: playground/Checkpoints
+# v3 = seed replicate of the best config (ours full mapping, cot weight 1.0,
+# 78.7% on LIBERO-plus). Everything except the seed is identical to
+# ..._ours_full_cotw1_qwen.yaml, so the difference between the two runs measures
+# TRAINING-SEED VARIANCE -- the variance component every pairwise p-value so far
+# has ignored by assuming eval sampling noise is the only source.
+seed: 1234
+wandb_entity: niblank
+wandb_project: starvla_libero_plus
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenGR00T_CoT
+  cot:
+    generate_at_inference: true
+    max_new_tokens: 160
+
+  readout_tokens:
+    enabled:    false
+    num_tokens: 32
+    num_layers: 2
+    num_heads:  8
+    ffn_dim:    0
+    dropout:    0.0
+
+  qwenvl:
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3.5-0.8B
+    attn_implementation: sdpa
+    vl_hidden_dim: 2048
+  action_model:
+    action_dim: 7          # LIBERO delta eef (6) + gripper (1)
+    state_dim: 0
+    action_horizon: 8
+    action_model_type: DiT-B
+    hidden_size: 768
+    action_hidden_dim: 768
+    add_pos_embed: True
+    max_seq_len: 1024
+    diffusion_model_cfg:
+      num_layers: 12
+      output_dim: 768
+      dropout: 0.1
+
+datasets:
+  vlm_data:
+    dataset_py: vlm_datasets
+    dataformat: llava_json
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    data_flatten: false
+    base_interval: 2
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    per_device_batch_size: 4
+    num_workers: 4
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0
+    data_mix: libero_plus
+    action_type: delta_qpos
+    sequential_step_sampling: False
+
+    # MUST match the human prompt baked into the mapping file, or
+    # assert_cot_prompt_consistent() fails at startup.
+    CoT_prompt: "Your task is {instruction}. Generate the 2D trajectory the object should follow to complete the task. Output exactly 5 points."
+
+    cot:
+      source: mapping
+      mapping_path: data/cot_mappings/libero_plus_full_ours_trace.jsonl
+      loss_scale: 0.1
+
+    per_device_batch_size: 32
+    load_all_data_for_training: true
+    video_backend: torchcodec
+    video_seek_mode: approximate
+    video_num_threads: 1
+    video_reader_cache_size: 80
+    video_prefetch_page_cache: true
+    lerobot_version: "v3.0"
+    num_workers: 8
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    include_state: false
+
+trainer:
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  save_interval: 5000
+  eval_interval: 1000
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+    cot: 1.0
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 100
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08

@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 5,
+    "episode_idx": 0,
+    "description": "pick up the tomato sauce and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "tomato_sauce_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            -0.002231533691839963,
+            0.26361158778833477,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            0.03986889050184229,
+            0.0032359805549647003
+          ],
+          "after_xyz": [
+            0.037637356810002326,
+            0.2668475683432995,
+            0.034999999999999996
+          ]
+        },
+        {
+          "name": "tomato_sauce_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "tomato_sauce_1_joint0",
+          "before_xyz": [
+            0.05,
+            -0.1,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.021693213692165533,
+            -0.03360661363044545
+          ],
+          "after_xyz": [
+            0.02830678630783447,
+            -0.13360661363044546,
+            0.034999999999999996
+          ]
+        }
+      ]
+    },
+    "model": "detector",
+    "cot_text": "<|trace|>{\"trace_2d\": [[735, 537], [736, 538], [737, 538], [738, 539], [739, 540]]}<|/trace|> [739, ",
+    "trace_2d": [
+      [
+        735.0,
+        537.0
+      ],
+      [
+        736.0,
+        538.0
+      ],
+      [
+        737.0,
+        538.0
+      ],
+      [
+        738.0,
+        539.0
+      ],
+      [
+        739.0,
+        540.0
+      ]
+    ]
+  }
+]

@@ -120,21 +120,29 @@ def build_param_lr_groups(model, cfg):
             print(f"⚠️ freeze module path does not exist: {freeze_path}")
             continue
 
-    for module_name, lr in lr_cfg.items():
-        if module_name == "base":
-            continue
+    # Deepest path first, so a NESTED override wins over its ancestor: listing both
+    #     qwen_vl_interface:                              1e-5
+    #     qwen_vl_interface...language_model.layers:      1e-6
+    # gives the decoder its own reduced LR while everything else under the interface keeps
+    # the ancestor's. Without the `used_params` filter below those parameters would land in
+    # TWO groups and AdamW rejects that ("some parameters appear in more than one parameter
+    # group"), so nested overrides were previously impossible.
+    named = sorted(((k, v) for k, v in lr_cfg.items() if k != "base"),
+                   key=lambda kv: -kv[0].count("."))
+    for module_name, lr in named:
         # try to find the module under vla by module_name (support nested paths)
         module = model
         try:
             for attr in module_name.split("."):
                 module = getattr(module, attr)
-            # filter out frozen parameters
-            params = [p for p in module.parameters() if id(p) not in frozen_params]
-            if params:  # only add param group if there are trainable parameters
-                param_groups.append({"params": params, "lr": lr, "name": module_name})
-                used_params.update(id(p) for p in params)
         except AttributeError:
-            ReferenceError(f"⚠️ module path `{module_name}` not found in vla")
+            print(f"⚠️ module path `{module_name}` not found in vla")
+            continue
+        params = [p for p in module.parameters()
+                  if id(p) not in frozen_params and id(p) not in used_params]
+        if params:  # only add param group if there are trainable parameters
+            param_groups.append({"params": params, "lr": lr, "name": module_name})
+            used_params.update(id(p) for p in params)
 
     # assign base learning rate to the remaining unused parameters (exclude frozen ones)
     other_params = [p for p in model.parameters() if id(p) not in used_params and id(p) not in frozen_params]
@@ -334,9 +342,32 @@ class TrainerUtils:
         :return: prepared distributed components (in the same order as input)
         """
 
-        # use accelerator.prepare method to wrap components
-        prepared_components = accelerator.prepare(*components)
-        return prepared_components
+        # Some data pipelines must expose an inner torch DataLoader to
+        # Accelerate and only wrap it after preparation.  In particular,
+        # Marigold/M3 workers emit singleton samples and the rank's main
+        # process assembles full batches; preparing the outer wrapper would
+        # bypass Accelerate's DataLoader handling.
+        prepare_components = []
+        deferred = {}
+        for index, component in enumerate(components):
+            get_inner = getattr(component, "accelerator_prepare_component", None)
+            finish = getattr(component, "after_accelerator_prepare", None)
+            if callable(get_inner) and callable(finish):
+                prepare_components.append(get_inner())
+                deferred[index] = finish
+            else:
+                prepare_components.append(component)
+
+        prepared_components = accelerator.prepare(*prepare_components)
+        if len(prepare_components) == 1:
+            prepared_components = (prepared_components,)
+        else:
+            prepared_components = tuple(prepared_components)
+
+        prepared_components = list(prepared_components)
+        for index, finish in deferred.items():
+            prepared_components[index] = finish(prepared_components[index])
+        return tuple(prepared_components)
 
     @staticmethod
     def euclidean_distance(predicted: np.ndarray, ground_truth: np.ndarray) -> float:

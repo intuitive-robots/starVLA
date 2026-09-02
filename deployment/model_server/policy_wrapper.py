@@ -43,11 +43,33 @@ class PolicyServerWrapper:
         use_bf16: bool = False,
         unnorm_key: Optional[str] = None,
         is_inference: bool = False,
+        cot_max_new_tokens: Optional[int] = None,
     ) -> None:
         self._ckpt_path = str(ckpt_path)
 
         logging.info("PolicyServerWrapper: loading framework from %s", self._ckpt_path)
         framework = baseframework.from_pretrained(self._ckpt_path, is_inference=is_inference)
+        if cot_max_new_tokens is not None:
+            if cot_max_new_tokens <= 0:
+                raise ValueError(
+                    f"cot_max_new_tokens must be positive, got {cot_max_new_tokens}"
+                )
+            framework_cfg = getattr(framework.config, "framework", None)
+            cot_cfg = getattr(framework_cfg, "cot", None)
+            if cot_cfg is None:
+                logging.info(
+                    "Ignoring cot_max_new_tokens=%d because this checkpoint has no CoT config",
+                    cot_max_new_tokens,
+                )
+            else:
+                if hasattr(cot_cfg, "__setitem__"):
+                    cot_cfg["max_new_tokens"] = int(cot_max_new_tokens)
+                else:
+                    setattr(cot_cfg, "max_new_tokens", int(cot_max_new_tokens))
+                logging.info(
+                    "Inference override: framework.cot.max_new_tokens=%d",
+                    cot_max_new_tokens,
+                )
         if use_bf16:
             framework = framework.to(torch.bfloat16)
         framework = framework.to(device).eval()
@@ -160,4 +182,9 @@ class PolicyServerWrapper:
             [proc.unapply_actions(normalized[b]) for b in range(normalized.shape[0])],
             axis=0,
         )
-        return {"actions": unnorm}
+        response = {"actions": unnorm}
+        # Pass reasoning text through untouched when the framework produced it
+        # (explicit-CoT models only), so clients can overlay it on rollout video.
+        if "cot_text" in out:
+            response["cot_text"] = out["cot_text"]
+        return response

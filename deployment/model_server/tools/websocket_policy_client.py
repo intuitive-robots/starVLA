@@ -44,15 +44,27 @@ class WebsocketClientPolicy:
 
             try:
                 headers = {"Authorization": f"Api-Key {self._api_key}"} if self._api_key else None
-                conn = websockets.sync.client.connect(
-                    self._uri,
-                    compression=None,
-                    max_size=None,
-                    additional_headers=headers,
-                    open_timeout=150,
-                    ping_interval=None,
-                    ping_timeout=60,
-                )
+                connect_kwargs = {
+                    "compression": None,
+                    "max_size": None,
+                    "additional_headers": headers,
+                    "open_timeout": 150,
+                    "ping_interval": None,
+                    "ping_timeout": 60,
+                }
+                try:
+                    conn = websockets.sync.client.connect(self._uri, **connect_kwargs)
+                except TypeError as exc:
+                    # websockets 13.x accepts arbitrary socket kwargs here but
+                    # doesn't implement sync-client keepalive options; they
+                    # reach socket.create_connection() and raise this error.
+                    # The simulator SIF uses 13.1, while the StarVLA host env
+                    # uses a newer release. Retry without only those options.
+                    if "ping_interval" not in str(exc) and "ping_timeout" not in str(exc):
+                        raise
+                    connect_kwargs.pop("ping_interval")
+                    connect_kwargs.pop("ping_timeout")
+                    conn = websockets.sync.client.connect(self._uri, **connect_kwargs)
                 metadata = msgpack_numpy.unpackb(conn.recv())
                 return conn, metadata
             except ConnectionRefusedError:

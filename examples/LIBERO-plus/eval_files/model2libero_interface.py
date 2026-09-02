@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import deque
 from typing import Dict, Optional, Sequence
 
@@ -134,6 +136,7 @@ class ModelClient:
         vla_input["unnorm_key"] = self.unnorm_key
 
         action_chunk_size = self.action_chunk_size
+        self.cot_is_fresh = False
         if step % action_chunk_size == 0:
             response = self.client.predict_action(vla_input)
             if not response.get("ok", False):
@@ -145,6 +148,12 @@ class ModelClient:
                 raise RuntimeError(f"Policy server returned malformed response: {response}")
             # server already un-normalized via training-time transform
             self.raw_actions = np.array(response["data"]["actions"][0])  # (chunk, D)
+            # Explicit-CoT servers also return the reasoning that conditioned this
+            # chunk; hold it so every frame until the next chunk can display it.
+            cot = response["data"].get("cot_text")
+            if cot:
+                self.last_cot_text = cot[0] if isinstance(cot, (list, tuple)) else cot
+                self.cot_is_fresh = True
 
         raw_actions = self.raw_actions[step % action_chunk_size][None]
 
@@ -154,7 +163,11 @@ class ModelClient:
             "open_gripper": np.array(raw_actions[0, 6:7]),  # range [0, 1]; 1 = open; 0 = close
         }
 
-        return {"raw_action": raw_action}
+        return {
+            "raw_action": raw_action,
+            "cot_text": getattr(self, "last_cot_text", None),
+            "cot_is_fresh": getattr(self, "cot_is_fresh", False),
+        }
 
     def _resize_image(self, image: np.ndarray) -> np.ndarray:
         image = cv.resize(image, tuple(self.image_size), interpolation=cv.INTER_AREA)

@@ -87,6 +87,10 @@ class _QWen3_VL_Interface(nn.Module):
         Forward pass delegating to underlying Qwen2.5-VL backbone.
         """
 
+        # Metadata used by the encoder-decoder adapter to split prompt from answer.
+        # The causal Qwen model has no use for it and must not receive an unknown kwarg.
+        kwargs.pop("_cot_encoder_prefix_length", None)
+
         with torch.autocast("cuda", dtype=torch.bfloat16):
             outputs = self.model(
                 **kwargs,
@@ -115,23 +119,60 @@ class _QWen3_VL_Interface(nn.Module):
             )
         return generation_output
 
-    def build_qwenvl_inputs(self, images, instructions, solutions=None, **kwargs):
+    def build_qwenvl_inputs(
+        self,
+        images,
+        instructions,
+        solutions=None,
+        cot_conversations=None,
+        cot_modes=None,
+        **kwargs,
+    ):
         """
-        Build model inputs from raw data (images + instructions + optional solutions).
+        Build model inputs from raw data (images + instructions + optional solutions/cot_conversations).
         Follow Oficial Qwen3-VL Instruct format: https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct
+
+        Args:
+            images:            List[List[PIL.Image]]  — one inner list per sample
+            instructions:      List[str]
+            solutions:         List[str] | None  — fast-tokenizer action token sequences
+            cot_conversations: List[list|None] | None  — per-sample ShareGPT conversations,
+                               each [{from: human, value: ...}, {from: gpt, value: ...}] or None
+                               (unannotated → no CoT loss for that sample). The human value may
+                               contain {instruction}, which is filled in here.
+            cot_modes:         List[str|None] | None — explicit ERVLA-style ``cot`` /
+                               ``no_cot`` condition. The marker is appended to the user prompt.
+
+        NOTE: this parameter used to be absent, so every framework that passed
+        ``cot_conversations=`` (QwenGR00T, QwenGR00T_CoTrain) had it silently swallowed by
+        **kwargs — no labels were built, ``qwenvl_outputs.loss`` stayed None, and no
+        ``cot_loss`` key ever reached the trainer. Ported from QWen3_5.py, which already had
+        this path; see RESULTS_TIER3.md §3 for the runs that were affected.
         """
 
-        # Create messages: one message per sample
+        # Create user-only messages (prompt side).
+        # For CoT samples the human turn comes from the conversation, not the CoT_prompt config.
         messages = []
         assert len(images) == len(instructions), "Images and instructions must have the same length"
-        for imgs, instruction in zip(images, instructions):
+        if cot_modes is not None and len(cot_modes) != len(instructions):
+            raise ValueError("cot_modes length must match batch size")
+        for i, (imgs, instruction) in enumerate(zip(images, instructions)):
             content = [{"type": "image", "image": img} for img in imgs]
 
-            if "CoT_prompt" in self.config.datasets.vla_data:  # If using a grounding prompt to task
+            conv = cot_conversations[i] if cot_conversations is not None else None
+            if conv is not None:
+                prompt = conv[0]["value"].replace("{instruction}", instruction)
+            elif "CoT_prompt" in self.config.datasets.vla_data:  # If using a grounding prompt to task
                 CoT_prompt = self.config.datasets.vla_data.get("CoT_prompt", "")
                 prompt = CoT_prompt.replace("{instruction}", instruction)
             else:
                 prompt = instruction
+
+            mode = cot_modes[i] if cot_modes is not None else None
+            if mode is not None:
+                if mode not in {"cot", "no_cot"}:
+                    raise ValueError(f"unsupported cot mode: {mode!r}")
+                prompt = f"{prompt}\n/{mode}"
 
             content.append({"type": "text", "text": prompt})
             msg = [{"role": "user", "content": content}]
@@ -141,7 +182,74 @@ class _QWen3_VL_Interface(nn.Module):
                 msg.append({"role": "assistant", "content": [{"type": "text", "text": solution}]})
             messages.append(msg)
 
-        # Preparation for inference
+        # ── CoT conversation path ─────────────────────────────────────────────────
+        # Loss is computed only on gpt (assistant) tokens; human/system tokens are masked.
+        if cot_conversations is not None:
+            assert len(cot_conversations) == len(messages), "cot_conversations length must match batch size"
+
+            messages_with_cot = []
+            for msg, conv in zip(messages, cot_conversations):
+                gpt_text = conv[1]["value"] if conv is not None else ""
+                messages_with_cot.append(
+                    msg + [{"role": "assistant", "content": [{"type": "text", "text": gpt_text}]}]
+                )
+
+            # Encode prompt-only to measure per-sample prompt lengths. With
+            # add_generation_prompt=True the encoding ends exactly where the assistant starts.
+            prompt_only_inputs = self.processor.apply_chat_template(
+                messages,  # user-only messages
+                tokenize=True,
+                padding=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            batch_inputs = self.processor.apply_chat_template(
+                messages_with_cot,
+                tokenize=True,
+                padding=True,
+                add_generation_prompt=False,
+                return_dict=True,
+                return_tensors="pt",
+            )
+
+            # Build labels: mask everything up to the assistant turn, supervise only the CoT
+            # tokens. With LEFT padding the valid tokens are right-aligned, so the assistant
+            # span is the last (full_valid - prompt_valid) positions.
+            #
+            # For the enc-dec backbone this is also what defines the architecture split:
+            # _EncDecOuterMixin sets encoder_prefix_length = (labels != -100).argmax(dim=1),
+            # so the bidirectional encoder sees exactly the prompt and the causal decoder
+            # sees exactly the CoT answer.
+            max_full_len = batch_inputs["input_ids"].shape[1]
+            labels = batch_inputs["input_ids"].clone()
+            encoder_prefix_length = []
+            for i in range(labels.size(0)):
+                prompt_valid = int(prompt_only_inputs["attention_mask"][i].sum())
+                full_valid = int(batch_inputs["attention_mask"][i].sum())
+                asst_len = full_valid - prompt_valid
+                asst_start = max_full_len - max(asst_len, 0)
+                encoder_prefix_length.append(asst_start)
+                labels[i, :asst_start] = IGNORE_INDEX
+                # An unmatched frame deliberately has no auxiliary target.  Appending an
+                # empty assistant turn still adds chat-template terminators, so mask the
+                # complete row instead of accidentally training on those special tokens.
+                if cot_conversations[i] is None:
+                    labels[i, :] = IGNORE_INDEX
+                # Mask any residual pad tokens that ended up in the label.
+                if self.processor.tokenizer.pad_token_id is not None:
+                    labels[i][labels[i] == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX
+            batch_inputs["labels"] = labels
+            # Keep the prompt boundary even for all-ignored rows.  Deriving it with
+            # `(labels != -100).argmax()` would return zero and remove that sample's image
+            # and instruction from the bidirectional encoder.  The ordinary causal adapter
+            # drops this private metadata in forward(); QWen3_EncDec consumes it.
+            batch_inputs["_cot_encoder_prefix_length"] = torch.tensor(
+                encoder_prefix_length, device=labels.device, dtype=torch.long)
+            return batch_inputs.to(self.model.device)
+
+        # Preparation for inference (no CoT)
 
         batch_inputs = self.processor.apply_chat_template(
             messages, tokenize=True, padding=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"

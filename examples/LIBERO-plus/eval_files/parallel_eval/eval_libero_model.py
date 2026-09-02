@@ -1,4 +1,9 @@
+from __future__ import annotations
+
+import argparse
 import dataclasses
+import hashlib
+import fcntl
 import json
 import logging
 import math
@@ -11,7 +16,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 import cv2 as cv
-import draccus
+import re
 import imageio
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,8 +30,13 @@ if str(EVAL_FILES_DIR) not in sys.path:
 
 from model2libero_interface import ModelClient
 
-from starVLA.model.framework.base_framework import baseframework
-from starVLA.model.tools import read_mode_config
+try:
+    import draccus
+except ModuleNotFoundError:
+    # The Apptainer simulator image intentionally contains only the evaluation
+    # runtime.  Keep the existing draccus CLI when it is installed (the conda
+    # path), and use the stdlib parser below in the lean SIF path.
+    draccus = None
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
@@ -148,6 +158,84 @@ def get_logger(file):
     return logger
 
 
+_TRACE_RE = re.compile(r"<\|trace\|>(.*?)<\|/trace\|>", re.DOTALL)
+
+
+def _parse_trace(cot_text: str | None) -> list[tuple[float, float]]:
+    """Pull the 2D trace out of a CoT string as normalized 0-1 coordinates.
+
+    Training targets encode points in a 0-1000 grid over the image the model was
+    shown, so dividing by 1000 makes them resolution-independent. Returns [] for
+    anything unparseable -- overlay is diagnostic and must never break a rollout.
+    """
+    if not cot_text:
+        return []
+    m = _TRACE_RE.search(cot_text)
+    if not m:
+        return []
+    arr = re.search(r"\[\s*\[.*?\]\s*\]", m.group(1), re.DOTALL)
+    if not arr:
+        return []
+    nums = re.findall(r"-?\d+(?:\.\d+)?", arr.group(0))
+    return [
+        (float(nums[i]) / 1000.0, float(nums[i + 1]) / 1000.0)
+        for i in range(0, len(nums) - 1, 2)
+    ]
+
+
+def _overlay_trace(frame: np.ndarray, points, fresh: bool = False) -> np.ndarray:
+    """Draw a predicted trace on a copy of `frame`. Never mutates the input.
+
+    The frame handed to the policy must stay pixel-identical, so this always
+    copies. Points are colour-graded start (green) -> end (red) so the direction
+    of the predicted motion is readable, and the frame where the chunk was
+    re-predicted gets a white border.
+    """
+    if not points:
+        return frame
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return frame
+
+    img = Image.fromarray(frame.copy())
+    draw = ImageDraw.Draw(img)
+    h, w = frame.shape[:2]
+    px = [(max(0.0, min(1.0, x)) * (w - 1), max(0.0, min(1.0, y)) * (h - 1)) for x, y in points]
+
+    n = max(len(px) - 1, 1)
+    for i in range(len(px) - 1):
+        f = i / n
+        draw.line([px[i], px[i + 1]], fill=(int(255 * f), int(255 * (1 - f)), 40), width=2)
+    for i, (x, y) in enumerate(px):
+        f = i / max(len(px) - 1, 1)
+        r = 3.5 if i in (0, len(px) - 1) else 2.0
+        draw.ellipse([x - r, y - r, x + r, y + r],
+                     fill=(int(255 * f), int(255 * (1 - f)), 40), outline=(255, 255, 255))
+    if fresh:
+        draw.rectangle([0, 0, w - 1, h - 1], outline=(255, 255, 255), width=2)
+    return np.asarray(img)
+
+
+
+_TRACE_WARNED = [False]
+
+
+def _warn_if_no_trace(cot_text, points) -> None:
+    """Overlay silently produces plain video when no trace reaches the client --
+    e.g. a non-CoT checkpoint, or a client that drops the server's cot_text.
+    Say so once instead of leaving the user to notice from the mp4s."""
+    if _TRACE_WARNED[0]:
+        return
+    if not cot_text:
+        logging.warning("[overlay_trace] enabled but the policy returned no cot_text -- "
+                        "video will be unannotated. Needs framework.cot.generate_at_inference=true.")
+        _TRACE_WARNED[0] = True
+    elif not points:
+        logging.warning("[overlay_trace] cot_text has no parseable <|trace|> block: %r", cot_text[:120])
+        _TRACE_WARNED[0] = True
+
+
 @dataclasses.dataclass
 class Args:
     host: str = "127.0.0.1"
@@ -167,6 +255,14 @@ class Args:
     # Utils
     #################################################################################################################
     video_out_path: str = "experiments/libero/logs"  # Path to save videos
+    save_video: bool = False
+    """Save one MP4 for every rollout. Disabled for quantitative evaluations;
+    per-shard JSONs contain everything required to compute success rates."""
+    overlay_trace: bool = False
+    """Draw the model's generated 2D trace on the saved rollout video. The trace
+    is re-predicted once per action chunk and held for the frames in between;
+    the frame where it was regenerated is marked with a white border. Requires
+    framework.cot.generate_at_inference=true -- a no-op otherwise."""
     log_path: str = "experiments/libero/logs"
 
     seed: int = 7  # Random Seed (for reproducibility)
@@ -182,11 +278,111 @@ class Args:
 
     start_idx: int = -1
     end_idx: int = -1
+    # Task indices within [start_idx, end_idx) are grouped into large contiguous
+    # blocks by perturbation category (e.g. index 0-499 of libero_10 is entirely
+    # "table" perturbations, 500-999 is "view", etc.) -- a plain contiguous
+    # sub-range is NOT a representative sample of perturbation types. stride > 1
+    # takes every stride'th index instead, spreading the evaluated tasks across
+    # every category the range spans.
+    stride: int = 1
+    # Exactly K indices floor(k * suite_size / K), k=0..K-1, filtered to this
+    # worker's [start_idx,end_idx). Zero keeps the legacy stride behavior.
+    exact_sample_count: int = 0
     output_dir: str = "./output"
 
     # Gripper output convention: "auto" reads dataset_statistics.json next to the
     # checkpoint; override with "zero_one" or "pm_one". See _binarize_gripper.
     gripper_encoding: str = "auto"
+    object_perturb_m: float = 0.0
+    object_perturb_roles: str = "source,target"
+    object_perturb_seed: int = 20260812
+
+
+def _stable_perturb_rng(seed: int, suite: str, task_id: int, episode_idx: int, object_name: str):
+    key = f"{seed}|{suite}|{task_id}|{episode_idx}|{object_name}".encode("utf-8")
+    digest = hashlib.sha256(key).digest()
+    return np.random.default_rng(int.from_bytes(digest[:8], "little"))
+
+
+def _goal_object_roles(env) -> tuple[list[str], list[str], list[str]]:
+    task_env = env.env
+    movable = task_env.objects_dict
+    fixtures = task_env.fixtures_dict
+
+    def owner(token: str, candidates) -> str | None:
+        matches = [name for name in candidates if token == name or token.startswith(name + "_")]
+        return max(matches, key=len) if matches else None
+
+    sources, targets, unsupported = [], [], []
+    for goal in task_env.parsed_problem.get("goal_state", []):
+        if len(goal) >= 2:
+            source = owner(goal[1], movable)
+            if source is not None:
+                sources.append(source)
+            elif owner(goal[1], fixtures) is not None:
+                unsupported.append(f"source fixture:{goal[1]}")
+        if len(goal) >= 3:
+            target = owner(goal[2], movable)
+            if target is not None:
+                targets.append(target)
+            elif owner(goal[2], fixtures) is not None:
+                unsupported.append(f"target fixture:{goal[2]}")
+            else:
+                unsupported.append(f"target region:{goal[2]}")
+    return list(dict.fromkeys(sources)), list(dict.fromkeys(targets)), list(dict.fromkeys(unsupported))
+
+
+def _apply_object_perturbation(env, magnitude_m, roles_csv, seed, suite, task_id, episode_idx) -> dict:
+    if magnitude_m < 0:
+        raise ValueError(f"object_perturb_m must be non-negative, got {magnitude_m}")
+    roles = {x.strip().lower() for x in roles_csv.split(",") if x.strip()}
+    unknown = roles - {"source", "target"}
+    if unknown:
+        raise ValueError(f"Unknown object perturbation roles: {sorted(unknown)}")
+    sources, targets, unsupported = _goal_object_roles(env)
+    selected: dict[str, set[str]] = {}
+    if "source" in roles:
+        for name in sources:
+            selected.setdefault(name, set()).add("source")
+    if "target" in roles:
+        for name in targets:
+            selected.setdefault(name, set()).add("target")
+    record = {
+        "magnitude_m": float(magnitude_m), "roles": sorted(roles),
+        "source_objects": sources, "target_objects": targets,
+        "unsupported": unsupported, "objects": [],
+    }
+    if magnitude_m == 0:
+        return record
+    if not selected:
+        raise RuntimeError(
+            f"No movable goal objects resolved for roles={sorted(roles)} in "
+            f"{suite} task={task_id}; unsupported={unsupported}"
+        )
+    for object_name, object_roles in sorted(selected.items()):
+        obj = env.env.objects_dict[object_name]
+        if not obj.joints:
+            raise RuntimeError(f"Movable goal object {object_name!r} has no MuJoCo joint")
+        joint = obj.joints[0]
+        qpos = np.asarray(env.sim.data.get_joint_qpos(joint), dtype=np.float64).copy()
+        if qpos.size != 7:
+            raise RuntimeError(f"Expected 7 qpos for free joint {joint!r}, got {qpos.size}")
+        before = qpos[:3].copy()
+        rng = _stable_perturb_rng(seed, suite, task_id, episode_idx, object_name)
+        angle = float(rng.uniform(0.0, 2.0 * np.pi))
+        delta = magnitude_m * np.asarray([np.cos(angle), np.sin(angle)], dtype=np.float64)
+        qpos[:2] += delta
+        env.sim.data.set_joint_qpos(joint, qpos)
+        record["objects"].append({
+            "name": object_name, "roles": sorted(object_roles), "joint": joint,
+            "before_xyz": before.tolist(), "delta_xy": delta.tolist(), "after_xyz": qpos[:3].tolist(),
+        })
+    env.sim.forward()
+    if env.check_success():
+        raise RuntimeError(
+            f"Perturbation accidentally satisfied {suite} task={task_id} episode={episode_idx}"
+        )
+    return record
 
 
 class PolicyModel:
@@ -206,6 +402,11 @@ class PolicyModel:
         port=10095,
         use_bf16=True,
     ) -> None:
+
+        # Local-model evaluation is retained for the conda path.  Importing the
+        # framework lazily keeps remote-server simulator workers independent of
+        # transformers / accelerate and the rest of the model-training stack.
+        from starVLA.model.framework.base_framework import baseframework
 
         # build client to connect server policy
         self.policy_setup = policy_setup
@@ -283,9 +484,16 @@ class PolicyModel:
         }
 
         action_chunk_size = self.action_chunk_size
+        self.cot_is_fresh = False
         if step % action_chunk_size == 0:
             response = self.vla.predict_action(example, **vla_input)
             normalized_actions = response["normalized_actions"]  # B, chunk, D
+            # Explicit-CoT frameworks return the reasoning that conditioned this
+            # chunk; hold it so every frame until the next chunk can show it.
+            cot = response.get("cot_text")
+            if cot:
+                self.last_cot_text = cot[0] if isinstance(cot, (list, tuple)) else cot
+                self.cot_is_fresh = True
 
             normalized_actions = normalized_actions[0]
 
@@ -304,7 +512,11 @@ class PolicyModel:
             "open_gripper": np.array(raw_actions[0, 6:7]),  # range [0, 1]; 1 = open; 0 = close
         }
 
-        return {"raw_action": raw_action}
+        return {
+            "raw_action": raw_action,
+            "cot_text": getattr(self, "last_cot_text", None),
+            "cot_is_fresh": getattr(self, "cot_is_fresh", False),
+        }
 
     @staticmethod
     def unnormalize_actions(normalized_actions: np.ndarray, action_norm_stats: Dict[str, np.ndarray]) -> np.ndarray:
@@ -325,6 +537,8 @@ class PolicyModel:
         """
         Duplicate stats accessor (retained for backward compatibility).
         """
+        from starVLA.model.tools import read_mode_config
+
         policy_ckpt_path = Path(policy_ckpt_path)
         model_config, norm_stats = read_mode_config(policy_ckpt_path)  # read config and norm_stats
 
@@ -333,6 +547,8 @@ class PolicyModel:
 
     @staticmethod
     def get_action_chunk_size(policy_ckpt_path):
+        from starVLA.model.tools import read_mode_config
+
         model_config, _ = read_mode_config(policy_ckpt_path)  # read config and norm_stats
         # import ipdb; ipdb.set_trace()
         return model_config["framework"]["action_model"]["future_action_window_size"] + 1
@@ -394,14 +610,24 @@ class PolicyModel:
         return unnorm_key
 
 
-@draccus.wrap()
+def _eval_entrypoint(func):
+    return draccus.wrap()(func) if draccus is not None else func
+
+
+@_eval_entrypoint
 def eval_libero(args: Args) -> None:
+    # Asking for a trace overlay necessarily asks for a replay video. Ordinary
+    # quantitative runs skip both frame retention and MP4 encoding entirely.
+    record_video = args.save_video or args.overlay_trace
 
     local_rank = int(os.getenv("LOCAL_RANK", "0"))
     world_size = int(os.getenv("WORLD_SIZE", "1"))
     rank = int(os.getenv("RANK", "0"))
     print(f"🌍 Rank {rank}/{world_size} | GPU: {local_rank}")
-    torch.cuda.set_device(local_rank)
+    # The model server owns CUDA inference.  SIF workers use a CPU-only torch
+    # wheel for LIBERO init-state loading and select EGL via environment vars.
+    if not args.use_server:
+        torch.cuda.set_device(local_rank)
 
     # Set random seed
     np.random.seed(args.seed)
@@ -424,10 +650,35 @@ def eval_libero(args: Args) -> None:
         args.end_idx = num_tasks_in_suite
     # args.start_idx = start_idx
     # args.end_idx = end_idx
-    print(f"processing tasks from {args.start_idx} to {args.end_idx}")
+    if args.exact_sample_count:
+        if not 0 < args.exact_sample_count <= num_tasks_in_suite:
+            raise ValueError(
+                f"exact_sample_count must be in [1, {num_tasks_in_suite}], "
+                f"got {args.exact_sample_count}"
+            )
+        global_task_ids = [
+            sample_idx * num_tasks_in_suite // args.exact_sample_count
+            for sample_idx in range(args.exact_sample_count)
+        ]
+        task_ids = [
+            task_id for task_id in global_task_ids
+            if args.start_idx <= task_id < args.end_idx
+        ]
+        sample_tag = f"_exact{args.exact_sample_count}"
+    else:
+        task_ids = list(range(args.start_idx, args.end_idx, args.stride))
+        sample_tag = "" if args.stride == 1 else f"_stride{args.stride}"
+    print(
+        f"processing {len(task_ids)} tasks from {args.start_idx} to {args.end_idx} "
+        f"(stride={args.stride}, exact_sample_count={args.exact_sample_count})"
+    )
     # args.video_out_path = f"{date_base}+{args.job_name}"
+    # stride suffix keeps a subsampled shard's filename distinct from a
+    # full (stride=1) shard covering the same [start_idx,end_idx) -- otherwise
+    # a later full-range rerun into the same output_dir would silently
+    # overwrite a subsampled shard's json (or vice versa) rather than erroring.
     log_path = os.path.join(args.output_dir, f"logs/{args.task_suite_name}")
-    log_file = os.path.join(log_path, f"{args.start_idx}_{args.end_idx}.log")
+    log_file = os.path.join(log_path, f"{args.start_idx}_{args.end_idx}{sample_tag}.log")
     pathlib.Path(log_path).mkdir(parents=True, exist_ok=True)
     logger = get_logger(log_file)
     logger.info(f"Arguments: {json.dumps(dataclasses.asdict(args), indent=4)}")
@@ -491,11 +742,12 @@ def eval_libero(args: Args) -> None:
     # Start evaluation
 
     total_episodes, total_successes = 0, 0
+    episode_records = []
     print(
         f"*****************num tasks in {args.task_suite_name}: {num_tasks_in_suite}****************, processing from{args.start_idx} to {args.end_idx}"
     )
     # for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
-    for task_id in tqdm.tqdm(range(args.start_idx, args.end_idx)):
+    for task_id in tqdm.tqdm(task_ids):
 
         # Get task
         task = task_suite.get_task(task_id)
@@ -518,11 +770,19 @@ def eval_libero(args: Args) -> None:
 
             # Set initial states
             obs = env.set_init_state(initial_states[episode_idx])
+            perturbation = _apply_object_perturbation(
+                env, args.object_perturb_m, args.object_perturb_roles,
+                args.object_perturb_seed, args.task_suite_name, task_id, episode_idx,
+            )
+            # Avoid a second flattened-state restore: in the pinned
+            # LIBERO/robosuite renderer it corrupts the offscreen camera and
+            # produces black observations. Settling steps below refresh obs.
 
             # Setup
             t = 0
             replay_images = []
             full_actions = []
+            initial_cot_text = None
 
             logger.info(f"Starting episode {task_episodes + 1}...")
             step = 0
@@ -543,8 +803,27 @@ def eval_libero(args: Args) -> None:
                 img = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
                 wrist_img = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
 
-                # Save preprocessed image for replay video
-                replay_images.append(img)
+                # Some LIBERO-plus "noise" perturbations (fog/glass_blur/motion_blur/...,
+                # see env_wrapper.py) are applied to agentview_image via third-party
+                # corruption functions that can silently drop the channel axis for
+                # certain severities, returning (H,W) instead of (H,W,3). The policy
+                # server rejects non-3D images outright, so restore it here rather
+                # than chasing the bug inside each corruption implementation.
+                if img.ndim == 2:
+                    img = np.repeat(img[:, :, None], 3, axis=2)
+                if wrist_img.ndim == 2:
+                    wrist_img = np.repeat(wrist_img[:, :, None], 3, axis=2)
+                if args.object_perturb_m > 0 and float(img.mean()) < 1.0:
+                    raise RuntimeError(
+                        "Agent-view observation is nearly black after object perturbation "
+                        f"(mean={float(img.mean()):.4f}); refusing an invalid rollout"
+                    )
+
+                # Save preprocessed image for replay video. With overlay_trace the
+                # append happens after the policy call, so the frame can carry the
+                # trace that was generated from it.
+                if record_video and not args.overlay_trace:
+                    replay_images.append(img)
 
                 state = np.concatenate(
                     (
@@ -564,19 +843,33 @@ def eval_libero(args: Args) -> None:
                 example_dict = {
                     "image": [observation["observation.primary"][0], observation["observation.wrist_image"][0]],
                     "lang": observation["instruction"][0],
-                    # "state": observation["observation.state"],
                 }
+                if os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "0") == "1":
+                    if state.shape != (8,):
+                        raise RuntimeError(f"expected 8-D LIBERO state, got {state.shape}")
+                    example_dict["state"] = observation["observation.state"].astype(np.float32)
 
                 start_time = time.time()
 
                 # response = client_model.step(example=example_dict)
                 response = client_model.step(example=example_dict, step=step)
+                if initial_cot_text is None and response.get("cot_is_fresh"):
+                    initial_cot_text = response.get("cot_text")
 
                 end_time = time.time()
                 # print(f"time: {end_time - start_time}")
 
                 # #
                 raw_action = response["raw_action"]
+
+                if record_video and args.overlay_trace:
+                    # _overlay_trace copies, so the observation the policy just
+                    # consumed stays byte-identical.
+                    _pts = _parse_trace(response.get("cot_text"))
+                    _warn_if_no_trace(response.get("cot_text"), _pts)
+                    replay_images.append(
+                        _overlay_trace(img, _pts, fresh=bool(response.get("cot_is_fresh")))
+                    )
 
                 world_vector_delta = np.asarray(raw_action.get("world_vector"), dtype=np.float32).reshape(-1)
                 rotation_delta = np.asarray(raw_action.get("rotation_delta"), dtype=np.float32).reshape(-1)
@@ -613,15 +906,15 @@ def eval_libero(args: Args) -> None:
             total_episodes += 1
             disturb_res[ID2CATEGORY[task_id + 1][0]]["total_count"] += 1
 
-            # Save a replay video of the episode
             suffix = "success" if done else "failure"
             task_segment = task_description.replace(" ", "_")
 
-            imageio.mimwrite(
-                pathlib.Path(video_out_path) / f"rollout_{ID2CATEGORY[task_id+1][1]}_episode{episode_idx}_{suffix}.mp4",
-                [np.asarray(x) for x in replay_images],
-                fps=25,
-            )
+            if record_video:
+                imageio.mimwrite(
+                    pathlib.Path(video_out_path) / f"rollout_{ID2CATEGORY[task_id+1][1]}_episode{episode_idx}_{suffix}.mp4",
+                    [np.asarray(x) for x in replay_images],
+                    fps=25,
+                )
 
             full_actions = np.stack(full_actions)
             # np.save(pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_episode{episode_idx}_{suffix}.npy", full_actions)
@@ -629,14 +922,23 @@ def eval_libero(args: Args) -> None:
             # print(pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_episode{episode_idx}_{suffix}.mp4")
             # Log current results
             logger.info(f"Success: {done}")
+            logger.info(f"Object perturbation: {json.dumps(perturbation, sort_keys=True)}")
+            episode_records.append({
+                "task_id": task_id, "episode_idx": episode_idx, "success": bool(done),
+                "category": ID2CATEGORY[task_id + 1][0],
+                "perturbation": perturbation, "initial_cot_text": initial_cot_text,
+            })
             logger.info(f"# episodes completed so far: {total_episodes}")
             logger.info(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)")
 
         # Log final results
         logger.info(f"Current task success rate: {float(task_successes) / float(task_episodes)}")
         logger.info(f"Current total success rate: {float(total_successes) / float(total_episodes)}")
-    with open(os.path.join(log_path, f"{args.start_idx}_to_{args.end_idx}.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}.json"), "w", encoding="utf-8") as f:
         json.dump(disturb_res, f)
+    with open(os.path.join(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}_episodes.jsonl"), "w", encoding="utf-8") as f:
+        for record in episode_records:
+            f.write(json.dumps(record) + "\n")
     logger.info(f"Total success rate: {float(total_successes) / float(total_episodes)}")
     logger.info(f"Total episodes: {total_episodes}")
 
@@ -650,7 +952,13 @@ def _get_libero_env(task, resolution, seed):
         "camera_heights": resolution,
         "camera_widths": resolution,
     }
-    env = OffScreenRenderEnv(**env_args)
+    # NVIDIA EGL context creation can race across independent workers on the
+    # same node. Serialize only construction; rollouts remain fully parallel.
+    lock_path = os.environ.get("STARVLA_EGL_INIT_LOCK", "/tmp/starvla_egl_init.lock")
+    with open(lock_path, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        env = OffScreenRenderEnv(**env_args)
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
     env.seed(seed)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
     return env, task_description
 
@@ -673,5 +981,63 @@ def _quat2axisangle(quat):
     return (quat[:3] * 2.0 * math.acos(quat[3])) / den
 
 
+def _parse_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected a boolean, got {value!r}")
+
+
+def _parse_stdlib_args() -> Args:
+    """CLI compatible with the arguments used by the parallel eval scripts.
+
+    draccus remains the preferred parser in the full conda environment.  This
+    fallback deliberately uses no StarVLA model-side dependencies so the same
+    evaluator can run as a thin client in the simulator SIF.
+    """
+    parser = argparse.ArgumentParser(description="Evaluate StarVLA on LIBERO-Plus")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=10093)
+    parser.add_argument("--resize_size", type=int, nargs=2, default=[224, 224])
+    parser.add_argument("--task_suite_name", default="libero_goal")
+    parser.add_argument("--num_steps_wait", type=int, default=10)
+    parser.add_argument("--num_trials_per_task", type=int, default=50)
+    parser.add_argument("--video_out_path", default="experiments/libero/logs")
+    parser.add_argument("--save_video", type=_parse_bool, default=False)
+    parser.add_argument("--overlay_trace", type=_parse_bool, default=False)
+    parser.add_argument("--log_path", default="experiments/libero/logs")
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--pretrained_path", default="")
+    parser.add_argument("--post_process_action", type=_parse_bool, default=True)
+    parser.add_argument("--job_name", default="test")
+    parser.add_argument("--use_bf16", type=_parse_bool, default=True)
+    parser.add_argument("--use_server", type=_parse_bool, default=False)
+    parser.add_argument("--start_idx", type=int, default=-1)
+    parser.add_argument("--end_idx", type=int, default=-1)
+    parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument("--exact_sample_count", type=int, default=0)
+    parser.add_argument("--output_dir", default="./output")
+    parser.add_argument(
+        "--gripper_encoding",
+        choices=("auto", "zero_one", "pm_one", "zero_one_close"),
+        default="auto",
+    )
+    parser.add_argument("--object_perturb_m", type=float, default=0.0)
+    parser.add_argument("--object_perturb_roles", default="source,target")
+    parser.add_argument("--object_perturb_seed", type=int, default=20260812)
+    values = vars(parser.parse_args())
+    resize_size = values.pop("resize_size")
+    args = Args(**values)
+    args.resize_size = resize_size
+    return args
+
+
 if __name__ == "__main__":
-    eval_libero()
+    if draccus is None:
+        eval_libero(_parse_stdlib_args())
+    else:
+        eval_libero()

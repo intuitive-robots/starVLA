@@ -39,6 +39,8 @@ Config knobs (framework:)
   (datasets.vla_data.cot.*)          # CoT resolver config — see cot_resolver.py
 """
 
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -54,7 +56,7 @@ import torch
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
-from starVLA.dataloader.cot_resolver import assert_cot_prompt_consistent, build_cot_resolver
+from starVLA.dataloader.cot_resolver import NullCoTResolver, assert_cot_prompt_consistent, build_cot_resolver
 from starVLA.model.modules.projector.readout import ReadoutProjector
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.framework.share_tools import merge_framework_config
@@ -122,6 +124,16 @@ class QwenGR00TCoTDefaultConfig:
         "max_new_tokens": 128,
     })
 
+    # What the DiT is conditioned on:
+    #   "all"      (default) every VLM token -- image, prompt and CoT.
+    #   "cot_only" ONLY the CoT/trace token hidden states. Turns the trace into a
+    #              hard information bottleneck: the action head sees the reasoning
+    #              and nothing else, so trace quality becomes the whole signal.
+    #              Requires cot.generate_at_inference=true, since at inference the
+    #              trace is then the only context that exists.
+    dit_context: str = "all"
+    cot_context_tokens: int = 64
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Model
@@ -159,9 +171,32 @@ class QwenGR00T_CoT(baseframework):
         self.action_model: FlowmatchingActionHead = get_action_model(config=self.config)
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
         self.is_inference = bool(kwargs.get("is_inference", False))
+        vla_data_cfg = getattr(getattr(self.config, "datasets", None), "vla_data", None)
+        data_cot_cfg = getattr(vla_data_cfg, "cot", None) if vla_data_cfg is not None else None
+        self.cot_source = str(
+            data_cot_cfg.get("source", "none")
+            if hasattr(data_cot_cfg, "get")
+            else getattr(data_cot_cfg, "source", "none")
+        ).lower()
 
         # Knowledge insulation toggle — read once and cache as a plain bool.
         # Avoids repeated OmegaConf attribute lookups in the hot forward path.
+        self.dit_context_mode: str = str(
+            getattr(self.config.framework, "dit_context", "all")
+        )
+        self.cot_context_tokens: int = int(
+            getattr(self.config.framework, "cot_context_tokens", 64)
+        )
+        if self.dit_context_mode not in ("all", "cot_only"):
+            raise ValueError(
+                f"framework.dit_context must be 'all' or 'cot_only', got {self.dit_context_mode!r}"
+            )
+        if self.dit_context_mode == "cot_only":
+            logger.info(
+                f"[QwenGR00T_CoTrain] dit_context=cot_only -- DiT sees ONLY the "
+                f"{self.cot_context_tokens} trailing CoT tokens"
+            )
+
         self.knowledge_insulation: bool = bool(
             getattr(self.config.framework, "knowledge_insulation", False)
         )
@@ -169,9 +204,13 @@ class QwenGR00T_CoT(baseframework):
             f"[QwenGR00T_CoTrain] knowledge_insulation={'ON' if self.knowledge_insulation else 'OFF'}"
         )
 
-        # Step-based CoT resolver
-        self.cot_resolver = build_cot_resolver(self.config, is_inference=self.is_inference)
-        assert_cot_prompt_consistent(self.cot_resolver, self.config)
+        # Step-based CoT resolver. Offline conditioning diagnostics inject their
+        # conversations directly and can skip loading million-row mappings.
+        if bool(kwargs.get("skip_cot_resolver", False)):
+            self.cot_resolver = NullCoTResolver()
+        else:
+            self.cot_resolver = build_cot_resolver(self.config, is_inference=self.is_inference)
+            assert_cot_prompt_consistent(self.cot_resolver, self.config)
 
         # GR00T N1.5-style readout projector (optional).
         # When enabled, compresses all VLM tokens into `num_tokens` learned
@@ -203,6 +242,35 @@ class QwenGR00T_CoT(baseframework):
 
     # ── Training forward ──────────────────────────────────────────────────────
 
+    def _resolve_training_cot(self, examples: List[dict]) -> tuple[list, float]:
+        """Prefer worker-resolved CoT so geometric label rewrites are preserved."""
+        cot_from_workers = all("cot_conversation" in ex for ex in examples)
+        if cot_from_workers:
+            conversations = [ex.get("cot_conversation") for ex in examples]
+            available = [
+                bool(ex.get("cot_available", conversation is not None))
+                for ex, conversation in zip(examples, conversations)
+            ]
+        else:
+            conversations = [
+                self.cot_resolver.resolve(
+                    ex.get("trajectory_name", ""), ex.get("frame_index", 0)
+                )
+                for ex in examples
+            ]
+            available = [conversation is not None for conversation in conversations]
+        if (
+            not any(conversation is not None for conversation in conversations)
+            and getattr(self, "training", False)
+            and getattr(self, "cot_source", "none") in {"mapping", "sparc_sqlite"}
+        ):
+            raise RuntimeError(
+                "mapping-backed CoT training reached forward() without a local CoT target; "
+                "the dataloader collator must retain at least one target per rank"
+            )
+        coverage = sum(available) / max(len(available), 1)
+        return conversations, coverage
+
     def forward(
         self,
         examples: List[dict] = None,
@@ -223,16 +291,10 @@ class QwenGR00T_CoT(baseframework):
         actions        = [ex["action"] for ex in examples]
         state          = [ex["state"]  for ex in examples] if "state" in examples[0] else None
 
-        # Resolve per-step CoT texts (None → no CoT loss for that sample)
-        cot_conversations = [
-            self.cot_resolver.resolve(
-                ex.get("trajectory_name", ""),
-                ex.get("frame_index", 0),
-            )
-            for ex in examples
-        ]
+        # Dataloader workers may already have jointly transformed images and
+        # coordinate-bearing CoT. Re-resolving here would restore stale labels.
+        cot_conversations, cot_coverage = self._resolve_training_cot(examples)
         has_cot = any(c is not None for c in cot_conversations)
-        cot_coverage = sum(c is not None for c in cot_conversations) / max(len(cot_conversations), 1)
 
         # ── 1. VLM backbone forward ──────────────────────────────────────────
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
@@ -264,6 +326,29 @@ class QwenGR00T_CoT(baseframework):
         if self.knowledge_insulation:
             last_hidden = last_hidden.detach()
 
+        # ── 2b. Trace bottleneck (optional) ──────────────────────────────────
+        # Keep only the CoT token hidden states, so the action head is forced to
+        # route everything through the reasoning. Samples without a CoT
+        # annotation carry no context in this mode and are dropped from the
+        # action loss rather than conditioned on zeros.
+        cot_keep = None
+        if self.dit_context_mode == "cot_only":
+            labels = qwen_inputs.get("labels")
+            if labels is None:
+                raise RuntimeError(
+                    "dit_context='cot_only' needs CoT labels, but this batch has no CoT "
+                    "annotations at all. Check datasets.vla_data.cot.mapping_path."
+                )
+            last_hidden, cot_keep = self._cot_only_context(
+                last_hidden, labels, self.cot_context_tokens
+            )
+            if last_hidden.shape[0] == 0:
+                # No annotated sample in this batch -- skip the action loss for
+                # this step instead of emitting a degenerate one.
+                return {"action_loss": last_hidden.sum() * 0.0,
+                        "cot_coverage": cot_coverage,
+                        **({"cot_loss": cot_loss} if cot_loss is not None else {})}
+
         # ── 3. Readout projection (optional) ─────────────────────────────────
         # Compress all VLM tokens → fixed-size readout tokens before DiT.
         # Readout projector is on the action side (post-detach) → only updated
@@ -278,6 +363,10 @@ class QwenGR00T_CoT(baseframework):
             actions_t = torch.tensor(
                 np.array(actions), device=dit_context.device, dtype=dit_context.dtype
             )
+            # cot_only dropped the unannotated samples from the context; the
+            # targets must be filtered identically or they misalign.
+            if cot_keep is not None:
+                actions_t = actions_t[cot_keep]
             actions_target = actions_t[:, -self.action_horizon:, :]
 
             repeated = int(self.config.framework.action_model.get("repeated_diffusion_steps", 4))
@@ -287,6 +376,8 @@ class QwenGR00T_CoT(baseframework):
             state_rep = None
             if state is not None:
                 state_t = torch.tensor(np.array(state), device=dit_context.device, dtype=dit_context.dtype)
+                if cot_keep is not None:
+                    state_t = state_t[cot_keep]
                 state_rep = state_t.repeat(repeated, 1, 1)
 
             action_loss = self.action_model(dit_context_rep, actions_rep, state_rep)
@@ -327,6 +418,101 @@ class QwenGR00T_CoT(baseframework):
         return self.qwen_vl_interface.processor.tokenizer.batch_decode(
             new_ids, skip_special_tokens=True
         )
+
+    # Ring buffer of recently generated traces, used by the "roll" corruption mode
+    # when a batch is too small to donate a wrong-but-plausible trace to itself.
+    _corrupt_trace_pool: list = []
+
+    def _cot_only_context(self, last_hidden, labels, n_tokens: int):
+        """Restrict the DiT's conditioning to the CoT (trace) tokens alone.
+
+        `labels` is -100 everywhere except the supervised CoT answer span, so it
+        already marks exactly the trace tokens in both the training and the
+        explicit-inference path -- no re-tokenisation needed.
+
+        Returns (context, keep) where context is [K, n_tokens, H] and keep is a
+        bool mask over the batch. Samples with no CoT have nothing to condition
+        on in this mode and are dropped by the caller rather than fed zeros,
+        which would train the DiT on empty context.
+        """
+        mask = labels != -100                       # [B, L]
+        keep = mask.any(dim=1)                      # [B]
+        B, _, H = last_hidden.shape
+        out = last_hidden.new_zeros((int(keep.sum()), n_tokens, H))
+        row = 0
+        for b in range(B):
+            if not bool(keep[b]):
+                continue
+            span = last_hidden[b][mask[b]]          # [n_cot, H]
+            # Keep the tail: the trace coordinates sit at the end of the answer.
+            take = min(span.shape[0], n_tokens)
+            out[row, :take] = span[-take:]
+            row += 1
+        return out, keep
+
+    def _corrupt_cot_traces(self, generated_cot: list[str], mode: str) -> list[str]:
+        """Replace the coordinates inside <|trace|>{...}<|/trace|>, keeping the rest intact.
+
+        The point is to hold token count and syntax fixed while destroying the
+        spatial content, so a flat success rate means the DiT is not reading the
+        trace. Non-matching strings are returned unchanged.
+
+        Modes:
+          roll  — reuse another sample's trace (a real, well-formed trace of the
+                  WRONG scene). The strongest control: plausible but misgrounded.
+          rand  — uniform random points in the 0-1000 normalized coordinate space.
+          shuf  — same points, permuted order. Kills temporal direction only.
+        """
+        if mode not in ("roll", "rand", "shuf"):
+            raise ValueError(f"unknown STARVLA_COT_CORRUPT mode: {mode!r} (roll|rand|shuf)")
+
+        pat = re.compile(r"(<\|trace\|>)(.*?)(<\|/trace\|>)", re.DOTALL)
+        payloads = [m.group(2) if (m := pat.search(c)) else None for c in generated_cot]
+
+        def _sub(cot: str, payload: str) -> str:
+            return pat.sub(lambda m: m.group(1) + payload + m.group(3), cot, count=1)
+
+        if mode == "roll":
+            current = [p for p in payloads if p]
+            # Pool spans calls so single-sample batches still find a foreign donor.
+            available = current + [p for p in self._corrupt_trace_pool if p not in current]
+            out = []
+            for i, (cot, own) in enumerate(zip(generated_cot, payloads)):
+                if own is None:
+                    out.append(cot)
+                    continue
+                donors = [p for p in available if p != own]
+                if not donors:
+                    logger.warning("[CoT corrupt] no foreign trace available; passing sample through")
+                    out.append(cot)
+                    continue
+                out.append(_sub(cot, donors[i % len(donors)]))
+            self._corrupt_trace_pool = available[:64]
+            return out
+
+        # rand / shuf operate on the coordinate array only. Parsing the whole
+        # payload would swallow the "2" in the "trace_2d" key as a coordinate.
+        arr_pat = re.compile(r"\[\s*\[.*?\]\s*\]", re.DOTALL)
+
+        def _replace(payload: str) -> str:
+            arr = arr_pat.search(payload)
+            if not arr:
+                return payload
+            nums = re.findall(r"-?\d+", arr.group(0))
+            if len(nums) < 2:
+                return payload
+            pts = [(int(nums[i]), int(nums[i + 1])) for i in range(0, len(nums) - 1, 2)]
+            if mode == "rand":
+                pts = [(int(np.random.randint(0, 1001)), int(np.random.randint(0, 1001))) for _ in pts]
+            else:  # shuf
+                pts = [pts[i] for i in np.random.permutation(len(pts))]
+            body = "[" + ", ".join(f"[{x}, {y}]" for x, y in pts) + "]"
+            return payload[: arr.start()] + body + payload[arr.end() :]
+
+        return [
+            _sub(cot, _replace(p)) if p is not None else cot
+            for cot, p in zip(generated_cot, payloads)
+        ]
 
     @torch.inference_mode()
     def predict_action(
@@ -370,6 +556,14 @@ class QwenGR00T_CoT(baseframework):
             generated_cot = self._generate_cot(batch_images, instructions)
             logger.debug(f"[CoT inference] generated: {generated_cot[0][:80]}...")
 
+            # Ablation hook: corrupt the trace coordinates while keeping the CoT
+            # string syntactically valid, to test whether the DiT reads trace
+            # *content* or merely benefits from the extra tokens in context.
+            # Off unless STARVLA_COT_CORRUPT is set. See _corrupt_cot_traces.
+            corrupt_mode = os.environ.get("STARVLA_COT_CORRUPT", "")
+            if corrupt_mode:
+                generated_cot = self._corrupt_cot_traces(generated_cot, corrupt_mode)
+
             # Pass 2: re-encode with generated CoT as assistant context.
             # Human prompt mirrors the CoT_prompt config so both passes use the same user message.
             cot_prompt_cfg = getattr(self.config.datasets.vla_data, "CoT_prompt", "{instruction}")
@@ -385,9 +579,16 @@ class QwenGR00T_CoT(baseframework):
                 instructions=instructions,
                 cot_conversations=cot_conversations,
             )
-            # Drop labels — inference only needs hidden states, not CE loss
-            qwen_inputs.pop("labels", None)
+            # Keep labels when cot_only needs them to locate the trace span;
+            # they must not reach the backbone, so pop either way.
+            cot_labels = qwen_inputs.pop("labels", None)
         else:
+            cot_labels = None
+            if self.dit_context_mode == "cot_only":
+                raise RuntimeError(
+                    "dit_context='cot_only' requires cot.generate_at_inference=true -- "
+                    "without a generated trace the DiT would have no context at all."
+                )
             qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
                 images=batch_images, instructions=instructions
             )
@@ -399,6 +600,13 @@ class QwenGR00T_CoT(baseframework):
                 return_dict=True,
             )
             last_hidden = qwenvl_outputs.hidden_states[-1]
+
+        if self.dit_context_mode == "cot_only":
+            if cot_labels is None:
+                raise RuntimeError("dit_context='cot_only': no CoT label span available at inference")
+            last_hidden, _ = self._cot_only_context(
+                last_hidden, cot_labels.to(last_hidden.device), self.cot_context_tokens
+            )
 
         if self.readout_projector is not None:
             dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
@@ -413,4 +621,10 @@ class QwenGR00T_CoT(baseframework):
         with torch.autocast("cuda", dtype=torch.float32):
             pred_actions = self.action_model.predict_action(dit_context, state_t)
 
-        return {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        result = {"normalized_actions": pred_actions.detach().cpu().numpy()}
+        # Surface the reasoning that conditioned this chunk so eval clients can
+        # visualise it. Only present in explicit-CoT mode; after any corruption
+        # hook, so what ships is exactly what the DiT saw.
+        if generate_at_inference:
+            result["cot_text"] = list(generated_cot)
+        return result

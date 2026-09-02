@@ -1,0 +1,8 @@
+{
+  "task_id": 8,
+  "episode_idx": 0,
+  "dataset_episode_idx": 14,
+  "description": "pick up the tomato sauce and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 135.0
+}

@@ -1,0 +1,89 @@
+[
+  {
+    "task_id": 8,
+    "episode_idx": 0,
+    "description": "pick up the chocolate pudding and place it in the basket",
+    "perturbation": {
+      "magnitude_m": 0.04,
+      "roles": [
+        "source",
+        "target"
+      ],
+      "source_objects": [
+        "chocolate_pudding_1"
+      ],
+      "target_objects": [
+        "basket_1"
+      ],
+      "unsupported": [],
+      "objects": [
+        {
+          "name": "basket_1",
+          "roles": [
+            "target"
+          ],
+          "joint": "basket_1_joint0",
+          "before_xyz": [
+            0.011981510238766965,
+            0.25109946566359104,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            -0.035370518211581915,
+            0.01867957283891022
+          ],
+          "after_xyz": [
+            -0.02338900797281495,
+            0.26977903850250123,
+            0.034999999999999996
+          ]
+        },
+        {
+          "name": "chocolate_pudding_1",
+          "roles": [
+            "source"
+          ],
+          "joint": "chocolate_pudding_1_joint0",
+          "before_xyz": [
+            -0.12,
+            -0.24000000000000002,
+            0.034999999999999996
+          ],
+          "delta_xy": [
+            0.004065214088162008,
+            -0.03979288924440407
+          ],
+          "after_xyz": [
+            -0.11593478591183799,
+            -0.2797928892444041,
+            0.034999999999999996
+          ]
+        }
+      ]
+    },
+    "model": "ours",
+    "cot_text": "<|trace|>{\"trace_2d\": [[599, 607], [554, 578], [508, 550], [459, 529], [419, 510]]}<|/trace|><|/trace|>",
+    "trace_2d": [
+      [
+        599.0,
+        607.0
+      ],
+      [
+        554.0,
+        578.0
+      ],
+      [
+        508.0,
+        550.0
+      ],
+      [
+        459.0,
+        529.0
+      ],
+      [
+        419.0,
+        510.0
+      ]
+    ]
+  }
+]

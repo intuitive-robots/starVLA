@@ -19,6 +19,50 @@ from starVLA.dataloader.gr00t_lerobot.registry import (
 )
 
 def collate_fn(batch):
+    """Collate samples and apply CoT dropout at local-batch granularity.
+
+    CoT-capable distributed runs must execute the decoder on every rank.  Independent
+    sample-side dropout could remove every target from a rank (especially in an epoch's
+    short final batch), giving DeepSpeed different parameter graphs and deadlocking its
+    gradient collectives.  Keeping resolution/augmentation in ``__getitem__`` but sampling
+    the keep mask here preserves worker-side overlap and lets us enforce one target per
+    local batch.
+    """
+    if not batch:
+        return batch
+
+    enabled = [bool(sample.pop("_cot_dropout_enabled", False)) for sample in batch]
+    rates = [float(sample.pop("_cot_dropout_rate", 0.0)) for sample in batch]
+    if not any(enabled):
+        return batch
+    if not all(enabled):
+        raise RuntimeError("mixed CoT-dropout settings in one local batch")
+    if not np.allclose(rates, rates[0]):
+        raise RuntimeError(f"mixed CoT-dropout rates in one local batch: {rates}")
+
+    candidates = [
+        i for i, sample in enumerate(batch)
+        if sample.get("cot_available", False) and sample.get("cot_conversation") is not None
+    ]
+    if not candidates:
+        raise RuntimeError(
+            "CoT-enabled local training batch contains no mapped targets; refusing to "
+            "enter a rank-dependent decoder graph"
+        )
+
+    keep = {i for i in candidates if np.random.random() >= rates[0]}
+    if not keep:
+        # Conditioning on a nonempty set changes the requested 0.5 keep rate by only the
+        # all-dropped probability (2^-16 for the current micro-batch), while guaranteeing
+        # identical decoder participation across ranks.
+        keep.add(candidates[int(np.random.randint(len(candidates)))])
+
+    for i in candidates:
+        if i in keep:
+            batch[i]["cot_mode"] = "cot"
+        else:
+            batch[i]["cot_conversation"] = None
+            batch[i]["cot_mode"] = "no_cot"
     return batch
 
 
@@ -26,16 +70,47 @@ def _apply_trajectory_split(
     dataset: LeRobotSingleDataset,
     split: str,
     holdout_trajectories_per_dataset: int = 1,
+    holdout_trajectories_per_task: int = 0,
 ) -> LeRobotSingleDataset:
     """Apply a deterministic per-dataset trajectory split in-place."""
     trajectory_ids = np.asarray(dataset.trajectory_ids)
     trajectory_lengths = np.asarray(dataset.trajectory_lengths)
     num_trajectories = len(trajectory_ids)
 
-    if holdout_trajectories_per_dataset <= 0 or num_trajectories == 0:
+    # Consolidated LeRobot-v3 releases may contain many benchmark tasks in one
+    # dataset directory.  Holding out only the last N trajectories would then
+    # evaluate one task and train on all examples of the other tasks.  This opt-in
+    # path recreates StarVLA's legacy one-directory-per-task split exactly.
+    if holdout_trajectories_per_task > 0 and num_trajectories:
+        grouped: dict[str, list[int]] = {}
+        for trajectory_id in trajectory_ids:
+            metadata = dataset.trajectory_ids_to_metadata.get(int(trajectory_id), {})
+            task_name = metadata.get("task_name")
+            if task_name is None:
+                raise ValueError(
+                    f"holdout_trajectories_per_task requires task_name episode metadata; "
+                    f"missing for {dataset.dataset_name} episode {trajectory_id}"
+                )
+            grouped.setdefault(str(task_name), []).append(int(trajectory_id))
+        held_out: set[int] = set()
+        for task_name, task_ids in grouped.items():
+            task_ids.sort()
+            if len(task_ids) <= holdout_trajectories_per_task:
+                raise ValueError(
+                    f"task {task_name!r} has only {len(task_ids)} trajectories, cannot "
+                    f"hold out {holdout_trajectories_per_task}"
+                )
+            held_out.update(task_ids[-holdout_trajectories_per_task:])
+        select_holdout = split == "eval"
+        mask = np.asarray(
+            [(int(trajectory_id) in held_out) == select_holdout for trajectory_id in trajectory_ids],
+            dtype=bool,
+        )
+        selected_ids = trajectory_ids[mask]
+        selected_lengths = trajectory_lengths[mask]
+    elif holdout_trajectories_per_dataset <= 0 or num_trajectories == 0:
         return dataset
-
-    if num_trajectories <= holdout_trajectories_per_dataset:
+    elif num_trajectories <= holdout_trajectories_per_dataset:
         if split == "eval":
             print(
                 f"Warning: Dataset {dataset.dataset_name} has only {num_trajectories} trajectories; "
@@ -57,6 +132,7 @@ def _apply_trajectory_split(
 
     dataset._trajectory_ids = np.asarray(selected_ids)
     dataset._trajectory_lengths = np.asarray(selected_lengths)
+    dataset._refresh_trajectory_index_cache()
     dataset._all_steps = dataset._get_all_steps_single_process()
     dataset._valid_base_indices_by_trajectory = dataset._build_valid_base_indices_by_trajectory()
     dataset._valid_trajectory_ids = np.array(list(dataset._valid_base_indices_by_trajectory.keys()))
@@ -97,7 +173,13 @@ def make_LeRobotSingleDataset(
         modality_config = data_config.modality_config(action_horizon=int(action_horizon_override))
     else:
         modality_config = data_config.modality_config()
-    transforms = data_config.transform()
+    # Benchmark transforms may use dataset-level options (for example LIBERO's opt-in
+    # photometric/crop augmentation). Keep backward compatibility with configs whose
+    # transform() takes no arguments.
+    if "data_cfg" in inspect.signature(data_config.transform).parameters:
+        transforms = data_config.transform(data_cfg=data_cfg)
+    else:
+        transforms = data_config.transform()
     dataset_path = data_root_dir / data_name
     if robot_type not in ROBOT_TYPE_TO_EMBODIMENT_TAG:
         print(f"Warning: Robot type {robot_type} not found in ROBOT_TYPE_TO_EMBODIMENT_TAG, using {EmbodimentTag.NEW_EMBODIMENT} as default")
@@ -143,6 +225,7 @@ def get_vla_dataset(
 
     dataset_mixture = []
     holdout_trajectories_per_dataset = int(data_cfg.get("holdout_trajectories_per_dataset", 1))
+    holdout_trajectories_per_task = int(data_cfg.get("holdout_trajectories_per_task", 0))
     for d_name, d_weight, robot_type in filtered_mixture_spec:
         dataset = make_LeRobotSingleDataset(
             Path(data_root_dir),
@@ -151,11 +234,16 @@ def get_vla_dataset(
             delete_pause_frame=delete_pause_frame,
             data_cfg=data_cfg,
         )
+        if mode == "train":
+            dataset.transforms.train()
+        else:
+            dataset.transforms.eval()
         if mode in {"train", "eval"}:
             dataset = _apply_trajectory_split(
                 dataset,
                 split=mode,
                 holdout_trajectories_per_dataset=holdout_trajectories_per_dataset,
+                holdout_trajectories_per_task=holdout_trajectories_per_task,
             )
         if len(dataset) == 0:
             print(f"Skipping {mode} dataset {dataset.dataset_name} because the split is empty.")

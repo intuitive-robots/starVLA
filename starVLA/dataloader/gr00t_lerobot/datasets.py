@@ -847,6 +847,36 @@ class LeRobotSingleDataset(Dataset):
         """
         # first check if the path directory exists
         self.data_cfg = data_cfg
+        from starVLA.dataloader.cot_resolver import MappingCoTResolver, NullCoTResolver
+        cot_cfg = (self.data_cfg or {}).get("cot")
+        cot_source = cot_cfg.get("source", "none") if cot_cfg else "none"
+        self._cot_source = cot_source
+        self._cot_dropout_enabled = bool(
+            cot_cfg.get("dropout_enabled", True) if cot_cfg else False
+        )
+        self._cot_dropout_rate = float(
+            cot_cfg.get("dropout_rate", 0.5) if cot_cfg else 0.0
+        )
+        if not 0.0 <= self._cot_dropout_rate <= 1.0:
+            raise ValueError(
+                f"cot.dropout_rate must be in [0, 1], got {self._cot_dropout_rate}"
+            )
+        if cot_source == "mapping":
+            mapping_path = cot_cfg.get("mapping_path")
+            if not mapping_path:
+                raise ValueError("cot.source='mapping' requires cot.mapping_path")
+            self._cot_resolver = MappingCoTResolver(mapping_path)
+            expected_prompt = (self.data_cfg or {}).get("CoT_prompt")
+            mapping_prompt = self._cot_resolver.human_prompt_template
+            if expected_prompt is not None and mapping_prompt is not None:
+                if expected_prompt != mapping_prompt:
+                    raise ValueError(
+                        "CoT mapping prompt does not match datasets.vla_data.CoT_prompt: "
+                        f"{mapping_prompt!r} != {expected_prompt!r}")
+        elif cot_source in {"none", None}:
+            self._cot_resolver = NullCoTResolver()
+        else:
+            raise ValueError(f"unsupported dataloader cot.source={cot_source!r}")
         if not Path(dataset_path).exists():
             raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
         # indict letobot version
@@ -943,6 +973,10 @@ class LeRobotSingleDataset(Dataset):
             )
 
         self._trajectory_ids, self._trajectory_lengths = self._get_trajectories()
+        # Auxiliary action-chunk objectives need the unpadded length at every
+        # sampled frame.  Resolve episode ids in O(1) rather than scanning the
+        # full trajectory-id array in each dataloader worker/sample.
+        self._refresh_trajectory_index_cache()
         self._modality_keys = self._get_modality_keys()
         self._delta_indices = self._get_delta_indices()
         self._all_steps = self._get_all_steps()
@@ -1405,6 +1439,10 @@ class LeRobotSingleDataset(Dataset):
                         episode_meta["tasks"] = episode.get("tasks", None)
                     if "task" in episodes_data.columns:
                         episode_meta["task"] = episode.get("task", None)
+                    if "task_name" in episodes_data.columns:
+                        # Consolidated multi-task releases (for example RoboTwin v3)
+                        # need this stable benchmark task id for per-task train/eval splits.
+                        episode_meta["task_name"] = episode.get("task_name", None)
                     # episode_meta = {
                     #     "data/chunk_index": episode["data/chunk_index"],
                     #     "data/file_index": episode["data/file_index"],
@@ -1428,8 +1466,16 @@ class LeRobotSingleDataset(Dataset):
             return np.array(trajectory_ids), np.array(trajectory_lengths)
 
     def _should_derive_v3_episode_files_from_data(self) -> bool:
-        """Enable the LIBERO-specific workaround for broken v3 metadata."""
-        return self._lerobot_version == "v3.0" and "libero" in self.dataset_name.lower()
+        """Derive parquet locations for released v3 datasets with broken metadata.
+
+        Both the converted LIBERO and official VLABench releases contain episode metadata
+        whose data/file_index can point at a parquet that does not contain that episode.
+        The data-derived map is exact and cached as part of normal dataset initialization.
+        """
+        name = self.dataset_name.lower()
+        return self._lerobot_version == "v3.0" and any(
+            marker in name for marker in ("libero", "vlabench")
+        )
 
     def _build_v3_episode_file_map(self) -> dict[int, tuple[int, int]]:
         """Map each episode_index to the actual data parquet that contains it."""
@@ -1992,6 +2038,31 @@ class LeRobotSingleDataset(Dataset):
         )
         return data
 
+    def _trajectory_name(self, trajectory_id: int) -> str:
+        episode_index = int(trajectory_id)
+        return (f"{self.dataset_name}/{episode_index // self.chunk_size}/"
+                f"{episode_index % self.chunk_size}")
+
+    def _attach_cot(self, data: dict, trajectory_id: int, base_index: int) -> dict:
+        """Resolve CoT before transforms so all CPU work stays in dataloader workers.
+
+        Dropout is intentionally deferred to the worker-side collator, after geometric
+        augmentation has rewritten target coordinates and a complete local batch is known.
+        The collator can then guarantee that every distributed rank retains a decoder target.
+        """
+        conversation = self._cot_resolver.resolve(
+            self._trajectory_name(trajectory_id), int(base_index)
+        )
+        available = conversation is not None
+        mode = None
+        if self._cot_source == "mapping":
+            mode = "cot" if available else "no_cot"
+
+        data["_cot_conversation"] = conversation
+        data["_cot_available"] = available
+        data["_cot_mode"] = mode
+        return data
+
     def _init_action_mode(self) -> None:
         if self.data_cfg is None:
             self._action_mode = "abs"
@@ -2163,6 +2234,7 @@ class LeRobotSingleDataset(Dataset):
         trajectory_id, base_index = self.all_steps[index]
         selected_video_keys = self._resolve_sampled_video_keys(trajectory_id=trajectory_id, base_index=base_index)
         raw_data = self.get_step_data(trajectory_id, base_index, selected_video_keys=selected_video_keys)
+        raw_data = self._attach_cot(raw_data, trajectory_id, base_index)
         data = self._apply_transforms_for_sample(raw_data, selected_video_keys=selected_video_keys)
         sample = self._pack_sample(data, selected_video_keys=selected_video_keys)
 
@@ -2171,11 +2243,16 @@ class LeRobotSingleDataset(Dataset):
         # Physical data/chunk_index describes file storage and may remain zero for
         # datasets with many episodes. Derive both logical components from the
         # globally unique episode index so the CoT key cannot wrap or collide.
-        episode_index = int(trajectory_id)
-        chunk_idx = episode_index // self.chunk_size
-        ep_within_chunk = episode_index % self.chunk_size
-        sample["trajectory_name"] = f"{self.dataset_name}/{chunk_idx}/{ep_within_chunk}"
+        sample["trajectory_name"] = self._trajectory_name(trajectory_id)
         sample["frame_index"] = int(base_index)
+        # Auxiliary chunk losses must not learn episode-end padding. The historical
+        # DiT target remains unchanged; this mask is consumed only by the ERVLA choice
+        # objective.
+        trajectory_index = self.get_trajectory_index(int(trajectory_id))
+        remaining = max(int(self.trajectory_lengths[trajectory_index]) - int(base_index), 0)
+        sample["action_time_mask"] = (
+            np.arange(sample["action"].shape[0], dtype=np.int64) < remaining
+        )
         self._maybe_log_worker_memory_debug(
             trajectory_id=trajectory_id,
             base_index=base_index,
@@ -2262,6 +2339,29 @@ class LeRobotSingleDataset(Dataset):
             "lang": language,
             "robot_tag": self.tag
         }
+        # Presence of the key (including a None value) tells the model that lookup already
+        # happened in the worker and prevents a duplicate resolver lookup / augmentation.
+        sample["cot_conversation"] = data.get("_cot_conversation")
+        sample["cot_available"] = bool(data.get("_cot_available", False))
+        sample["cot_mode"] = data.get("_cot_mode")
+        # Parse after worker-side image/coordinate augmentation, so these numeric labels
+        # describe the pixels actually handed to the model. This remains cheap CPU work
+        # overlapped with the GPU step and avoids reparsing text in every rank process.
+        from starVLA.dataloader.cot_resolver import extract_structured_cot_targets
+        sample["cot_structured_targets"] = extract_structured_cot_targets(
+            sample["cot_conversation"]
+        )
+        # Private collator controls are removed by collate_fn before the model sees them.
+        # The collator guard is always active for mapping-backed training, even when
+        # stochastic dropout is disabled. A zero effective rate retains every mapped
+        # target while still rejecting a local batch that would skip the decoder graph.
+        sample["_cot_dropout_enabled"] = bool(
+            self._cot_source == "mapping"
+            and self._is_training_mode()
+        )
+        sample["_cot_dropout_rate"] = float(
+            self._cot_dropout_rate if self._cot_dropout_enabled else 0.0
+        )
 
         if self.data_cfg is not None and self.data_cfg.get("include_state", False) not in ["False", False]:
             state = []
@@ -2387,12 +2487,28 @@ class LeRobotSingleDataset(Dataset):
         Returns:
             int: The index of the trajectory in the dataset.
         """
-        trajectory_indices = np.where(self.trajectory_ids == trajectory_id)[0]
-        if len(trajectory_indices) != 1:
-            raise ValueError(
-                f"Error finding trajectory index for {trajectory_id}, found {trajectory_indices=}"
-            )
-        return trajectory_indices[0]
+        trajectory_id = int(trajectory_id)
+        index = self._trajectory_id_to_index.get(trajectory_id)
+        # Dataset split helpers mutate the trajectory arrays in place.  Guard the
+        # cache invariant here as well as refreshing it in the canonical split
+        # helper so any future in-place filter cannot silently return a stale index.
+        if (
+            index is None
+            or index >= len(self._trajectory_ids)
+            or int(self._trajectory_ids[index]) != trajectory_id
+        ):
+            self._refresh_trajectory_index_cache()
+            index = self._trajectory_id_to_index.get(trajectory_id)
+        if index is None:
+            raise ValueError(f"Error finding trajectory index for {trajectory_id}")
+        return index
+
+    def _refresh_trajectory_index_cache(self) -> None:
+        """Rebuild the O(1) episode-id lookup after an in-place dataset split."""
+        self._trajectory_id_to_index = {
+            int(trajectory_id): index
+            for index, trajectory_id in enumerate(self._trajectory_ids)
+        }
 
     def get_episode_chunk(self, ep_index: int) -> int:
         """Get the chunk index for an episode index."""
@@ -3284,15 +3400,13 @@ class LeRobotMixtureDataset(Dataset):
                     step,
                     selected_video_keys=selected_video_keys,
                 )
+                raw_data = dataset._attach_cot(raw_data, trajectory_id, step)
                 data = dataset._apply_transforms_for_sample(
                     raw_data,
                     selected_video_keys=selected_video_keys,
                 )
                 sample = dataset._pack_sample(data, selected_video_keys=selected_video_keys)
-                episode_index = int(trajectory_id)
-                chunk_idx = episode_index // dataset.chunk_size
-                ep_within_chunk = episode_index % dataset.chunk_size
-                sample["trajectory_name"] = f"{dataset.dataset_name}/{chunk_idx}/{ep_within_chunk}"
+                sample["trajectory_name"] = dataset._trajectory_name(trajectory_id)
                 sample["frame_index"] = int(step)
                 dataset._maybe_log_worker_memory_debug(
                     trajectory_id=int(trajectory_id),

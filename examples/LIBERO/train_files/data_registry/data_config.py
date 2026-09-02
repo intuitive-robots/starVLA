@@ -5,6 +5,15 @@ import os
 from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
 from starVLA.dataloader.gr00t_lerobot.transform.base import ComposedModalityTransform
 from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionToTensor, StateActionTransform
+from starVLA.dataloader.gr00t_lerobot.transform.video import (
+    VideoColorJitter,
+    VideoCrop,
+    VideoResize,
+    VideoRandomRotation,
+    VideoToNumpy,
+    VideoToTensor,
+)
+from starVLA.dataloader.cot_augmentation import CoTVideoAugment
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
 
 
@@ -69,7 +78,62 @@ class Libero4in1DataConfig:
     # auto_eval_libero.sh sets this from the checkpoint's stats file.
     GRIPPER_NORM_MODE = os.environ.get("STARVLA_LIBERO_GRIPPER_NORM", "binary_invert")
 
-    def transform(self):
+    def transform(self, data_cfg: dict | None = None):
+        """Build LIBERO preprocessing with an explicitly selected augmentation policy.
+
+        ``augmentation`` is deliberately opt-in so old checkpoints and the ERVLA A--E
+        comparison retain their original recipe. Supported values:
+
+        * ``none``: historical LIBERO preprocessing.
+        * ``photometric``: coordinate-safe color jitter; valid with CoT supervision.
+        * ``crop_photometric``: π0.5 recipe: 0.95 random crop, resize back to 256,
+          rotation in [-5°, 5°], then brightness/contrast/saturation jitter. CoT datasets
+          use the joint worker transform so all coordinate fields follow the geometry.
+        """
+        data_cfg = data_cfg or {}
+        augmentation = str(data_cfg.get("augmentation", "none")).lower()
+        allowed = {"none", "photometric", "crop_photometric"}
+        if augmentation not in allowed:
+            raise ValueError(
+                f"unknown LIBERO augmentation {augmentation!r}; expected one of {sorted(allowed)}")
+        has_cot = bool(data_cfg.get("cot"))
+
+        transforms = []
+        if augmentation != "none" and has_cot:
+            # The dataset attaches the resolved conversation before transforms run, letting
+            # workers overlap image augmentation and coordinate rewriting with GPU compute.
+            transforms.append(CoTVideoAugment(
+                apply_to=self.video_keys, mode=augmentation, crop_scale=0.95))
+        elif augmentation != "none":
+            transforms.append(VideoToTensor(apply_to=self.video_keys))
+            if augmentation == "crop_photometric":
+                # LIBERO training videos are 256x256. Resize restores the model-facing
+                # resolution after the crop, making this a translation/zoom perturbation.
+                transforms.extend([
+                    VideoCrop(apply_to=self.video_keys, scale=0.95),
+                    VideoResize(
+                        apply_to=self.video_keys,
+                        height=256,
+                        width=256,
+                        interpolation="linear",
+                    ),
+                    VideoRandomRotation(
+                        apply_to=self.video_keys,
+                        degrees=(-5.0, 5.0),
+                        interpolation="linear",
+                    ),
+                ])
+            transforms.extend([
+                VideoColorJitter(
+                    apply_to=self.video_keys,
+                    brightness=0.3,
+                    contrast=0.4,
+                    saturation=0.5,
+                    hue=0.0,
+                ),
+                VideoToNumpy(apply_to=self.video_keys),
+            ])
+
         normalization_modes = {
             "action.x": "min_max",
             "action.y": "min_max",
@@ -81,13 +145,14 @@ class Libero4in1DataConfig:
         if self.GRIPPER_NORM_MODE != "none":
             normalization_modes["action.gripper"] = self.GRIPPER_NORM_MODE
 
-        return ComposedModalityTransform(transforms=[
+        transforms.extend([
             StateActionToTensor(apply_to=self.action_keys),
             StateActionTransform(
                 apply_to=self.action_keys,
                 normalization_modes=normalization_modes,
             ),
         ])
+        return ComposedModalityTransform(transforms=transforms)
 
 
 ROBOT_TYPE_CONFIG_MAP = {

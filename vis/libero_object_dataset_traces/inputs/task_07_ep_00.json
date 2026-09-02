@@ -1,0 +1,8 @@
+{
+  "task_id": 7,
+  "episode_idx": 0,
+  "dataset_episode_idx": 12,
+  "description": "pick up the butter and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 135.0
+}

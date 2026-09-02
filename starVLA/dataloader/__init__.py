@@ -85,6 +85,40 @@ def _estimate_in_flight_samples(batch_size: int, loader_kwargs: dict) -> int | N
         return None
     return batch_size * num_workers * prefetch_factor
 
+
+class DeferredMainProcessBatchLoader:
+    """Prepare a singleton worker loader, then batch samples in the main process.
+
+    ``Accelerator.prepare`` must see the inner :class:`DataLoader`, not this
+    lightweight wrapper.  ``TrainerUtils.setup_distributed_training`` replaces
+    this object with ``accelerator_prepare_component()``, prepares it alongside
+    the model and optimizer, and calls ``after_accelerator_prepare`` afterward.
+
+    This mirrors the production loader path in both ``marigold_train`` and its
+    successor ``m3_data``: workers produce individual samples, so a slow video
+    is not allowed to pin one worker while it constructs an entire local batch.
+    """
+
+    def __init__(self, loader, *, batch_size: int, collate_fn, drop_last: bool):
+        self.loader = loader
+        self.batch_size = int(batch_size)
+        self.collate_fn = collate_fn
+        self.drop_last = bool(drop_last)
+        self.dataset = getattr(loader, "dataset", None)
+
+    def accelerator_prepare_component(self):
+        return self.loader
+
+    def after_accelerator_prepare(self, prepared_loader):
+        from marigold_data.dataloader import MainProcessBatchLoader
+
+        return MainProcessBatchLoader(
+            prepared_loader,
+            batch_size=self.batch_size,
+            collate_fn=self.collate_fn,
+            drop_last=self.drop_last,
+        )
+
 def save_dataset_statistics(dataset_statistics, run_dir):
     """Saves a `dataset_statistics.json` file."""
     out_path = run_dir / "dataset_statistics.json"
@@ -114,6 +148,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
         from starVLA.dataloader.lerobot_datasets import get_vla_dataset, collate_fn
         vla_dataset_cfg = cfg.datasets.vla_data
         loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
+        drop_last = bool(getattr(vla_dataset_cfg, "drop_last", False))
 
         vla_dataset = get_vla_dataset(data_cfg=vla_dataset_cfg)
         estimated_in_flight_samples = _estimate_in_flight_samples(
@@ -125,7 +160,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             logger.info(
                 "Building VLA DataLoader: batch_size=%s, num_workers=%s, prefetch_factor=%s, "
                 "persistent_workers=%s, pin_memory=%s, worker_init=%s, worker_torch_num_threads=%s, "
-                "estimated_in_flight_samples=%s",
+                "drop_last=%s, estimated_in_flight_samples=%s",
                 cfg.datasets.vla_data.per_device_batch_size,
                 loader_kwargs.get("num_workers", 0),
                 loader_kwargs.get("prefetch_factor", "n/a"),
@@ -133,6 +168,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
                 loader_kwargs.get("pin_memory", False),
                 "global_scope_seed" if "worker_init_fn" in loader_kwargs else "default",
                 getattr(vla_dataset_cfg, "worker_torch_num_threads", 1),
+                drop_last,
                 estimated_in_flight_samples if estimated_in_flight_samples is not None else "n/a",
             )
         
@@ -140,6 +176,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             vla_dataset,
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
             collate_fn=collate_fn,
+            drop_last=drop_last,
             **loader_kwargs,
             # shuffle=True
         )
@@ -190,13 +227,16 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
         return vla_train_dataloader
     elif dataset_py == "marigold_data_datasets":
         from starVLA.dataloader.marigold_data_datasets import get_marigold_data_vla_dataset, collate_fn
+        from marigold_data.dataloader import _single_sample_collate
 
         vla_dataset_cfg = cfg.datasets.vla_data
         loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
+        round_robin = bool(getattr(vla_dataset_cfg, "round_robin_dataloader", True))
+        drop_last = bool(getattr(vla_dataset_cfg, "drop_last", True))
 
         vla_dataset = get_marigold_data_vla_dataset(data_cfg=vla_dataset_cfg)
         estimated_in_flight_samples = _estimate_in_flight_samples(
-            batch_size=cfg.datasets.vla_data.per_device_batch_size,
+            batch_size=1 if round_robin else cfg.datasets.vla_data.per_device_batch_size,
             loader_kwargs=loader_kwargs,
         )
 
@@ -204,7 +244,8 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             logger.info(
                 "Building full marigold_data VLA DataLoader: batch_size=%s, num_workers=%s, "
                 "prefetch_factor=%s, persistent_workers=%s, pin_memory=%s, worker_init=%s, "
-                "worker_torch_num_threads=%s, estimated_in_flight_samples=%s",
+                "worker_torch_num_threads=%s, round_robin=%s, drop_last=%s, "
+                "estimated_in_flight_samples=%s",
                 cfg.datasets.vla_data.per_device_batch_size,
                 loader_kwargs.get("num_workers", 0),
                 loader_kwargs.get("prefetch_factor", "n/a"),
@@ -212,15 +253,34 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
                 loader_kwargs.get("pin_memory", False),
                 "global_scope_seed" if "worker_init_fn" in loader_kwargs else "default",
                 getattr(vla_dataset_cfg, "worker_torch_num_threads", 1),
+                round_robin,
+                drop_last,
                 estimated_in_flight_samples if estimated_in_flight_samples is not None else "n/a",
             )
 
-        vla_train_dataloader = DataLoader(
-            vla_dataset,
-            batch_size=cfg.datasets.vla_data.per_device_batch_size,
-            collate_fn=collate_fn,
-            **loader_kwargs,
-        )
+        if round_robin:
+            inner_loader = DataLoader(
+                vla_dataset,
+                batch_size=1,
+                collate_fn=_single_sample_collate,
+                **loader_kwargs,
+            )
+            vla_train_dataloader = DeferredMainProcessBatchLoader(
+                inner_loader,
+                batch_size=cfg.datasets.vla_data.per_device_batch_size,
+                collate_fn=collate_fn,
+                drop_last=drop_last,
+            )
+        else:
+            # Retained as a benchmark/debug escape hatch. Production should
+            # use round-robin batching for expensive video IterableDatasets.
+            vla_train_dataloader = DataLoader(
+                vla_dataset,
+                batch_size=cfg.datasets.vla_data.per_device_batch_size,
+                collate_fn=collate_fn,
+                drop_last=drop_last,
+                **loader_kwargs,
+            )
         if not dist.is_initialized() or dist.get_rank() == 0:
             logger.info("Built full marigold_data VLA DataLoader")
             output_dir = Path(cfg.output_dir)

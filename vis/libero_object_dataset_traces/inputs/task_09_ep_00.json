@@ -1,0 +1,8 @@
+{
+  "task_id": 9,
+  "episode_idx": 0,
+  "dataset_episode_idx": 16,
+  "description": "pick up the chocolate pudding and place it in the basket",
+  "input_source": "LIBERO-object training demonstration, first frame",
+  "agent_mean": 134.33333333333334
+}

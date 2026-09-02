@@ -78,6 +78,7 @@ class ModelClient:
 
         # Cached unnormalized chunk; refreshed every `action_chunk_size` steps.
         self.raw_actions: Optional[np.ndarray] = None
+        self.last_cot_text: Optional[str] = None
 
     def _add_image_to_history(self, image: np.ndarray) -> None:
         self.image_history.append(image)
@@ -94,6 +95,7 @@ class ModelClient:
         self.sticky_gripper_action = 0.0
         self.previous_gripper_action = None
         self.raw_actions = None
+        self.last_cot_text = None
 
     def step(self, example: dict, step: int = 0, **kwargs) -> dict:
         """One env step.
@@ -110,6 +112,7 @@ class ModelClient:
             self.reset(task_description)
 
         # Refresh chunk if needed.
+        cot_is_fresh = False
         if step % self.action_chunk_size == 0 or self.raw_actions is None:
             vla_input = {
                 "examples": [example],
@@ -127,6 +130,10 @@ class ModelClient:
                     f"full response={response}"
                 )
             self.raw_actions = np.asarray(actions_batch)[0]  # (T, D)
+            cot = response["data"].get("cot_text")
+            if cot is not None:
+                self.last_cot_text = cot[0] if isinstance(cot, (list, tuple)) else cot
+            cot_is_fresh = True
 
         raw_actions = self.raw_actions[step % self.action_chunk_size][None]
         raw_action = {
@@ -134,7 +141,11 @@ class ModelClient:
             "rotation_delta": np.array(raw_actions[0, 3:6]),
             "open_gripper": np.array(raw_actions[0, 6:7]),  # 1 = open; 0 = close
         }
-        return {"raw_action": raw_action}
+        return {
+            "raw_action": raw_action,
+            "cot_text": self.last_cot_text,
+            "cot_is_fresh": cot_is_fresh,
+        }
 
     def visualize_epoch(
         self, predicted_raw_actions: Sequence[np.ndarray], images: Sequence[np.ndarray], save_path: str

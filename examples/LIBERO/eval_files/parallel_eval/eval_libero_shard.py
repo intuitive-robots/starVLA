@@ -15,6 +15,8 @@ per-task counts; ``aggregate_results.py`` merges them.
 """
 
 import dataclasses
+import hashlib
+import fcntl
 import json
 import logging
 import math
@@ -159,6 +161,137 @@ class Args:
     # via the server handshake; override with "zero_one" or "pm_one". See _binarize_gripper.
     gripper_encoding: str = "auto"
 
+    # Deterministic OOD object-position perturbation. The magnitude is a fixed
+    # XY radius (metres), not a uniform [0, radius] draw, so every evaluated
+    # episode receives the requested difficulty. ``source,target`` resolves
+    # binary BDDL goals such as (In soup basket_contain_region) to the movable
+    # source object and movable destination owner (basket). Fixed fixtures are
+    # deliberately not moved.
+    object_perturb_m: float = 0.0
+    object_perturb_roles: str = "source,target"
+    object_perturb_seed: int = 20260812
+
+
+def _stable_perturb_rng(seed: int, suite: str, task_id: int, episode_idx: int, object_name: str):
+    key = f"{seed}|{suite}|{task_id}|{episode_idx}|{object_name}".encode("utf-8")
+    digest = hashlib.sha256(key).digest()
+    return np.random.default_rng(int.from_bytes(digest[:8], "little"))
+
+
+def _goal_object_roles(env) -> tuple[list[str], list[str], list[str]]:
+    """Resolve movable source/destination objects from the parsed BDDL goal.
+
+    Destination predicates usually refer to a region such as
+    ``basket_1_contain_region``. We map that to the longest movable-object name
+    that prefixes the region. Fixture-owned regions are reported as unsupported
+    rather than moving cabinets/stoves and silently changing task geometry.
+    """
+    task_env = env.env
+    movable = task_env.objects_dict
+    fixtures = task_env.fixtures_dict
+
+    def owner(token: str, candidates) -> str | None:
+        matches = [name for name in candidates if token == name or token.startswith(name + "_")]
+        return max(matches, key=len) if matches else None
+
+    sources: list[str] = []
+    targets: list[str] = []
+    unsupported: list[str] = []
+    for goal in task_env.parsed_problem.get("goal_state", []):
+        if len(goal) >= 2:
+            source = owner(goal[1], movable)
+            if source is not None:
+                sources.append(source)
+            elif owner(goal[1], fixtures) is not None:
+                unsupported.append(f"source fixture:{goal[1]}")
+        if len(goal) >= 3:
+            target = owner(goal[2], movable)
+            if target is not None:
+                targets.append(target)
+            elif owner(goal[2], fixtures) is not None:
+                unsupported.append(f"target fixture:{goal[2]}")
+            else:
+                unsupported.append(f"target region:{goal[2]}")
+    return list(dict.fromkeys(sources)), list(dict.fromkeys(targets)), list(dict.fromkeys(unsupported))
+
+
+def _apply_object_perturbation(
+    env,
+    magnitude_m: float,
+    roles_csv: str,
+    seed: int,
+    suite: str,
+    task_id: int,
+    episode_idx: int,
+) -> dict:
+    """Apply paired, deterministic fixed-radius XY shifts to goal objects."""
+    if magnitude_m < 0:
+        raise ValueError(f"object_perturb_m must be non-negative, got {magnitude_m}")
+    roles = {x.strip().lower() for x in roles_csv.split(",") if x.strip()}
+    unknown = roles - {"source", "target"}
+    if unknown:
+        raise ValueError(f"Unknown object perturbation roles: {sorted(unknown)}")
+
+    sources, targets, unsupported = _goal_object_roles(env)
+    selected: dict[str, set[str]] = {}
+    if "source" in roles:
+        for name in sources:
+            selected.setdefault(name, set()).add("source")
+    if "target" in roles:
+        for name in targets:
+            selected.setdefault(name, set()).add("target")
+
+    record = {
+        "magnitude_m": float(magnitude_m),
+        "roles": sorted(roles),
+        "source_objects": sources,
+        "target_objects": targets,
+        "unsupported": unsupported,
+        "objects": [],
+    }
+    if magnitude_m == 0:
+        return record
+    if not selected:
+        raise RuntimeError(
+            f"No movable goal objects resolved for roles={sorted(roles)} in "
+            f"{suite} task={task_id}; unsupported={unsupported}"
+        )
+
+    for object_name, object_roles in sorted(selected.items()):
+        obj = env.env.objects_dict[object_name]
+        if not obj.joints:
+            raise RuntimeError(f"Movable goal object {object_name!r} has no MuJoCo joint")
+        joint = obj.joints[0]
+        qpos = np.asarray(env.sim.data.get_joint_qpos(joint), dtype=np.float64).copy()
+        if qpos.size != 7:
+            raise RuntimeError(
+                f"Expected a free joint (7 qpos) for {object_name!r}, got {qpos.size} from {joint!r}"
+            )
+        before = qpos[:3].copy()
+        rng = _stable_perturb_rng(seed, suite, task_id, episode_idx, object_name)
+        angle = float(rng.uniform(0.0, 2.0 * np.pi))
+        delta = magnitude_m * np.asarray([np.cos(angle), np.sin(angle)], dtype=np.float64)
+        qpos[:2] += delta
+        env.sim.data.set_joint_qpos(joint, qpos)
+        record["objects"].append(
+            {
+                "name": object_name,
+                "roles": sorted(object_roles),
+                "joint": joint,
+                "before_xyz": before.tolist(),
+                "delta_xy": delta.tolist(),
+                "after_xyz": qpos[:3].tolist(),
+            }
+        )
+
+    env.sim.forward()
+    if env.check_success():
+        raise RuntimeError(
+            f"Perturbation accidentally satisfied {suite} task={task_id} episode={episode_idx}; "
+            "refusing to count an invalid rollout"
+        )
+    return record
+
 
 def _build_episode_list(n_tasks: int, num_trials: int) -> list[tuple[int, int]]:
     """Flat, task-major list of (task_id, episode_idx) work units."""
@@ -244,6 +377,7 @@ def eval_libero(args: Args) -> None:
 
     # per-task results, keyed by task_id
     results: dict[str, dict] = {}
+    episode_records: list[dict] = []
     total_episodes, total_successes = 0, 0
 
     for task_id, episode_indices in by_task.items():
@@ -263,11 +397,26 @@ def eval_libero(args: Args) -> None:
             client_model.reset(task_description=task_description)
             env.reset()
             obs = env.set_init_state(initial_states[episode_idx])
+            perturbation = _apply_object_perturbation(
+                env=env,
+                magnitude_m=args.object_perturb_m,
+                roles_csv=args.object_perturb_roles,
+                seed=args.object_perturb_seed,
+                suite=args.task_suite_name,
+                task_id=task_id,
+                episode_idx=episode_idx,
+            )
+            # Do NOT call regenerate_obs_from_state() here. A second flattened-
+            # state restore after set_init_state() corrupts MuJoCo's offscreen
+            # camera context in this LIBERO/robosuite version and yields black
+            # images. The settling env.step() calls below refresh observations
+            # from the already-forwarded, directly modified qpos state.
 
             t = 0
             step = 0
             done = False
             replay_images = []
+            initial_cot_text = None
 
             while t < max_steps + args.num_steps_wait:
                 # IMPORTANT: Do nothing for the first few timesteps because the simulator drops objects
@@ -280,6 +429,11 @@ def eval_libero(args: Args) -> None:
                 # IMPORTANT: rotate 180 degrees to match train preprocessing
                 img = np.ascontiguousarray(obs["agentview_image"][::-1, ::-1])
                 wrist_img = np.ascontiguousarray(obs["robot0_eye_in_hand_image"][::-1, ::-1])
+                if float(img.mean()) < 1.0:
+                    raise RuntimeError(
+                        "Agent-view observation is nearly black after object perturbation "
+                        f"(mean={float(img.mean()):.4f}); refusing an invalid rollout"
+                    )
 
                 if args.save_video:
                     replay_images.append(img)
@@ -288,8 +442,21 @@ def eval_libero(args: Args) -> None:
                     "image": [img, wrist_img],
                     "lang": str(task_description),
                 }
+                if os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "0") == "1":
+                    state = np.concatenate(
+                        (
+                            obs["robot0_eef_pos"],
+                            _quat2axisangle(obs["robot0_eef_quat"]),
+                            obs["robot0_gripper_qpos"],
+                        )
+                    ).astype(np.float32)
+                    if state.shape != (8,):
+                        raise RuntimeError(f"expected 8-D LIBERO state, got {state.shape}")
+                    example_dict["state"] = state[None]
 
                 response = client_model.step(example=example_dict, step=step)
+                if initial_cot_text is None and response.get("cot_is_fresh"):
+                    initial_cot_text = response.get("cot_text")
                 raw_action = response["raw_action"]
 
                 world_vector_delta = np.asarray(raw_action.get("world_vector"), dtype=np.float32).reshape(-1)
@@ -325,6 +492,16 @@ def eval_libero(args: Args) -> None:
                 )
 
             logging.info(f"Success: {done}")
+            logging.info(f"Object perturbation: {json.dumps(perturbation, sort_keys=True)}")
+            episode_records.append(
+                {
+                    "task_id": task_id,
+                    "episode_idx": episode_idx,
+                    "success": bool(done),
+                    "perturbation": perturbation,
+                    "initial_cot_text": initial_cot_text,
+                }
+            )
             logging.info(f"# episodes completed so far: {total_episodes}")
             logging.info(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)")
 
@@ -350,6 +527,10 @@ def eval_libero(args: Args) -> None:
                 "total_count": total_episodes,
                 "success_count": total_successes,
                 "per_task": results,
+                "object_perturb_m": args.object_perturb_m,
+                "object_perturb_roles": args.object_perturb_roles,
+                "object_perturb_seed": args.object_perturb_seed,
+                "episodes": episode_records,
             },
             f,
             indent=2,
@@ -368,7 +549,13 @@ def _get_libero_env(task, resolution, seed):
         "camera_heights": resolution,
         "camera_widths": resolution,
     }
-    env = OffScreenRenderEnv(**env_args)
+    # NVIDIA EGL context creation can race across independent workers on the
+    # same node. Serialize only construction; rollouts remain fully parallel.
+    lock_path = os.environ.get("STARVLA_EGL_INIT_LOCK", "/tmp/starvla_egl_init.lock")
+    with open(lock_path, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        env = OffScreenRenderEnv(**env_args)
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
     env.seed(seed)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
     return env, task_description
 

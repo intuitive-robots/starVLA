@@ -126,9 +126,11 @@ class ComposedModalityTransform(ModalityTransform):
         return data
 
     def train(self):
+        self.training = True
         for transform in self.transforms:
             transform.train()
 
     def eval(self):
+        self.training = False
         for transform in self.transforms:
             transform.eval()

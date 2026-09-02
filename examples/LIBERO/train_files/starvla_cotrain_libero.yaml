@@ -1,4 +1,4 @@
-run_id: libero_qwen08b_base
+run_id: libero_qwen08b_base_16chunk
 run_root_dir: playground/Checkpoints
 seed: 42
 wandb_entity: niblank
@@ -15,7 +15,7 @@ framework:
   action_model:
     action_dim: 7
     state_dim: 7
-    action_horizon: 8
+    action_horizon: 16
 
 datasets:
   vlm_data:
@@ -50,6 +50,8 @@ datasets:
     prefetch_factor: 4
     persistent_workers: true
     pin_memory: true
+    action_horizon: 16
+
 
 trainer:
   max_train_steps: 30000

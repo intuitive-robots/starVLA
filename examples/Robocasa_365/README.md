@@ -4,7 +4,7 @@ End-to-end example for training and evaluating starVLA on the upstream
 [RoboCasa](https://github.com/robocasa/robocasa) benchmark (single-arm Franka
 PandaOmron mobile robot, 365 simulated kitchen tasks). This walk-through covers:
 
-1. Environment install (`robocasa365` conda env)
+1. Environment install (`robocasa365` conda env or Apptainer SIF)
 2. Data download (one task: `OpenDrawer`, target/human, already in LeRobot v2.1)
 3. Training (Qwen3VL-OFT, 100 steps, all visible GPUs)
 4. Evaluation (websocket policy server + gym sim client)
@@ -15,7 +15,27 @@ PandaOmron mobile robot, 365 simulated kitchen tasks). This walk-through covers:
 
 ## 1. Environment
 
-We isolate the simulator from the trainer with two conda envs.
+We isolate the simulator from the host trainer and policy server.
+
+On this cluster, the preferred setup is an Apptainer image containing the
+current upstream `robocasa/main`, `robosuite/master`, and all kitchen assets:
+
+```bash
+bash containers/apptainer/build_robocasa365.sh
+# -> playground/sims/sif/robocasa365-main-arm64.sif
+```
+
+The build records the exact resolved source revisions under
+`/opt/starvla-build-info/` inside the SIF. The simulator's many asset files are
+stored inside the single SquashFS image inode. The StarVLA model server still
+runs in the host `starVLA` conda environment.
+
+The launcher adds an Apptainer writable tmpfs overlay because RoboCasa briefly
+creates and deletes processed MJCF files beside its assets. The original asset
+tree remains in the read-only SquashFS image; only those small copy-on-write
+changes occupy node memory for the lifetime of the evaluation process.
+
+The manual conda installation below remains available as a fallback.
 
 ```bash
 # trainer env (already provided by the repo)
@@ -97,10 +117,12 @@ Two terminals; the script is the same wrapper for both.
 conda activate starVLA
 bash examples/Robocasa_365/eval_files/run_eval.sh server
 
-# terminal 2 (sim env, MuJoCo)
-conda activate robocasa365
+# terminal 2 (automatically uses the SIF when it exists)
 bash examples/Robocasa_365/eval_files/run_eval.sh client
 ```
+
+Set `ROBOCASA365_RUNTIME=conda` for the old simulator environment, or set
+`ROBOCASA365_SIF=/path/to/image.sif` to select another image.
 
 Or launch directly with `tyro` flags (note the `--args.` prefix and dashes):
 

@@ -57,17 +57,33 @@ DATASET_NAMED_MIXTURES = {
         ("droid_success", 1.0, "droid_lerobot_joint_pos"),
     
     ],
+    "droid_lerobot_delta_eef": [
+        ("droid_success", 1.0, "droid_lerobot_delta_eef"),
+    ],
+    # Original droid_success Parquet/action schema with only its videos
+    # transcoded to the training resolution.  Keep the non-resized DROID
+    # sampler: unlike droid_resized_success, no tabular schema was changed.
+    "droid_lerobot_180x320_delta_eef": [
+        ("droid_success_180x320", 1.0, "droid_lerobot_delta_eef"),
+    ],
     "droid_lerobot_resized": [
         ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
     ],
     "droid_lerobot_resized_success": [
         ("droid_resized_success", 1.0, "droid_lerobot_resized_joint_pos"),
     ],
+    "droid_lerobot_resized_success_delta_eef": [
+        ("droid_resized_success", 1.0, "droid_lerobot_resized_delta_eef"),
+    ],
     "libero_goal": [
         ("libero_goal_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
     ],
     "libero_mixed": [
         ("libero", 1.0, "libero_franka"),
+    ],
+
+    "vlabench_primitive": [
+        ("vlabench_primitive_ft_lerobot_video", 1.0, "vlabench_franka"),
     ],
 
     "libero_plus": [

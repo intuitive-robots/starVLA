@@ -113,4 +113,9 @@ DATASET_NAMED_MIXTURES = {
     "vla_arena_L0_L": [
         ("VLA_Arena_L0_L_lerobot_openpi", 1.0, "vla_arena_franka"),
     ],
+    # L1 (harder difficulty tier). Lives under <data_root_dir>/VLA-Arena/, so
+    # point datasets.vla_data.data_root_dir at that directory.
+    "vla_arena_L1_L": [
+        ("VLA_Arena_L1_L_lerobot_openpi", 1.0, "vla_arena_franka"),
+    ],
 }

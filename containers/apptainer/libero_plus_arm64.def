@@ -1,0 +1,148 @@
+Bootstrap: docker
+From: nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+%files
+    /tmp/starvla-libero-plus-assets-dd2bd61b7d9a6fef1abc52d606e983b41886a149.zip /opt/libero-plus-assets.zip
+
+%labels
+    org.opencontainers.image.title starVLA LIBERO-Plus evaluation environment
+    org.opencontainers.image.source https://github.com/allenai/vla-evaluation-harness
+    org.opencontainers.image.version v0.5.0-arm64
+    starvla.libero_plus.revision 4976dc30028e805ff8094b55501d532c48fec182
+    starvla.vla_eval.revision 4aeb4369640e8019d46af9534ce9b957e486ad38
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+    export LIBERO_CONFIG_PATH=/opt/libero-config
+    export PYOPENGL_PLATFORM=egl
+    export EGL_PLATFORM=device
+    export MUJOCO_GL=egl
+    export NVIDIA_DRIVER_CAPABILITIES=all
+
+%post
+    set -eu
+
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/conda/bin:$PATH
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        libegl1 \
+        libegl1-mesa-dev \
+        libexpat1 \
+        libfontconfig1-dev \
+        libgl1 \
+        libgl1-mesa-glx \
+        libgles2 \
+        libglew-dev \
+        libglfw3 \
+        libglib2.0-0 \
+        libglvnd-dev \
+        libhdf5-dev \
+        libmagickwand-dev \
+        libosmesa6 \
+        libosmesa6-dev \
+        libsm6 \
+        libvulkan1 \
+        libxext6 \
+        libxkbcommon-x11-0 \
+        libxrender-dev \
+        libxcb-xinerama0 \
+        mesa-vulkan-drivers \
+        pkg-config \
+        unzip \
+        wget
+    rm -rf /var/lib/apt/lists/*
+
+    wget -qO /tmp/miniforge.sh \
+        https://github.com/conda-forge/miniforge/releases/download/26.3.2-0/Miniforge3-Linux-aarch64.sh
+    bash /tmp/miniforge.sh -b -p /opt/conda
+    rm /tmp/miniforge.sh
+
+    /opt/conda/bin/conda create -n libero python=3.8 pip -y
+    /opt/conda/bin/conda clean -afy
+    /opt/conda/bin/python -m pip install --no-cache-dir uv==0.11.25
+
+    LIBERO_PYTHON=/opt/conda/envs/libero/bin/python
+    UV=/opt/conda/bin/uv
+
+    # PyTorch is needed only for LIBERO init-state loading in the simulator.
+    # The aarch64 PyPI wheel is CPU-only; model inference remains on the host.
+    "$UV" pip install --python "$LIBERO_PYTHON" --no-cache \
+        torch==2.1.0
+
+    "$UV" pip install --python "$LIBERO_PYTHON" --no-cache \
+        numpy==1.24.4 \
+        mujoco==3.2.3 \
+        robosuite==1.4.0 \
+        bddl==1.0.1 \
+        Pillow \
+        scipy \
+        h5py \
+        pyyaml \
+        termcolor \
+        future \
+        easydict \
+        hydra-core \
+        "gym>=0.21,<0.27" \
+        matplotlib \
+        opencv-python \
+        scikit-image \
+        wand
+
+    mkdir -p /app/LIBERO-plus
+    cd /app/LIBERO-plus
+    git init -q
+    git remote add origin https://github.com/sylvestf/LIBERO-plus.git
+    git fetch -q --depth 1 origin 4976dc30028e805ff8094b55501d532c48fec182
+    git checkout -q FETCH_HEAD
+    "$UV" pip install --python "$LIBERO_PYTHON" --no-cache \
+        --config-setting editable_mode=compat -e .
+    rm -rf /app/LIBERO-plus/.git
+
+    echo "96764a4bfbdaea98d4411598caeab235458318fe0f549611b93d1a323027b3cf  /opt/libero-plus-assets.zip" \
+        | sha256sum -c -
+    mkdir -p /tmp/libero-plus-assets
+    unzip -q /opt/libero-plus-assets.zip -d /tmp/libero-plus-assets
+    ASSET_SOURCE=$(find /tmp/libero-plus-assets -type d -name assets -print -quit)
+    test -n "$ASSET_SOURCE"
+    rm -rf /app/LIBERO-plus/libero/libero/assets
+    mv "$ASSET_SOURCE" /app/LIBERO-plus/libero/libero/assets
+    rm -rf /tmp/libero-plus-assets /opt/libero-plus-assets.zip
+
+    mkdir -p /opt/vla-evaluation-harness
+    cd /opt/vla-evaluation-harness
+    git init -q
+    git remote add origin https://github.com/allenai/vla-evaluation-harness.git
+    git fetch -q --depth 1 origin 4aeb4369640e8019d46af9534ce9b957e486ad38
+    git checkout -q FETCH_HEAD
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.5.0 \
+        "$UV" pip install --python "$LIBERO_PYTHON" --no-cache -e .
+    rm -rf /opt/vla-evaluation-harness/.git
+
+    mkdir -p /opt/libero-config
+    cat > /opt/libero-config/config.yaml <<'EOF'
+benchmark_root: /app/LIBERO-plus/libero/libero
+bddl_files: /app/LIBERO-plus/libero/libero/bddl_files
+init_states: /app/LIBERO-plus/libero/libero/init_files
+datasets: /app/LIBERO-plus/libero/datasets
+assets: /app/LIBERO-plus/libero/libero/assets
+EOF
+
+    rm -rf /root/.cache /opt/conda/pkgs/*
+
+%runscript
+    exec /opt/conda/envs/libero/bin/vla-eval "$@"
+
+%test
+    set -eu
+    export LIBERO_CONFIG_PATH=/opt/libero-config
+    /opt/conda/envs/libero/bin/python -c \
+        "import platform, libero, vla_eval; assert platform.machine() == 'aarch64'; print(platform.machine(), libero.__file__, vla_eval.__version__)"
+    test -f /app/LIBERO-plus/libero/libero/benchmark/task_classification.json
+    test "$(find /app/LIBERO-plus/libero/libero/assets -type f | wc -l)" -gt 100

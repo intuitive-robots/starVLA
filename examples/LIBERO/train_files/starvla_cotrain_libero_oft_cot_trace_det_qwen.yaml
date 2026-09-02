@@ -32,7 +32,7 @@ framework:
   # MLP head over the gathered <action> token hidden states.
   action_model:
     action_dim: 7
-    action_horizon: 8
+    action_horizon: 16
     action_model_type: MLP
 
 datasets:
@@ -59,6 +59,12 @@ datasets:
     data_mix: libero_mixed
     action_type: delta_qpos
     sequential_step_sampling: False
+    # MUST match framework.action_model.action_horizon -- the dataloader has no
+    # other way to know how many future action steps to load per sample, and
+    # silently defaults elsewhere if this is missing (that mismatch is what
+    # caused the RuntimeError: pred_actions came out (B,16,D) from the model
+    # config while actions_target stayed (B,8,D) from the dataloader default).
+    action_horizon: 16
 
     # MUST match the human prompt baked into the mapping file, or
     # assert_cot_prompt_consistent() fails at startup.

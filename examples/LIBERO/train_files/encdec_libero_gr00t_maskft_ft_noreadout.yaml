@@ -1,0 +1,131 @@
+# R1 — ISOLATE THE READ-OUT PROJECTOR.
+#
+# Exact clone of `encdec_libero_gr00t_maskft_ft.yaml` (vanilla 96.2%, LIBERO-Plus 65.6%)
+# with ONE field changed: readout_tokens.enabled true -> false. Nothing else differs, so
+# the delta is attributable to the projector alone.
+#
+# Why: RESULTS_TIER3.md §4a-v CORRECTION (2026-08-20). The claim "the read-out mechanism
+# dominates" was never isolated -- every QwenOFT arm is placeholders + MLP head and every
+# QwenGR00T arm is Q-Former + DiT-B head, so the ~52pp OFT/GR00T gap conflates read-out,
+# action head and capacity. `pi_maskft` separates them partially: DiT-B head, NO projector,
+# 89.5 vanilla / 47.3 LIBERO-Plus vs GR00T's 91.0 / 41.0. That is +1.5pp vanilla (inside the
+# 3.0pp seed band) and -6.3pp on LIBERO-Plus for 100.8M trainable params -- but pi_maskft is
+# only a proxy, since it also uses a different conditioning scheme (per-DiT-block layer
+# states). This arm is the within-framework comparison that proxy cannot give.
+#
+# With the projector off, QwenGR00T feeds the DiT the FULL encoder sequence
+# (`dit_context = last_hidden`, QwenGR00T.py:258 train / :331 eval) instead of 32 compressed
+# queries -- roughly 550 tokens rather than 32, so expect a slower step. Context dim is
+# unchanged at 2048 either way, and `max_seq_len` bounds the ACTION sequence, not the
+# context, so nothing else needs touching.
+#
+# Read-out: vanilla LIBERO AND LIBERO-Plus, chained. If the projector is worth nothing,
+# every future arm loses 100.8M params and may recover LIBERO-Plus.
+run_id: libero_gr00t_arm_maskft_ft_noreadout
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: niblank
+wandb_project: starvla_libero
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenGR00T
+
+  readout_tokens:
+    # THE ONLY CHANGE vs encdec_libero_gr00t_maskft_ft.yaml.
+    enabled:    false
+    num_tokens: 32
+    num_layers: 2
+    num_heads:  8
+    ffn_dim:    0
+    dropout:    0.0
+
+  qwenvl:
+    base_vlm:  /e/scratch/m3/misc_data/nogga2/weights/Qwen3-VL-2B-Instruct
+    enc_dec: true
+    encdec_ckpt: /e/project1/m3/blank4/code/train_downstream/train/outputs/enc_dec_2b_t097_fsd_rp_llov2/2026-06-12_01-49-02/checkpoints/checkpoint-9056
+    encdec_maskft: /e/scratch/m3/blank4/encdec_all28_s0.pt
+    skip_decoder: true
+    attn_implementation: sdpa
+    vl_hidden_dim: 2048
+  action_model:
+    action_dim: 7          # LIBERO delta eef (6) + gripper (1)
+    state_dim: 0
+    action_horizon: 16
+    action_model_type: DiT-B
+    hidden_size: 768
+    action_hidden_dim: 768
+    add_pos_embed: True
+    max_seq_len: 1024
+    diffusion_model_cfg:
+      num_layers: 12
+      output_dim: 768
+      dropout: 0.1
+
+datasets:
+  vlm_data:
+    dataset_py: vlm_datasets
+    dataformat: llava_json
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    data_flatten: false
+    base_interval: 2
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    per_device_batch_size: 4
+    num_workers: 4
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+
+  vla_data:
+    action_horizon: 16
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/libero_lerobot
+    data_mix: libero_mixed
+    action_type: delta_qpos
+    sequential_step_sampling: False
+
+
+
+    per_device_batch_size: 32
+    load_all_data_for_training: true
+    video_backend: decord
+    lerobot_version: "v3.0"
+    num_workers: 8
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    include_state: false
+
+trainer:
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  save_interval: 5000
+  eval_interval: 1000
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 100
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: true
+
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08

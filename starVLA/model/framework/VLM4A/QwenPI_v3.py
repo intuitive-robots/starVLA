@@ -50,6 +50,8 @@ import torch.nn as nn
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
+from starVLA.dataloader.cot_augmentation import augment_cot_batch
+from starVLA.dataloader.cot_resolver import assert_cot_prompt_consistent, build_cot_resolver
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.framework.share_tools import merge_framework_config, populate_layerwise_dit_cfg
 from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader import LayerwiseFlowmatchingActionHead, get_action_model
@@ -180,7 +182,15 @@ class Qwen_PI_v3(baseframework):
         # on the top-level config.  getattr(..., vlm_hf_cfg) handles both cases.
         vlm_hf_cfg = self.qwen_vl_interface.model.config
         text_cfg = getattr(vlm_hf_cfg, "text_config", vlm_hf_cfg)
-        num_vl_layers = int(text_cfg.num_hidden_layers)
+        # Full-duplicate enc-dec exposes all source-depth encoder states (28 for
+        # Qwen3-VL-2B), while a parameter-matched layer split exposes only its encoder
+        # prefix (14 in the 14/14 experiment).  The HF config still reports the original
+        # source depth, so ask the interface for the actual feature count when available.
+        num_vl_layers = int(getattr(
+            self.qwen_vl_interface,
+            "num_encoder_feature_layers",
+            text_cfg.num_hidden_layers,
+        ))
         llm_hidden_size = int(vlm_hf_cfg.hidden_size)
         self.config.framework.qwenvl.vl_hidden_dim = llm_hidden_size
         self.config.framework.qwenvl.num_vl_layers = num_vl_layers
@@ -233,6 +243,25 @@ class Qwen_PI_v3(baseframework):
         # are normalised upstream by `share_tools.apply_config_compat`, so we
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
+        self.is_inference = bool(kwargs.get("is_inference", False))
+
+        # Match QwenGR00T's CoT execution semantics. Full training resolves mappings and
+        # performs dropout in dataloader workers; the lazy resolver is only a fallback for
+        # direct/manual batches. Keeping this inside PI is essential for a controlled
+        # readout comparison: otherwise changing framework.name silently removes the
+        # frozen-decoder reasoning objective.
+        cot_cfg = self.config.datasets.vla_data.get("cot", None)
+        cot_source = cot_cfg.get("source", "none") if cot_cfg is not None else "none"
+        self.cot_dropout_enabled = bool(
+            cot_cfg.get("dropout_enabled", True) if cot_cfg is not None else False
+        ) and cot_source in {"mapping", "sparc_sqlite"}
+        self.cot_dropout_rate = float(
+            cot_cfg.get("dropout_rate", 0.5) if cot_cfg is not None else 0.0
+        )
+        self.cot_resolver = None
+        if self.is_inference:
+            self.cot_resolver = build_cot_resolver(self.config, is_inference=True)
+            assert_cot_prompt_consistent(self.cot_resolver, self.config)
 
     def _project_vl_hidden_for_action(self, vl_embs_list: List[torch.Tensor]) -> List[torch.Tensor]:
         """Project layer-wise VL hidden states to the hidden space expected by Action DiT."""
@@ -244,11 +273,19 @@ class Qwen_PI_v3(baseframework):
         return [proj(vl_h) for proj, vl_h in zip(self.project_layers, vl_embs_list)]
 
     def _encode_vl_hidden_states(
-        self, batch_images: List, instructions: List[str]
-    ) -> List[torch.Tensor]:
-        """Run QwenVL, project hidden states, and return the layer-wise embeddings for the Action DiT."""
+        self,
+        batch_images: List,
+        instructions: List[str],
+        cot_conversations: List[list | None] | None = None,
+        cot_modes: List[str] | None = None,
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+        """Return projected layer states, optional CoT CE, and encoder attention bias."""
+        has_cot = bool(cot_conversations) and any(c is not None for c in cot_conversations)
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
-            images=batch_images, instructions=instructions
+            images=batch_images,
+            instructions=instructions,
+            cot_conversations=cot_conversations if has_cot else None,
+            cot_modes=cot_modes,
         )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
@@ -259,7 +296,51 @@ class Qwen_PI_v3(baseframework):
             )
             vl_embs_list = list(qwenvl_outputs.hidden_states[-self.num_action_dit_layers:])
             vl_embs_list = self._project_vl_hidden_for_action(vl_embs_list)
-        return vl_embs_list
+        last_hidden = vl_embs_list[-1]
+        valid = getattr(self.qwen_vl_interface, "_last_encoder_attention_mask", None)
+        if valid is None:
+            valid = qwen_inputs.get("attention_mask")
+        if valid is None:
+            valid = torch.ones(
+                last_hidden.shape[:2], device=last_hidden.device, dtype=torch.bool
+            )
+        valid = valid[:, : last_hidden.shape[1]].to(
+            device=last_hidden.device, dtype=torch.bool
+        )
+        if valid.shape != last_hidden.shape[:2]:
+            raise RuntimeError(
+                "PI encoder mask/hidden-state mismatch: "
+                f"{tuple(valid.shape)} vs {tuple(last_hidden.shape[:2])}"
+            )
+        attention_bias = self._dit_attention_bias(valid, last_hidden.dtype)
+        cot_loss = (
+            qwenvl_outputs.loss
+            if has_cot and qwenvl_outputs.loss is not None
+            else None
+        )
+        return vl_embs_list, cot_loss, attention_bias
+
+    @staticmethod
+    def _dit_attention_bias(valid: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+        """Convert a [B,L] keep mask to Diffusers' additive cross-attention mask."""
+        bias = torch.zeros(valid.shape, device=valid.device, dtype=dtype)
+        bias.masked_fill_(~valid, -10_000.0)
+        return bias[:, None, :]
+
+    @staticmethod
+    def _apply_cot_graph_guard(
+        cot_loss: Optional[torch.Tensor],
+        examples: List[dict],
+        conversations: List[list | None],
+    ) -> Optional[torch.Tensor]:
+        """Keep the decoder graph but remove supervision from a synthetic guard row."""
+        if cot_loss is None:
+            return None
+        guard_only = all(
+            conversation is None or bool(example.get("cot_graph_guard", False))
+            for example, conversation in zip(examples, conversations)
+        )
+        return cot_loss * 0.0 if guard_only else cot_loss
 
     def forward(
         self,
@@ -283,6 +364,64 @@ class Qwen_PI_v3(baseframework):
             [example["state"] for example in examples] if "state" in examples[0] else None
         )  # List[ndarray (1, state_dim)] or None
 
+        # Worker-resolved CoT is the production path. The direct resolver fallback keeps
+        # smoke/manual batches equivalent without loading a 273k-row mapping per rank.
+        cot_from_workers = all("cot_conversation" in ex for ex in examples)
+        if not cot_from_workers and self.cot_resolver is None:
+            self.cot_resolver = build_cot_resolver(self.config, is_inference=False)
+            assert_cot_prompt_consistent(self.cot_resolver, self.config)
+        cot_conversations = [
+            ex.get("cot_conversation") if cot_from_workers else self.cot_resolver.resolve(
+                ex.get("trajectory_name", ""), ex.get("frame_index", 0)
+            )
+            for ex in examples
+        ]
+        cot_available = [
+            bool(ex.get("cot_available", c is not None)) if cot_from_workers else c is not None
+            for ex, c in zip(examples, cot_conversations)
+        ]
+        if self.cot_dropout_enabled:
+            if cot_from_workers:
+                cot_modes = [
+                    ex.get("cot_mode", "cot" if c is not None else "no_cot")
+                    for ex, c in zip(examples, cot_conversations)
+                ]
+            else:
+                for i, conversation in enumerate(cot_conversations):
+                    if (
+                        self.training
+                        and conversation is not None
+                        and np.random.random() < self.cot_dropout_rate
+                    ):
+                        cot_conversations[i] = None
+                cot_modes = ["cot" if c is not None else "no_cot" for c in cot_conversations]
+        else:
+            cot_modes = None
+        has_cot = any(c is not None for c in cot_conversations)
+        if self.training and self.cot_dropout_enabled and not has_cot:
+            raise RuntimeError(
+                "CoT dropout removed every target from this local training batch. "
+                "The worker-side collator must retain at least one target per rank."
+            )
+        cot_coverage = sum(cot_available) / max(len(cot_available), 1)
+        available_count = sum(cot_available)
+        cot_keep_rate = (
+            sum(c is not None for c in cot_conversations) / available_count
+            if available_count
+            else 0.0
+        )
+
+        augmentation = str(self.config.datasets.vla_data.get("augmentation", "none")).lower()
+        if (
+            self.training
+            and has_cot
+            and not cot_from_workers
+            and augmentation in {"photometric", "crop_photometric"}
+        ):
+            batch_images, cot_conversations = augment_cot_batch(
+                batch_images, cot_conversations, mode=augmentation
+            )
+
         # Prepend discretised proprioceptive state to each instruction string.
         instructions = (
             self.add_discretized_state_to_instruction(instructions, state) if state is not None else instructions
@@ -290,7 +429,13 @@ class Qwen_PI_v3(baseframework):
         state = None  # state is now encoded in the instruction tokens
 
         # Step 1: encode through QwenVL
-        vl_embs_list = self._encode_vl_hidden_states(batch_images, instructions)
+        vl_embs_list, cot_loss, encoder_attention_bias = self._encode_vl_hidden_states(
+            batch_images,
+            instructions,
+            cot_conversations=cot_conversations if has_cot else None,
+            cot_modes=cot_modes,
+        )
+        cot_loss = self._apply_cot_graph_guard(cot_loss, examples, cot_conversations)
         base_hidden = vl_embs_list[-1]
 
         # Step 2: compute flow-matching loss over the action chunk
@@ -308,6 +453,9 @@ class Qwen_PI_v3(baseframework):
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
             # Repeat every VLM layer embedding to match the duplicated action batch.
             vl_embs_list_repeated = [h.repeat(repeated_diffusion_steps, 1, 1) for h in vl_embs_list]
+            encoder_attention_bias_repeated = encoder_attention_bias.repeat(
+                repeated_diffusion_steps, 1, 1
+            )
 
             state_repeated = None
             if state is not None:
@@ -318,9 +466,17 @@ class Qwen_PI_v3(baseframework):
                 vl_embs_list_repeated,
                 actions_target_repeated,
                 state_repeated,
+                encoder_attention_mask=encoder_attention_bias_repeated,
             )
 
-        return {"action_loss": action_loss}
+        result = {
+            "action_loss": action_loss,
+            "cot_coverage": cot_coverage,
+            "cot_keep_rate": cot_keep_rate,
+        }
+        if cot_loss is not None:
+            result["cot_loss"] = cot_loss
+        return result
 
     @torch.inference_mode()
     def predict_action(
@@ -365,7 +521,9 @@ class Qwen_PI_v3(baseframework):
             batch_images = resize_images(batch_images, target_size=train_obs_image_size)
 
         # Step 1: encode through QwenVL
-        vl_embs_list = self._encode_vl_hidden_states(batch_images, instructions)
+        vl_embs_list, _, encoder_attention_bias = self._encode_vl_hidden_states(
+            batch_images, instructions
+        )
         base_hidden = vl_embs_list[-1]
 
         state = (
@@ -376,7 +534,9 @@ class Qwen_PI_v3(baseframework):
         # Step 2: run the flow-matching sampler to produce the denoised action chunk.
         with torch.autocast("cuda", dtype=torch.float32):
             pred_actions = self.action_model.predict_action(
-                vl_embs_list, state
+                vl_embs_list,
+                state,
+                encoder_attention_mask=encoder_attention_bias,
             )  # (B, action_horizon, action_dim)
 
         normalized_actions = pred_actions.detach().cpu().numpy()

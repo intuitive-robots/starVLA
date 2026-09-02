@@ -549,9 +549,41 @@ def _lightweight_winner_idx(row: dict) -> Optional[int]:
     return None
 
 
+def _centroid_traces_count(row: dict) -> int:
+    """Number of per-candidate traces in the arrays blob (0 when absent).
+
+    Cached on the row: the blob is base64 + npz and decoding it per lookup is
+    expensive on multi-million-entry mappings.
+    """
+    cached = row.get("_centroid_traces_count")
+    if cached is not None:
+        return int(cached)
+    count = 0
+    blob = _lightweight_payload(row).get("arrays_blob")
+    if blob:
+        try:
+            raw = base64.b64decode(str(blob).encode("ascii"))
+            with np.load(io.BytesIO(raw)) as npz:
+                if "centroid_traces" in npz.files:
+                    traces = np.asarray(npz["centroid_traces"])
+                    if traces.ndim == 3:
+                        count = int(traces.shape[0])
+        except Exception:
+            count = 0
+    row["_centroid_traces_count"] = count
+    return count
+
+
 def _trace_idx_for_box(row: dict, box: list | None, preferred_idx: int | None = None) -> Optional[int]:
     candidate_boxes = _lightweight_candidate_boxes(row)
-    if preferred_idx is not None and 0 <= int(preferred_idx) < len(candidate_boxes):
+    # publication-v2 rows expose only the detector's box in candidate_boxes (a
+    # 1-element list), while winner_idx and centroid_traces are both indexed
+    # against the full original candidate array. Validating preferred_idx only
+    # against candidate_boxes therefore rejected every nonzero winner and fell
+    # through to index 0 -- silently returning candidate 0's trace instead of
+    # the selected winner's. Accept the index if EITHER array can serve it.
+    limit = max(len(candidate_boxes), _centroid_traces_count(row))
+    if preferred_idx is not None and 0 <= int(preferred_idx) < limit:
         return int(preferred_idx)
     if box is None or not candidate_boxes:
         return None
@@ -813,6 +845,7 @@ def build_phase_entries(
     trace_arc_sample_pts: int = 5,
     trace_snap_min_arc_px: float = 20.0,
     trace_min_arc_px: float = 20.0,
+    prefer_mean_trace: bool = False,
     stats: dict | None = None,
 ) -> list[dict]:
     """
@@ -823,6 +856,14 @@ def build_phase_entries(
         [{"from": "human", "value": <prompt template>},
          {"from": "gpt",   "value": <phase description + point>}]
     The human value may contain {instruction} which is filled in at training time.
+
+    prefer_mean_trace: when True, swaps the _candidate_trace fallback order to
+    prefer "obj_traces" (the per-frame mean of visible CoTracker points,
+    already collapsed in trajectory_annotator.py) over "obj_traces_cotracker_point"
+    (a single verified keypoint track). Only affects trajectories where the
+    normally-preferred source is actually populated -- for annotation batches
+    where "obj_traces_cotracker_point" is present (as it is for LIBERO-plus),
+    this is the only way to get the mean-based trace instead of the point track.
     """
     phase_anns = ann.get("phase_annotations") or []
     if not phase_anns:
@@ -833,6 +874,11 @@ def build_phase_entries(
     obj_lbl = _obj_label(task_obj_info)
     tgt_lbl = _target_label(task_obj_info)
     coord_size = coord_size or _coord_size_from_annotation(ann)
+    trace_keys = (
+        ("obj_traces", "obj_traces_cotracker_point")
+        if prefer_mean_trace
+        else ("obj_traces_cotracker_point", "obj_traces")
+    )
 
     if selection_mode not in {"ours", "detection"}:
         raise ValueError(f"Unsupported selection_mode: {selection_mode}")
@@ -876,7 +922,7 @@ def build_phase_entries(
             full_trace = _candidate_trace(
                 ann,
                 init_trace_idx,
-                ("obj_traces_cotracker_point", "obj_traces"),
+                trace_keys,
             )
             frame_indices = _tracking_frame_indices_from_arrays_blob(ann)
         snap_box = cand_box if cand_box is not None else init_box
@@ -937,7 +983,7 @@ def build_phase_entries(
         if phase in _GRASP_PHASES and init_box is not None:
             if trace_format:
                 trace = _postprocess_trace(
-                    _candidate_trace(ann, init_trace_idx, ("obj_traces_cotracker_point", "obj_traces")),
+                    _candidate_trace(ann, init_trace_idx, trace_keys),
                     snap_end_to_box=init_box,
                     rdp_epsilon=trace_rdp_epsilon,
                     max_trace_pts=max_trace_pts,
@@ -957,7 +1003,7 @@ def build_phase_entries(
         elif phase in _PLACE_PHASES and cand_box is not None:
             if trace_format:
                 trace = _postprocess_trace(
-                    _candidate_trace(ann, cand_trace_idx, ("obj_traces_cotracker_point", "obj_traces")),
+                    _candidate_trace(ann, cand_trace_idx, trace_keys),
                     snap_end_to_box=cand_box,
                     rdp_epsilon=trace_rdp_epsilon,
                     max_trace_pts=max_trace_pts,
@@ -1057,6 +1103,7 @@ def _write_mapping(
                 trace_arc_sample_pts=args.trace_arc_sample_pts,
                 trace_snap_min_arc_px=args.trace_snap_min_arc_px,
                 trace_min_arc_px=args.trace_min_arc_px,
+                prefer_mean_trace=args.prefer_mean_trace,
                 stats=stats,
             )
             filtered_static += stats.get("filtered_static_traces", 0)
@@ -1169,6 +1216,15 @@ def main():
         type=float,
         default=10.0,
         help="Filter per-frame trace entries with less than this many pixels of remaining raw trajectory motion.",
+    )
+    parser.add_argument(
+        "--prefer_mean_trace",
+        action="store_true",
+        help=(
+            "Swap the trace-source fallback order to prefer 'obj_traces' (per-frame mean "
+            "of visible CoTracker points) over 'obj_traces_cotracker_point' (a single "
+            "verified keypoint track). Default (off) matches existing mapping files."
+        ),
     )
     parser.add_argument(
         "--coord_width",
