@@ -51,9 +51,12 @@ from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
 
-deepspeed_plugin = None if os.environ.get("STARVLA_DISABLE_DEEPSPEED") == "1" else DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
-accelerator.print(accelerator.state)
+# NOTE: upstream builds a module-level Accelerator here. This tree builds one
+# inside build_accelerator() instead, and accelerate raises
+#   NotImplementedError: You cannot pass in a `deepspeed_plugin` when creating a
+#   second `Accelerator`
+# if both exist. The helpers below take the accelerator as an argument, so no
+# module-level instance is needed.
 
 
 def _unwrap_model(accelerator, model):
