@@ -53,30 +53,6 @@ SIF_SITE=/opt/conda/envs/starVLA/lib/python3.12/site-packages
 [ -e "${FFMPEG_SHIM}/libavcodec.so.60" ] || { echo "[ERROR] FFmpeg shim missing: ${FFMPEG_SHIM}"; exit 1; }
 export APPTAINERENV_LD_LIBRARY_PATH="${FFMPEG_SHIM}:${CUDA_LIB64}:${SIF_SITE}/torch/lib:/opt/conda/envs/starVLA/lib"
 
-# ── Stage the dataset into node RAM ───────────────────────────────────────────
-# The dataset is only 39 mp4 files (mean 153 MB) but this node runs two arms x
-# two ranks x 24 workers = 96 readers against them, each with its own decoder
-# doing independent random seeks. On the shared exa_scratch filesystem that
-# collides badly: observed data stalls of 11-16 s while model_times stayed at
-# ~1.2 s. tmpfs has 239 GB and the copy takes about 4 s, so both arms read from
-# RAM instead. STARVLA_RC365_STAGE=0 disables it.
-STAGE_DATA="${STARVLA_RC365_STAGE:-1}"
-if [ "${STAGE_DATA}" = "1" ]; then
-    SHM_ROOT=/dev/shm/rc365_${SLURM_JOB_ID:-local}
-    echo "staging dataset -> ${SHM_ROOT} (node RAM)"
-    mkdir -p "${SHM_ROOT}"
-    t0=$SECONDS
-    # -a preserves the loader's generated meta/ cache (stats_gr00t.json and the
-    # 20 MB steps_data_index.pkl), so indexing is not redone from scratch.
-    cp -a "${DATA_ROOT}" "${SHM_ROOT}/" || { echo "[ERROR] staging failed"; exit 1; }
-    echo "staged $(du -sh "${SHM_ROOT}" | cut -f1) in $((SECONDS-t0)) s; /dev/shm now $(df -h /dev/shm | awk 'NR==2{print $3" used, "$4" free"}')"
-    DATA_ROOT_DIR_OVERRIDE="${SHM_ROOT}"
-    cleanup_shm() { rm -rf "${SHM_ROOT}" 2>/dev/null || true; }
-    trap cleanup_shm EXIT
-else
-    DATA_ROOT_DIR_OVERRIDE=""
-fi
-
 echo "=========================================="
 echo " RoboCasa365 Atomic-Seen PI backbone comparison -- seed ${SEED}"
 echo " Job ${SLURM_JOB_ID:-local} on $(hostname)"
@@ -103,17 +79,13 @@ launch() {
         # cd's there; without this override both arms would train from that tree,
         # which does not contain these configs.
         export STARVLA_REPO="${REPO}"
-        export DATA_ROOT_DIR_OVERRIDE
         export STARVLA_CUDA_VISIBLE_DEVICES="${devs}"
         export NUM_PROCESSES=2
         export MASTER_PORT="${port}"
-        extra=()
-        [ -n "${DATA_ROOT_DIR_OVERRIDE}" ] && extra+=(--datasets.vla_data.data_root_dir "${DATA_ROOT_DIR_OVERRIDE}")
         bash train_libero_slurm.sh \
             --config "${yaml}" \
             --run_id "${run_id}" \
-            --seed "${SEED}" \
-            "${extra[@]}"
+            --seed "${SEED}"
     ) > "${log}" 2>&1 &
     pids+=($!)
 }
