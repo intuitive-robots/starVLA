@@ -368,6 +368,22 @@ num_active_workers=${#worker_start[@]}
 # was i*(i+1) seconds (quadratic, not linear): worker 99 wouldn't start until
 # ~9900s (~2.75h) in. Now it's num_gpu_slots parallel streams of
 # workers_per_gpu each, flat 2s within each stream.
+# A shard that exhausts its retries should cost only that shard. Failed ranges
+# are recorded here so a re-run can target them, and STARVLA_RESUME_EVAL=1 skips
+# shards whose result JSON already exists. Neither changes which episodes are
+# rolled out -- the partitioning above is untouched, so results stay directly
+# comparable with earlier runs.
+failed_manifest="${output_dir}/failed_shards_${task_suite_name}.txt"
+: > "${failed_manifest}"
+resume_eval="${STARVLA_RESUME_EVAL:-0}"
+if [ "${exact_sample_count}" -gt 0 ]; then
+    result_tag="_exact${exact_sample_count}"
+elif [ "${stride}" != "1" ]; then
+    result_tag="_stride${stride}"
+else
+    result_tag=""
+fi
+
 gpu_launcher_pids=()
 for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
     gpu_id=${gpu_ids[$gpu_slot]}
@@ -388,6 +404,11 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
             sleep 2
 
             (
+                shard_result="${output_dir}/logs/${task_suite_name}/${current_start}_to_${current_end}${result_tag}.json"
+                if [ "${resume_eval}" = "1" ] && [ -s "${shard_result}" ]; then
+                    echo "Part ${i} [${current_start},${current_end}): already complete, skipping"
+                    exit 0
+                fi
                 for ((attempt=1; attempt<=worker_max_attempts; attempt++)); do
                     if run_eval_worker "${gpu_id}" \
                         --pretrained_path "$your_ckpt" \
@@ -417,6 +438,7 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
                     [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
                 done
                 echo "[ERROR] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} exhausted ${worker_max_attempts} attempts."
+                echo "${current_start} ${current_end} ${current_shard} ${current_num_shards}" >> "${failed_manifest}"
                 exit "${rc}"
             ) &
             pids+=($!)
@@ -435,7 +457,13 @@ for pid in "${gpu_launcher_pids[@]}"; do
     wait "${pid}" || workers_rc=1
 done
 if [ "${workers_rc}" -ne 0 ]; then
-    echo "[ERROR] One or more simulator shards failed; refusing to aggregate partial results."
+    n_failed=$(wc -l < "${failed_manifest}" 2>/dev/null || echo 0)
+    echo "[ERROR] ${n_failed} shard(s) failed. NOT aggregating: a success rate over a subset"
+    echo "        would silently understate the real one."
+    echo "        Every other shard completed and is on disk -- that work is not lost."
+    echo "        Failed ranges (start end shard num_shards): ${failed_manifest}"
+    echo "        Re-run the SAME command with STARVLA_RESUME_EVAL=1 to retry only those;"
+    echo "        completed shards are skipped, so the episode partitioning is unchanged."
     exit 1
 fi
 
