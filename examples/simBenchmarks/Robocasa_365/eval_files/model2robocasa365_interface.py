@@ -46,6 +46,10 @@ class PolicyWarper:
         host: str = "0.0.0.0",
         port: int = 10095,
         image_size=(224, 224),
+        camera_keys=(
+            "video.robot0_agentview_left",
+            "video.robot0_eye_in_hand",
+        ),
         n_action_steps: int = 8,
         action_ensemble: bool = False,
         action_ensemble_horizon: int = 3,
@@ -56,6 +60,11 @@ class PolicyWarper:
         self.client = WebsocketClientPolicy(host, port)
         self.unnorm_key = unnorm_key
         self.image_size = tuple(image_size)
+        # Must match the training DataConfig's video_keys exactly, in order.
+        # Default pairs the left agentview with the wrist camera
+        # (panda_omron_robocasa365_2cam); pass camera_keys=("video.robot0_agentview_left",)
+        # for a checkpoint trained with the *_1cam mixtures.
+        self.camera_keys = tuple(camera_keys)
         self.n_action_steps = n_action_steps
         self.use_ddim = use_ddim
         self.num_ddim_steps = num_ddim_steps
@@ -89,10 +98,16 @@ class PolicyWarper:
         if instructions[0] != self.task_description:
             self.reset(instructions[0])
 
-        # 2) image — the tabletop multi-view env returns (B, n_obs, H, W, 3); we use the
-        # left agentview (the same one used during training).
-        view = observations["video.robot0_agentview_left"]  # (B, 1, H, W, 3)
-        images = [[self._resize_image(img) for img in sample] for sample in view]
+        # 2) image — the env returns (B, n_obs, H, W, 3) per camera. Send exactly the
+        # views the checkpoint was trained on, in the same order: the loader stacks
+        # frames in its DataConfig's video_keys order, so camera order is part of the
+        # contract and a permutation degrades the policy silently.
+        views = [observations[key] for key in self.camera_keys]  # each (B, n_obs, H, W, 3)
+        batch_size = len(views[0])
+        images = [
+            [self._resize_image(img) for view in views for img in view[b]]
+            for b in range(batch_size)
+        ]
 
         # 3) state — concatenate parts in the same order as in training
         state_parts = [observations[k] for k in STATE_KEY_ORDER]  # each (B, 1, d)

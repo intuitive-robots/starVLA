@@ -99,9 +99,29 @@ class PandaOmronRoboCasa365SingleCamDataConfig(PandaOmronRoboCasa365DataConfig):
     video_keys = ["video.robot0_agentview_left"]
 
 
+class PandaOmronRoboCasa365TwoCamDataConfig(PandaOmronRoboCasa365DataConfig):
+    """Left agentview + wrist camera.
+
+    The eye-in-hand view carries the contact and grasp-alignment detail that a
+    fixed agentview cannot resolve, and 14 of the 18 Atomic-Seen tasks are
+    manipulation rather than navigation. The environment publishes all three
+    views (see PandaOmron_modality.json), so this only requires the evaluation
+    bridge to forward both, which model2robocasa365_interface now does.
+
+    Key order here is the contract: the loader stacks frames in video_keys order
+    and the bridge must send them in the same order.
+    """
+
+    video_keys = [
+        "video.robot0_agentview_left",
+        "video.robot0_eye_in_hand",
+    ]
+
+
 ROBOT_TYPE_CONFIG_MAP = {
     "panda_omron_robocasa365": PandaOmronRoboCasa365DataConfig(),
     "panda_omron_robocasa365_1cam": PandaOmronRoboCasa365SingleCamDataConfig(),
+    "panda_omron_robocasa365_2cam": PandaOmronRoboCasa365TwoCamDataConfig(),
 }
 
 ROBOT_TYPE_TO_EMBODIMENT_TAG = {
@@ -122,6 +142,7 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
 #   # or run the helper at examples/simBenchmarks/Robocasa_365/train_files/dump_target_human_paths.py
 _ROBOT_TAG = "panda_omron_robocasa365"
 _ROBOT_TAG_1CAM = "panda_omron_robocasa365_1cam"
+_ROBOT_TAG_2CAM = "panda_omron_robocasa365_2cam"
 
 # Atomic single-skill tasks (target/human split, 18 tasks).
 _TARGET_HUMAN_ATOMIC = {
@@ -226,8 +247,11 @@ DATASET_NAMED_MIXTURES = {
                                                        **_TARGET_HUMAN_COMPOSITE}),
     # ------- LeRobot v3.0 mirrors (one merged dataset per benchmark group) -------
     **{name: [(directory, 1.0, _ROBOT_TAG)] for name, directory in _V3_MIRRORS.items()},
-    # Same data, single-camera contract that matches the checked-in eval bridge.
+    # Same data, single-camera contract (left agentview only).
     **{f"{name}_1cam": [(directory, 1.0, _ROBOT_TAG_1CAM)]
+       for name, directory in _V3_MIRRORS.items()},
+    # Left agentview + wrist. Requires the two-camera eval bridge.
+    **{f"{name}_2cam": [(directory, 1.0, _ROBOT_TAG_2CAM)]
        for name, directory in _V3_MIRRORS.items()},
     # "seen-34" = 18 atomic + 16 composite-seen, the scope StarVLA-PI and
     # StarVLA-GR00T were trained on in the archived snapshot. It holds out the

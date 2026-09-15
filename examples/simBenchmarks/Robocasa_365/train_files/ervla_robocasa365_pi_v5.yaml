@@ -82,7 +82,7 @@ datasets:
     action_horizon: 16
     dataset_py: lerobot_datasets
     data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0
-    data_mix: robocasa365_v3_target_atomic_1cam
+    data_mix: robocasa365_v3_target_atomic_2cam
     action_type: delta_ee
     sequential_step_sampling: false
     # 32/device x 2 GPUs = 64 effective -- identical to the controls, which ran
