@@ -54,6 +54,15 @@ datasets:
     obs_image_size: [224, 224]
     delete_pause_frame: false
     video_backend: decord
+    # The loader defaults to 4 workers, which leaves training data-bound on this
+    # dataset: random video seeks cost ~70 ms/frame (sequential is 1.6 ms), and
+    # worker parallelism is what hides that. Measured at bs=32 with the prefetch
+    # queue drained: 8 -> 1.885 s/batch, 16 -> 0.835, 24 -> 0.437, against a
+    # ~1.22 s model step.
+    num_workers: 24
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
 
 trainer:
   max_train_steps: 30000

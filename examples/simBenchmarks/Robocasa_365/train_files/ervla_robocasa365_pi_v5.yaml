@@ -92,7 +92,14 @@ datasets:
     load_all_data_for_training: true
     video_backend: decord
     lerobot_version: "v3.0"
-    num_workers: 8
+    # Measured on a dev node against this dataset (bs=32, prefetch queue
+    # drained before timing): 8 workers -> 1.885 s/batch, 16 -> 0.835 s/batch,
+    # against a 1.22 s model step. Eight workers leave training data-bound;
+    # 24 keeps it model-bound with margin, since four training processes
+    # share a node here whereas the benchmark ran alone. Random video seeks
+    # cost ~70 ms/frame (sequential is 1.6 ms), so worker count is what
+    # hides decode -- the same lever DROID uses at 24 workers.
+    num_workers: 24
     prefetch_factor: 4
     persistent_workers: true
     pin_memory: true
