@@ -48,14 +48,21 @@ done
 ml load CUDA
 export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 
-# ── Conda ─────────────────────────────────────────────────────────────────────
-source ~/blank4/envs/miniforge3/etc/profile.d/conda.sh
-conda activate starVLA
+# ── Environment: Apptainer image, not conda ───────────────────────────────────
+# The conda envs were replaced by packed images on 2026-09-14; `conda activate
+# starVLA` now fails with EnvironmentNameNotFound. RUN_ENV wraps every python
+# invocation below. run_in_env.sh resolves $SIF_DIR/starVLA.sif (project dir,
+# falling back to scratch), passes --nv, binds /e/project1,/e/scratch,/e/software,/e/home,
+# and points CUDA_HOME at the host toolkit for the DeepSpeed/Triton JIT.
+# Apptainer inherits the host environment, so CUDA_VISIBLE_DEVICES, NUM_PROCESSES
+# and MASTER_PORT set by the pair launchers still reach the training process.
+RUN_ENV_SH="${RUN_ENV_SH:-/e/home/jusers/blank4/jupiter/blank4/containers/envs/run_in_env.sh}"
+STARVLA_ENV_NAME="${STARVLA_ENV_NAME:-starVLA}"
+[ -x "${RUN_ENV_SH}" ] || { echo "PREFLIGHT FAIL: no run_in_env.sh at ${RUN_ENV_SH}"; exit 1; }
+RUN_ENV=("${RUN_ENV_SH}" "${STARVLA_ENV_NAME}")
 set -u
 
 # ── Library paths ─────────────────────────────────────────────────────────────
-export LD_LIBRARY_PATH=/home/hk-project-sustainebot/bm3844/miniconda3/envs/vlm/lib/python3.12/site-packages/nvidia/nvjitlink/lib:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 export TORCH_USE_CUDA_DSA=1
 
 # ── HuggingFace / cache dirs ──────────────────────────────────────────────────
@@ -110,7 +117,7 @@ preflight_ok=1
 for d in "/e/project1/m3/blank4/code/starVLA" "$HOME/blank4/envs/miniforge3" "/e/scratch/m3/blank4"; do
     ls "$d" >/dev/null 2>&1 || { echo "PREFLIGHT FAIL: cannot stat $d on $(hostname)"; preflight_ok=0; }
 done
-python -c "import torch, transformers" >/dev/null 2>&1 || { echo "PREFLIGHT FAIL: import torch/transformers on $(hostname)"; preflight_ok=0; }
+"${RUN_ENV[@]}" python -c "import torch, transformers" >/dev/null 2>&1 || { echo "PREFLIGHT FAIL: import torch/transformers inside ${STARVLA_ENV_NAME}.sif on $(hostname)"; preflight_ok=0; }
 if [ "$preflight_ok" -ne 1 ]; then
     echo "PREFLIGHT FAILED on $(hostname): this node's mounts are stale. Not resubmitting."
     exit 1
@@ -126,7 +133,7 @@ echo "CUDA allocator:${PYTORCH_CUDA_ALLOC_CONF}"
 echo "Extra args:    ${EXTRA_ARGS[*]:-<none>}"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
-accelerate launch \
+"${RUN_ENV[@]}" accelerate launch \
     --config_file "${ACCELERATE_CONFIG_FILE}" \
     --num_processes "${NUM_PROCESSES}" \
     starVLA/training/train_starvla.py \

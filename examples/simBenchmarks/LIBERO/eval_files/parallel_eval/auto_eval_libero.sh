@@ -53,8 +53,11 @@ fi
 
 # Absolute interpreters — do NOT rely on `python` resolving correctly (a stray
 # venv on PATH will silently win over the activated conda env).
-LIBERO_PYTHON="${LIBERO_PYTHON:-/e/project1/m3/blank4/envs/miniforge3/envs/libero/bin/python}"
-STARVLA_PYTHON="${STARVLA_PYTHON:-/e/project1/m3/blank4/envs/miniforge3/envs/starVLA/bin/python}"
+# The conda envs were replaced by packed Apptainer images on 2026-09-14, so these
+# now point at wrappers that exec `python` inside the matching image. Still
+# absolute paths, and still overridable, so the reasoning above is unchanged.
+LIBERO_PYTHON="${LIBERO_PYTHON:-${REPO_ROOT}/scripts/env/libero_python}"
+STARVLA_PYTHON="${STARVLA_PYTHON:-${REPO_ROOT}/scripts/env/starvla_python}"
 
 your_ckpt="${your_ckpt:-path_to_checkpoint}"
 output_dir="${output_dir:-}"
