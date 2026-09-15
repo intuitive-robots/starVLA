@@ -1,3 +1,22 @@
+def has_flash_attn():
+    """Check whether a flash-attention backend is available.
+
+    Returns True if either ``torch_npu`` (Ascend NPU) or ``flash_attn`` (GPU)
+    can be imported, otherwise False.  This allows VLM modules to gracefully
+    fall back to SDPA when no compatible flash-attention implementation is found.
+    """
+    try:
+        import torch_npu  # NPU flash-attention backend
+        return True
+    except ImportError:
+        pass
+    try:
+        import flash_attn  # GPU flash-attention backend
+        return True
+    except ImportError:
+        return False
+
+
 def auto_get_module_keys(module, max_depth=0, prefix_list=None, current_depth=0, current_prefix=""):
     """
     get all submodule keys of a module, support setting recursion depth and prefix list.
@@ -336,7 +355,7 @@ class CrossAttention(nn.Module):
         return output
 
 
-def preprocess_images(image_list, target_size, mode="crop"):  #  [B，[PLT]]
+def preprocess_images(image_list, target_size, mode="crop"):  #  [B, [PLT]]
     batch_images = []
     shapes = set()
     to_tensor = TF.ToTensor()
@@ -390,7 +409,7 @@ def preprocess_images(image_list, target_size, mode="crop"):  #  [B，[PLT]]
 
             shapes.add((img.shape[1], img.shape[2]))
             epi_images.append(img)
-        batch_images.append(torch.stack(epi_images))
+        batch_images.append(epi_images)
 
     # Check if we have different shapes
     # In theory our model can also work well with different shapes
@@ -401,24 +420,27 @@ def preprocess_images(image_list, target_size, mode="crop"):  #  [B，[PLT]]
         max_width = max(shape[1] for shape in shapes)
 
         # Pad images if necessary
-        padded_images = []
-        for img in batch_images:
-            h_padding = max_height - img.shape[1]
-            w_padding = max_width - img.shape[2]
+        padded_batch_images = []
+        for epi_images in batch_images:
+            padded_images = []
+            for img in epi_images:
+                h_padding = max_height - img.shape[1]
+                w_padding = max_width - img.shape[2]
 
-            if h_padding > 0 or w_padding > 0:
-                pad_top = h_padding // 2
-                pad_bottom = h_padding - pad_top
-                pad_left = w_padding // 2
-                pad_right = w_padding - pad_left
+                if h_padding > 0 or w_padding > 0:
+                    pad_top = h_padding // 2
+                    pad_bottom = h_padding - pad_top
+                    pad_left = w_padding // 2
+                    pad_right = w_padding - pad_left
 
-                img = torch.nn.functional.pad(
-                    img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
-                )
-            padded_images.append(img)
-        batch_images = padded_images
+                    img = torch.nn.functional.pad(
+                        img, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=1.0
+                    )
+                padded_images.append(img)
+            padded_batch_images.append(padded_images)
+        batch_images = padded_batch_images
 
-    batch_images = torch.stack(batch_images)  # concatenate images
+    batch_images = torch.stack([torch.stack(images) for images in batch_images])
 
     # Ensure correct shape when single image
     if len(image_list) == 1:

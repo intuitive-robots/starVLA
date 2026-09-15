@@ -19,7 +19,7 @@
 # distinct 1/num_nodes slice of the suite; results land in the same shared
 # output_dir (every shard file is named by its own [start,end) range, so
 # concurrent nodes never collide), then this script aggregates once at the
-# end. Wraps examples/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh.
+# end. Wraps examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh.
 #
 # LIBERO-plus suites have thousands of perturbed task instances (not just
 # 10-90 tasks like vanilla LIBERO); tasks_per_gpu is auto-sized (see
@@ -101,8 +101,8 @@
 
 set -euo pipefail
 
-AUTO_EVAL_SCRIPT="./examples/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh"
-AGGREGATE_SCRIPT="./examples/LIBERO-plus/eval_files/parallel_eval/aggregate_results.py"
+AUTO_EVAL_SCRIPT="./examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh"
+AGGREGATE_SCRIPT="./examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/aggregate_results.py"
 
 DEFAULT_SUITES=(libero_10 libero_goal libero_object libero_spatial)
 

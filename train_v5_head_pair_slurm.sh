@@ -29,8 +29,8 @@ SEED="${1:-42}"
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "$REPO"
 
-PI_YAML=./examples/LIBERO/train_files/ervla_v5_pi_actiononly_pifix.yaml
-GR_YAML=./examples/LIBERO/train_files/ervla_v5_gr00t_actiononly.yaml
+PI_YAML=./examples/simBenchmarks/LIBERO/train_files/ervla_v5_pi_actiononly_pifix.yaml
+GR_YAML=./examples/simBenchmarks/LIBERO/train_files/ervla_v5_gr00t_actiononly.yaml
 for f in "$PI_YAML" "$GR_YAML" train_libero_slurm.sh; do
     [ -f "$f" ] || { echo "[ERROR] missing $f"; exit 1; }
 done

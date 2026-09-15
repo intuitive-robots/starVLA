@@ -17,7 +17,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from typing import Union
 
-from examples.LIBERO.model2libero_interface import M1Inference
+from examples.simBenchmarks.LIBERO.model2libero_interface import M1Inference
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data

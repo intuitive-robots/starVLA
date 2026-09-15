@@ -14,7 +14,7 @@ set -euo pipefail
 STARVLA=/e/project1/m3/blank4/code/starVLA
 DIAG_ROOT=/e/project1/m3/blank4/code/encdec-vlm/train/encoder_decoder_training/enc_dec_cot
 PYTHON=/e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/starVLA/bin/python
-CFG=examples/LIBERO/train_files/ervla_g_cam3d_cot05.yaml
+CFG=examples/simBenchmarks/LIBERO/train_files/ervla_g_cam3d_cot05.yaml
 CKPT=playground/Checkpoints/ervla_g_cam3d_cot05/checkpoints/steps_20000_pytorch_model.pt
 RESULT_ROOT="$DIAG_ROOT/g_cam3d_diagnostic_results"
 RESULTS="$RESULT_ROOT/job_${SLURM_JOB_ID}"

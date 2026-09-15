@@ -65,10 +65,7 @@ from starVLA.model.framework.VLM4A.QwenGR00T import StructuredEncoderRegressionH
 from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader import LayerwiseFlowmatchingActionHead, get_action_model
 from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.model.tools import FRAMEWORK_REGISTRY
-from starVLA.training.trainer_utils import initialize_overwatch
 from starVLA.training.trainer_utils.trainer_tools import resize_images
-
-logger = initialize_overwatch(__name__)
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
@@ -196,7 +193,14 @@ class QwenPI_v3DefaultConfig:
                 "action_dit_hidden_dim": 1024,
                 "dropout": 0.2,
                 "final_dropout": True,
-                "interleave_self_attention": True,
+                # A single mode switch: false is legacy all-cross, true is
+                # canonical interleaved self/cross attention.
+                # A checkpoint config containing this field overrides the
+                # default; for old HF releases, use the matching code snapshot.
+                "interleave_self_attention": False,
+                # QwenPI_v3 intentionally keeps the historical layer-wise
+                # all-cross-attention semantics by default, without changing
+                # defaults for other frameworks.
                 "norm_type": "ada_norm",
                 "positional_embeddings": None,
                 "attention_head_dim": 64,
@@ -218,6 +222,12 @@ class Qwen_PI_v3(baseframework):
       ``action_dit_hidden_dim`` before feeding the Action DiT.
     - Layer-wise cross-DiT flow-matching action head that attends to every
       selected VLM layer in parallel.
+
+    QwenPI_v3 defaults to the historical legacy all-cross-attention DiT
+    forward. Set ``interleave_self_attention=true`` only for a checkpoint
+    explicitly trained with the canonical interleaved forward. The historical
+    ``use_canonical_forward`` boolean remains accepted as a compatibility alias
+    for existing launchers and is mapped to the same single mode switch.
 
     Focus: predict a future action chunk conditioned on multi-view images
     and a natural-language instruction (with optional discretised state prefix).
@@ -741,6 +751,7 @@ class Qwen_PI_v3(baseframework):
             cot_conversations=cot_conversations if has_cot else None,
             cot_modes=cot_modes,
         )
+        attention_mask = qwen_inputs.get("attention_mask", None)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -1518,6 +1529,8 @@ class Qwen_PI_v3(baseframework):
             batch_images, instructions
         )
         base_hidden = vl_embs_list[-1]
+        if backbone_attention_mask is not None:
+            backbone_attention_mask = backbone_attention_mask.to(dtype=torch.bool)
 
         state = (
             torch.from_numpy(np.array(state)).to(base_hidden.device, dtype=base_hidden.dtype)
@@ -1574,7 +1587,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config_yaml",
         type=str,
-        default="examples/SimplerEnv/train_files/starvla_cotrain_oxe.yaml",
+        default="examples/simBenchmarks/SimplerEnv/train_files/starvla_cotrain_oxe.yaml",
         help="Path to YAML config",
     )
     args, clipargs = parser.parse_known_args()
@@ -1641,7 +1654,7 @@ if __name__ == "__main__":
     print(f"Unnormalized Action: {normalized_actions}")
 
     # # # Advance: try forward model with dataloader
-    # # # can be fake sample， but here get from dataloader for simpler
+    # # # can be fake sample, but here get from dataloader for simpler
     # from starVLA.dataloader.lerobot_datasets import get_vla_dataset, collate_fn
 
     # vla_dataset_cfg = cfg.datasets.vla_data

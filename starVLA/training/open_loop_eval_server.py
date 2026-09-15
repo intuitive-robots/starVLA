@@ -10,7 +10,7 @@ Override with --output_dir if needed.
 
 Usage:
     python -m starVLA.training.open_loop_eval_server \
-        --config_yaml examples/LIBERO/train_files/starvla_cotrain_libero.yaml \
+        --config_yaml examples/simBenchmarks/LIBERO/train_files/starvla_cotrain_libero.yaml \
         --host 127.0.0.1 --port 10093 \
         --num_traj 5
 """

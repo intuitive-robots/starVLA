@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
-from examples.LIBERO.eval_files.parallel_eval.eval_libero_shard import (
+from examples.simBenchmarks.LIBERO.eval_files.parallel_eval.eval_libero_shard import (
     LIBERO_DUMMY_ACTION,
     LIBERO_ENV_RESOLUTION,
     _apply_object_perturbation,

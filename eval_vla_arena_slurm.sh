@@ -14,7 +14,7 @@
 # self-contained copy of the single-node pipeline (policy servers + sim workers,
 # all node-local) against a distinct slice of the (suite x level) work units;
 # shards land in a shared output_dir and this script aggregates once at the end.
-# Wraps examples/VLA-Arena/eval_files/parallel_eval/auto_eval_vla_arena.sh.
+# Wraps examples/simBenchmarks/VLA-Arena/eval_files/parallel_eval/auto_eval_vla_arena.sh.
 #
 # Difference vs eval_libero_plus_slurm.sh: LIBERO-plus splits one suite by task
 # index (thousands of perturbed instances). eval_vla_arena.py has no task-range
@@ -47,8 +47,8 @@
 
 set -euo pipefail
 
-AUTO_EVAL_SCRIPT="./examples/VLA-Arena/eval_files/parallel_eval/auto_eval_vla_arena.sh"
-AGGREGATE_SCRIPT="./examples/VLA-Arena/eval_files/parallel_eval/aggregate_vla_arena_results.py"
+AUTO_EVAL_SCRIPT="./examples/simBenchmarks/VLA-Arena/eval_files/parallel_eval/auto_eval_vla_arena.sh"
+AGGREGATE_SCRIPT="./examples/simBenchmarks/VLA-Arena/eval_files/parallel_eval/aggregate_vla_arena_results.py"
 
 # ── VLA-Arena environment (edit if your paths differ) ───────────────────────
 export VLA_ARENA_HOME="${VLA_ARENA_HOME:-/e/project1/m3/blank4/code/VLA-Arena}"

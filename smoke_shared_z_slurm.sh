@@ -13,7 +13,7 @@
 set -uo pipefail
 
 STARVLA=/e/project1/m3/blank4/code/starVLA
-CFG="$STARVLA/examples/LIBERO/train_files"
+CFG="$STARVLA/examples/simBenchmarks/LIBERO/train_files"
 TRAIN="$STARVLA/train_libero_slurm.sh"
 TAG="${SLURM_JOB_ID}_$(date +%Y%m%d_%H%M%S)"
 LOG_DIR="$STARVLA/slurm_logs/sharedz_smoke_${TAG}"

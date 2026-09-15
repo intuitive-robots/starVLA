@@ -30,7 +30,7 @@ You can refer to this link to fix: [Installation Guide – Vulkan Section](https
 We provide a minimal environment verification script:
 
 ```bash
-python examples/SimplerEnv/test_your_simplerEnv.py
+python examples/simBenchmarks/SimplerEnv/test_your_simplerEnv.py
 ```
 
 If you see the "✅ Env built successfully" message, it means SimplerEnv is installed correctly and ready to use.
@@ -61,7 +61,7 @@ Available SimplerEnv WidowX checkpoints (see [docs/model_zoo.md](../../docs/mode
 In the first terminal, activate the `starVLA` conda environment and run:  
 
 ```bash
-bash examples/SimplerEnv/eval_files/run_policy_server.sh
+bash examples/simBenchmarks/SimplerEnv/eval_files/run_policy_server.sh
 ```
 
 ⚠️ **Note:** Please ensure that you specify the correct checkpoint path in  
@@ -76,7 +76,7 @@ In the second terminal, activate the `simpler_env` conda environment and run:
 
 ```bash
 export MODEL_PATH=.../checkpoints/steps_50000_pytorch_model.pt # for read normonization json and get name to save video under ckpt dir
-bash examples/SimplerEnv/start_simpler_env.sh ${MODEL_PATH} 
+bash examples/simBenchmarks/SimplerEnv/start_simpler_env.sh ${MODEL_PATH} 
 ```
 This script will automatically launch the WidowX Robot evaluation tasks, reproducing the benchmark results reported above.
 
@@ -118,7 +118,7 @@ Steps:
 We provide a simple way to check your dataloader. Make sure you can load batched data:
 
 ```bash
-python starVLA/dataloader/lerobot_datasets.py --config_yaml examples/SimplerEnv/train_files/starvla_cotrain_oxe.yaml
+python starVLA/dataloader/lerobot_datasets.py --config_yaml examples/simBenchmarks/SimplerEnv/train_files/starvla_cotrain_oxe.yaml
 ```
 
 ## Framework Preparation
@@ -128,7 +128,7 @@ Before running, you need to ensure that your framework can `forward` and `predic
 Try the following command:
 
 ```bash
-python starVLA/model/framework/VLM4A/QwenGR00T.py --config_yaml examples/SimplerEnv/train_files/starvla_cotrain_oxe.yaml
+python starVLA/model/framework/VLM4A/QwenGR00T.py --config_yaml examples/simBenchmarks/SimplerEnv/train_files/starvla_cotrain_oxe.yaml
 ```
 
 Note: You can modify the following code snippet to align with your dataset:
@@ -150,7 +150,7 @@ Note: You can modify the following code snippet to align with your dataset:
 Once everything is ready, use our provided script to start training:
 
 ```bash
-bash ./examples/SimplerEnv/train_files/run_oxe_train.sh
+bash ./examples/simBenchmarks/SimplerEnv/train_files/run_oxe_train.sh
 ```
 
 ⚠️ **Note:** Ensure that the script explicitly uses the validated config path in `run_lerobot_datasets.sh`. If not already passed, add the `--config_yaml` argument.

@@ -20,7 +20,7 @@
 # the same shared output_dir (every shard file is named by its own
 # [start,end) episode range, so concurrent nodes never collide on filenames),
 # then this script aggregates once per suite after every node has finished.
-# Wraps examples/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh.
+# Wraps examples/simBenchmarks/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh.
 #
 # Usage:
 #   sbatch eval_libero_slurm.sh --ckpt /path/to/pytorch_model.pt
@@ -68,8 +68,8 @@
 
 set -euo pipefail
 
-AUTO_EVAL_SCRIPT="./examples/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh"
-AGGREGATE_SCRIPT="./examples/LIBERO/eval_files/parallel_eval/aggregate_results.py"
+AUTO_EVAL_SCRIPT="./examples/simBenchmarks/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh"
+AGGREGATE_SCRIPT="./examples/simBenchmarks/LIBERO/eval_files/parallel_eval/aggregate_results.py"
 LIBERO_PYTHON="${LIBERO_PYTHON:-/e/project1/m3/blank4/envs/miniforge3/envs/libero/bin/python}"
 
 DEFAULT_SUITES=(libero_spatial libero_object libero_goal libero_10)

@@ -20,7 +20,7 @@
 #
 # Usage:  sbatch train_seed_pair_slurm.sh <config.yaml> <run_id_prefix> <seedA> <seedB>
 #   e.g.  sbatch train_seed_pair_slurm.sh \
-#             examples/LIBERO/train_files/ervla_v5aux_pi_actiononly_pifix.yaml \
+#             examples/simBenchmarks/LIBERO/train_files/ervla_v5aux_pi_actiononly_pifix.yaml \
 #             ervla_v5aux_pi_actiononly_pifix 42 43
 # Produces run ids <run_id_prefix>_s<seed>.
 # Logs:   slurm_logs/train_seed_pair_<jobid>_s<seed>.log

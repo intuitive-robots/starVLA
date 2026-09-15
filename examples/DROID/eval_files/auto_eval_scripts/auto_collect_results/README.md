@@ -59,7 +59,7 @@ success_summary/{raw_success.txt, success_summary.csv, success_plot.png}
 `0427_oxe_bridge_rt_1_QwenPI_v3`**，所以直接：
 
 ```bash
-cd examples/SimplerEnv/eval_files/auto_eval_scripts/auto_collect_results
+cd examples/simBenchmarks/SimplerEnv/eval_files/auto_eval_scripts/auto_collect_results
 
 # 方式 1：用默认 DIR_GLOB
 bash schedule_widowx_eval.sh

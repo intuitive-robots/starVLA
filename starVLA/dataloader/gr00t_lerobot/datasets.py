@@ -50,6 +50,7 @@ from starVLA.dataloader.gr00t_lerobot.schema import (
     LeRobotStateActionMetadata,
 )
 from starVLA.dataloader.gr00t_lerobot.transform import ComposedModalityTransform
+from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionTransform
 
 from functools import partial
 from typing import Tuple, List
@@ -191,6 +192,11 @@ def calculate_dataset_statistics(
         all_low_dim_data_list.append(parquet_data)
 
     if not all_low_dim_data_list:
+        if total_raw_rows == 0:
+            raise FileNotFoundError(
+                f"No parquet files found under the provided paths: {[str(p) for p in parquet_paths[:3]]}..."
+                f" — make sure the dataset has been downloaded/converted before training."
+            )
         raise ValueError("No rows left after applying dataset statistics filters.")
 
     print(
@@ -478,7 +484,8 @@ def _compute_statistics_for_mode(
     action_mode_state_map: dict[str, str] | None,
     stats_filter_config: dict | None = None,
 ) -> dict:
-    print(f"[RANK 0] Calculating dataset statistics for {dataset_name} (mode={action_mode})")
+    if int(os.environ.get("RANK", "0")) == 0:
+        print(f"[RANK 0] Calculating dataset statistics for {dataset_name} (mode={action_mode})")
 
     base_stats = calculate_dataset_statistics(parquet_paths, stats_filter_config=stats_filter_config)
     
@@ -991,8 +998,8 @@ class LeRobotSingleDataset(Dataset):
         self.set_transforms_metadata(self.metadata)
         self.set_epoch(0)
 
-        print(f"Initialized dataset {self.dataset_name} with {embodiment_tag}")
-
+        if int(os.environ.get("RANK", "0")) == 0:
+            print(f"Initialized dataset {self.dataset_name} with {embodiment_tag}")
 
         # Check if the dataset is valid
         self._check_integrity()
@@ -1399,7 +1406,7 @@ class LeRobotSingleDataset(Dataset):
 
                     # TODO auto map key 
                     # Collect video file indices for each video key
-                    #已修改的lerobotv3.0的视频索引（提取视频和文件的索引）
+                    # Modified lerobot v3.0 video index (extract video and file indices)
                     video_file_indices = {}
                     for col in timestamp_cols:
                         video_key = str(col)[len("videos/") : -len("/from_timestamp")]
@@ -2322,6 +2329,26 @@ class LeRobotSingleDataset(Dataset):
 
     def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
+        state_action_dtype = (
+            self.data_cfg.get("state_action_dtype", "float16")
+            if self.data_cfg is not None
+            else "float16"
+        )
+        try:
+            state_action_dtype = np.dtype(state_action_dtype)
+        except TypeError as exc:
+            raise ValueError(
+                f"state_action_dtype must be a NumPy dtype name, got {state_action_dtype!r}"
+            ) from exc
+
+        image_size = self.data_cfg.get("image_size", 224) if self.data_cfg is not None else 224
+        if isinstance(image_size, int):
+            image_size = (image_size, image_size)
+        else:
+            image_size = tuple(image_size)
+            if len(image_size) != 2:
+                raise ValueError(f"image_size must be an int or a 2-item sequence, got {image_size!r}")
+
         step_images = []
         future_images = []
         packed_image_mib = 0.0
@@ -2352,7 +2379,7 @@ class LeRobotSingleDataset(Dataset):
         action = []
         for action_key in self.modality_keys["action"]:
             action.append(data[action_key])
-        action = np.concatenate(action, axis=1).astype(np.float16)
+        action = np.concatenate(action, axis=1).astype(state_action_dtype)
         self._last_packed_image_mib = packed_image_mib
         self._last_action_mib = _estimate_value_mib(action)
         self._last_state_mib = 0.0
@@ -2391,11 +2418,20 @@ class LeRobotSingleDataset(Dataset):
 
         if self.data_cfg is not None and self.data_cfg.get("include_state", False) not in ["False", False]:
             state = []
-            for state_key in self.modality_keys["state"]:
+            for state_key in self.modality_keys.get("state", []):
                 state.append(data[state_key])
-            state = np.concatenate(state, axis=1).astype(np.float16)
-            sample["state"] = state
-            self._last_state_mib = _estimate_value_mib(state)
+            if not state:
+                import warnings
+                warnings.warn(
+                    "include_state=True but no state modality keys found in modality_configs "
+                    "(state modality may be disabled in the dataset's DataConfig). "
+                    "Skipping state packing.",
+                    stacklevel=2,
+                )
+            else:
+                state = np.concatenate(state, axis=1).astype(state_action_dtype)
+                sample["state"] = state
+                self._last_state_mib = _estimate_value_mib(state)
 
         return sample
 
@@ -2615,7 +2651,7 @@ class LeRobotSingleDataset(Dataset):
 
             video_file_indices = episode_meta.get("videos/file_indices", {})
             # print(f"{video_file_indices=}")
-            #已修改的lerobotv3.0的视频索引
+            # Modified lerobot v3.0 video index
             if original_key in video_file_indices:
                 video_chunk_index = video_file_indices[original_key]["chunk_index"]
                 video_file_index = video_file_indices[original_key]["file_index"]
@@ -2913,9 +2949,11 @@ class LeRobotSingleDataset(Dataset):
                 # Combine statistics from filtered action sub-keys
                 combined_action_stats = combine_modality_stats(filtered_action_stats)
                 
-                # Add mask field based on whether it's gripper or not
+                # mask=False for dimensions whose normalization mode is "binary"
+                _action_norm_modes = _extract_action_normalization_modes(self.transforms)
                 mask = generate_action_mask_for_used_keys(
-                    self.metadata.modalities.action, filtered_action_stats.keys()
+                    self.metadata.modalities.action, filtered_action_stats.keys(),
+                    normalization_modes=_action_norm_modes,
                 )
                 combined_action_stats["mask"] = mask
                 
@@ -3121,38 +3159,64 @@ def combine_modality_stats(modality_stats: dict) -> dict:
     
     return combined_stats
 
-def generate_action_mask_for_used_keys(action_modalities: dict, used_action_keys_ordered) -> list[bool]:
+def _extract_action_normalization_modes(transforms) -> dict:
+    """Extract normalization modes for action keys from a ComposedModalityTransform.
+
+    Returns:
+        dict: {subkey_without_action_prefix -> normalization_mode_str}
     """
-    Generate mask based on action modalities, but only for used keys.
-    Gripper-related are False, others are True.
-    
+    modes = {}
+    for t in transforms.transforms:
+        if isinstance(t, StateActionTransform):
+            for key, mode in t.normalization_modes.items():
+                if key.startswith("action."):
+                    subkey = key[len("action."):]
+                    modes[subkey] = mode
+    return modes
+
+
+def generate_action_mask_for_used_keys(
+    action_modalities: dict,
+    used_action_keys_ordered,
+    normalization_modes: dict | None = None,
+) -> list[bool]:
+    """Generate per-dimension mask for action statistics.
+
+    A dimension gets ``mask=False`` only when its normalization mode is ``"binary"``.
+    This tells the inference code to skip continuous de-normalization for that dimension.
+    All other modes (q99, mean_std, min_max ...) produce ``mask=True``.
+
     Args:
         action_modalities (dict): Configuration information for action modalities.
-        used_action_keys_ordered: Iterable of actually used action keys in the correct order.
-        
+        used_action_keys_ordered: Iterable of actually used action keys (no "action." prefix).
+        normalization_modes (dict | None): Mapping {subkey -> mode} (no "action." prefix).
+            If ``None``, all dimensions default to ``mask=True``.
+
     Returns:
-        list[bool]: List of mask values
+        list[bool]: Per-dimension mask values.
     """
     mask = []
-    
-    # Generate mask in the same order as the statistics were combined
+
     for subkey in used_action_keys_ordered:
         if subkey in action_modalities:
             subkey_config = action_modalities[subkey]
-            
+
             # Get dimension count from shape
             if hasattr(subkey_config, 'shape') and len(subkey_config.shape) > 0:
                 dim_count = subkey_config.shape[0]
             else:
                 dim_count = 1
-            
-            # Check if it's gripper-related
-            is_gripper = "gripper" in subkey.lower()
-            
-            # Generate mask value for each dimension
+
+            # mask=False only when the normalization mode is explicitly "binary"
+            is_binary = (
+                normalization_modes.get(subkey) == "binary"
+                if normalization_modes is not None
+                else False
+            )
+
             for _ in range(dim_count):
-                mask.append(not is_gripper)  # gripper is False, others are True
-    
+                mask.append(not is_binary)
+
     return mask
 
 def get_used_modality_keys(modality_keys: dict) -> tuple[list, list]:
@@ -3221,11 +3285,50 @@ class LeRobotMixtureDataset(Dataset):
         self.seed = seed
         self.mode = mode
         self.data_cfg = kwargs["data_cfg"] if "data_cfg" in kwargs else None
+        self.drop_incomplete_action_chunks = bool(
+            self.data_cfg.get("drop_incomplete_action_chunks", False)
+            if self.data_cfg is not None
+            else False
+        )
+
+        self._valid_step_bounds: list[tuple[int, int]] = []
+        self._effective_trajectory_lengths: list[np.ndarray] = []
+        if self.drop_incomplete_action_chunks:
+            # Sample only base frames whose action offsets stay in the episode.
+            for dataset in self.datasets:
+                offsets = [
+                    np.asarray(dataset.delta_indices[key], dtype=np.int64)
+                    for key in dataset.modality_keys.get("action", [])
+                ]
+                offsets = np.concatenate(offsets) if offsets else np.array([], dtype=np.int64)
+                min_offset = int(offsets.min()) if offsets.size else 0
+                max_offset = int(offsets.max()) if offsets.size else 0
+                valid_start = max(0, -min_offset)
+                end_trim = max(0, max_offset)
+                effective_lengths = np.maximum(
+                    np.asarray(dataset.trajectory_lengths, dtype=np.int64)
+                    - valid_start
+                    - end_trim,
+                    0,
+                )
+                if not np.any(effective_lengths > 0):
+                    raise ValueError(
+                        f"Dataset {dataset.dataset_name!r} has no complete action chunks "
+                        f"for action offset range [{min_offset}, {max_offset}]"
+                    )
+                self._valid_step_bounds.append((valid_start, end_trim))
+                self._effective_trajectory_lengths.append(effective_lengths)
 
         # Set properties for sampling
 
         # 1. Dataset lengths
-        self._dataset_lengths = np.array([len(dataset) for dataset in self.datasets])
+        if self.drop_incomplete_action_chunks:
+            self._dataset_lengths = np.array(
+                [lengths.sum() for lengths in self._effective_trajectory_lengths]
+            )
+            print(f"Dropped incomplete action chunks; effective dataset lengths: {self._dataset_lengths}")
+        else:
+            self._dataset_lengths = np.array([len(dataset) for dataset in self.datasets])
         print(f"Dataset lengths: {self._dataset_lengths}")
         self._getitem_count = 0
         # 2. Dataset sampling weights
@@ -3262,8 +3365,10 @@ class LeRobotMixtureDataset(Dataset):
             if self.balance_trajectory_weights:
                 trajectory_sampling_weights *= valid_lengths
             
-            # Check for zero or negative weights before normalization
-            if np.any(trajectory_sampling_weights <= 0):
+            if self.drop_incomplete_action_chunks:
+                if np.any(trajectory_sampling_weights < 0):
+                    raise ValueError(f"Dataset {i} has negative trajectory sampling weights")
+            elif np.any(trajectory_sampling_weights <= 0):
                 print(f"Warning: Dataset {i} has zero or negative trajectory weights")
                 trajectory_sampling_weights = np.maximum(trajectory_sampling_weights, 1e-8)
             
@@ -3295,21 +3400,6 @@ class LeRobotMixtureDataset(Dataset):
 
         # Set the epoch and sample the first epoch
         self.set_epoch(0)
-
-        self._sequential_step_sampling = True
-        if self.data_cfg is not None:
-            seq_cfg = self.data_cfg.get("sequential_step_sampling", True)
-            self._sequential_step_sampling = seq_cfg not in ["False", False]
-
-        self._step_order: list[np.ndarray] = []
-        self._step_pos: list[int] = []
-        if self._sequential_step_sampling:
-            for dataset in self.datasets:
-                self._step_order.append(np.arange(len(dataset.all_steps)))
-                if self.mode == "train":
-                    rng = np.random.default_rng(self.seed)
-                    rng.shuffle(self._step_order[-1])
-                self._step_pos.append(0)
 
         self.update_metadata(metadata_config)
 
@@ -3778,8 +3868,17 @@ class LeRobotMixtureDataset(Dataset):
                 if filtered_action_stats:
                     combined_action_stats = combine_modality_stats(filtered_action_stats)
                     
+                    # Collect action normalization modes from datasets of this tag.
+                    # "binary" takes precedence: if any dataset marks a key as binary, use binary.
+                    _action_norm_modes: dict = {}
+                    for _ds in self.datasets:
+                        if _ds.tag == tag:
+                            for _k, _m in _extract_action_normalization_modes(_ds.transforms).items():
+                                if _k not in _action_norm_modes or _m == "binary":
+                                    _action_norm_modes[_k] = _m
                     mask = generate_action_mask_for_used_keys(
-                        merged_metadata.modalities.action, filtered_action_stats.keys()
+                        merged_metadata.modalities.action, filtered_action_stats.keys(),
+                        normalization_modes=_action_norm_modes,
                     )
                     combined_action_stats["mask"] = mask
                     

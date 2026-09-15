@@ -23,7 +23,7 @@ failed=0
 for arm in ervla_zsup_pi_sharedz_ground_temporal ervla_zsupdec_pi_sharedz_ground_temporal; do
   echo "CAPACITY_START $arm $(date -Is)"
   if bash train_libero_slurm.sh \
-      --config "examples/LIBERO/train_files/${arm}.yaml" \
+      --config "examples/simBenchmarks/LIBERO/train_files/${arm}.yaml" \
       --run_root_dir "$run_root" \
       --run_id "$arm" \
       --trainer.max_train_steps 1 \

@@ -25,7 +25,7 @@ run_root="/e/scratch/m3/blank4/sharedz_capacity_runs/${SLURM_JOB_ID}"
 mkdir -p "$run_root"
 
 bash train_libero_slurm.sh \
-  --config "examples/LIBERO/train_files/${arm}.yaml" \
+  --config "examples/simBenchmarks/LIBERO/train_files/${arm}.yaml" \
   --run_root_dir "$run_root" \
   --run_id "$arm" \
   --trainer.max_train_steps 1 \

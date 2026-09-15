@@ -25,6 +25,15 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+
+# NPU support: import torch_npu and enable automatic CUDA→NPU mapping.
+# On GPU-only environments this is a no-op (ImportError is silently ignored).
+try:
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+except ImportError:
+    pass
+
 import wandb
 from accelerate import Accelerator, DeepSpeedPlugin
 from accelerate.logging import get_logger
@@ -41,6 +50,23 @@ from starVLA.model.framework.base_framework import build_framework
 from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, setup_optimizer_and_scheduler, normalize_dotlist_args
+
+deepspeed_plugin = None if os.environ.get("STARVLA_DISABLE_DEEPSPEED") == "1" else DeepSpeedPlugin()
+accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
+accelerator.print(accelerator.state)
+
+
+def _unwrap_model(accelerator, model):
+    """Avoid importing a broken optional DeepSpeed install in single-GPU mode."""
+    if os.environ.get("STARVLA_DISABLE_DEEPSPEED") == "1":
+        return model.module if hasattr(model, "module") else model
+    return accelerator.unwrap_model(model)
+
+
+def _get_state_dict(accelerator, model):
+    if os.environ.get("STARVLA_DISABLE_DEEPSPEED") == "1":
+        return _unwrap_model(accelerator, model).state_dict()
+    return accelerator.get_state_dict(model)
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -493,7 +519,8 @@ def prepare_data(cfg, accelerator, output_dir) -> DataLoader:
     vla_train_dataloader = build_dataloader(cfg=cfg, dataset_py=cfg.datasets.vla_data.dataset_py)
 
     accelerator.dataloader_config.dispatch_batches = False
-    dist.barrier()
+    if dist.is_initialized():
+        dist.barrier()
     return vla_train_dataloader
 
 
@@ -618,7 +645,15 @@ class VLATrainer(TrainerUtils):
         )
 
     def _init_wandb(self):
-        """Initialize Weights & Biases."""
+        """Initialize Weights & Biases (best-effort; must not block training)."""
+        self._wandb_enabled = False
+        if os.environ.get("WANDB_MODE") == "disabled" or os.environ.get("WANDB_DISABLED", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            self.accelerator.wait_for_everyone()
+            return
         if self.accelerator.is_main_process:
             # Keep one W&B identity across Slurm continuations.  Offline W&B
             # otherwise generates a fresh random ID on every allocation, so a
@@ -637,33 +672,42 @@ class VLATrainer(TrainerUtils):
             else:
                 wandb_group = getattr(self.config, "wandb_group", "vla-train")
 
-            wandb.init(
-                id=wandb_run_id,
-                resume="allow",
-                name=self.config.run_id,
-                dir=os.path.join(self.config.output_dir, "wandb"),
-                project=self.config.wandb_project,
-                entity=self.config.wandb_entity,
-                group=wandb_group,
-            )
-            for metric_name in (
-                "train/cot_loss",
-                "train_cot_loss",
-                "cot_loss",
-                "train/cot_coverage",
-                "cot_coverage",
-                "train/cot_keep_rate",
-                "cot_keep_rate",
-                "train/state_keep_rate",
-                "state_keep_rate",
-                "eval/cot_loss",
-                "eval_cot_loss",
-                "eval/cot_coverage",
-                "eval_cot_coverage",
-                "eval/cot_keep_rate",
-                "eval_cot_keep_rate",
-            ):
-                wandb.define_metric(metric_name)
+            try:
+                wandb.init(
+                    id=wandb_run_id,
+                    resume="allow",
+                    name=self.config.run_id,
+                    dir=os.path.join(self.config.output_dir, "wandb"),
+                    project=self.config.wandb_project,
+                    entity=self.config.wandb_entity,
+                    group=wandb_group,
+                )
+                for metric_name in (
+                    "train/cot_loss",
+                    "train_cot_loss",
+                    "cot_loss",
+                    "train/cot_coverage",
+                    "cot_coverage",
+                    "train/cot_keep_rate",
+                    "cot_keep_rate",
+                    "train/state_keep_rate",
+                    "state_keep_rate",
+                    "eval/cot_loss",
+                    "eval_cot_loss",
+                    "eval/cot_coverage",
+                    "eval_cot_coverage",
+                    "eval/cot_keep_rate",
+                    "eval_cot_keep_rate",
+                ):
+                    wandb.define_metric(metric_name)
+                self._wandb_enabled = True
+            except Exception as exc:
+                logger.warning(f"W&B init failed; continuing without W&B: {exc}")
+                self._wandb_enabled = False
+        # Rendezvous after rank-0 W&B init. Otherwise a slow or failing init on
+        # rank 0 lets the other ranks reach the first collective alone and
+        # eventually hit an NCCL watchdog timeout.
+        self.accelerator.wait_for_everyone()
 
     def _save_initial_configs(self):
         """Save full config and training script at the very start of training."""
@@ -769,7 +813,7 @@ class VLATrainer(TrainerUtils):
         if self.accelerator.is_main_process:
             save_format = getattr(self.config.trainer, "save_format", "pt")
 
-            state_dict = self.accelerator.get_state_dict(self.model)
+            state_dict = _get_state_dict(self.accelerator, self.model)
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
@@ -833,7 +877,8 @@ class VLATrainer(TrainerUtils):
 
     def _log_metrics(self, metrics):
         """Record training metrics."""
-        if self.completed_steps % self.config.trainer.logging_frequency == 0 and dist.get_rank() == 0:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        if self.completed_steps % self.config.trainer.logging_frequency == 0 and rank == 0:
             last_lrs = self.lr_scheduler.get_last_lr()
             for i, group in enumerate(self.optimizer.param_groups):
                 group_name = group.get("name", str(i))
@@ -847,7 +892,12 @@ class VLATrainer(TrainerUtils):
                 dataloader_length = None
             if dataloader_length:
                 metrics["epoch"] = round(self.completed_steps / dataloader_length, 2)
-            wandb.log(metrics, step=self.completed_steps)
+            if getattr(self, "_wandb_enabled", False):
+                try:
+                    wandb.log(metrics, step=self.completed_steps)
+                except Exception as exc:
+                    self._wandb_enabled = False
+                    logger.warning(f"W&B log failed; disabling W&B: {exc}")
             logger.info(f"Step {self.completed_steps}, Loss: {metrics})")
 
     def _create_data_iterators(self):
@@ -998,7 +1048,7 @@ class VLATrainer(TrainerUtils):
         step_metrics = step_metrics or {}
         examples = self._get_next_batch()
         actions = [example["action"] for example in examples]
-        eval_model = self.accelerator.unwrap_model(self.model)
+        eval_model = _unwrap_model(self.accelerator, self.model)
         was_training = eval_model.training
         # torch.inference_mode()/no_grad do not disable dropout. Evaluation
         # must use module eval mode or GR00T's DiT dropout makes checkpoint
@@ -1060,7 +1110,8 @@ class VLATrainer(TrainerUtils):
         if was_training:
             eval_model.train()
         del examples
-        dist.barrier()
+        if dist.is_initialized():
+            dist.barrier()
         return step_metrics
 
     def _eval_open_loop_trajectories(self) -> dict:
@@ -1991,7 +2042,7 @@ class VLATrainer(TrainerUtils):
             save_format = getattr(self.config.trainer, "save_format", "pt")
             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
             os.makedirs(final_checkpoint, exist_ok=True)
-            state_dict = self.accelerator.get_state_dict(self.model)
+            state_dict = _get_state_dict(self.accelerator, self.model)
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
@@ -2004,8 +2055,11 @@ class VLATrainer(TrainerUtils):
         elif self.accelerator.is_main_process:
             logger.info("Training complete. Final checkpoint disabled by config.")
 
-        if self.accelerator.is_main_process:
-            wandb.finish()
+        if self.accelerator.is_main_process and getattr(self, "_wandb_enabled", False):
+            try:
+                wandb.finish()
+            except Exception:
+                pass
 
         self.accelerator.wait_for_everyone()
 
@@ -2046,7 +2100,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config_yaml",
         type=str,
-        default="examples/SimplerEnv/train_files/starvla_cotrain_oxe.yaml",
+        default="examples/simBenchmarks/SimplerEnv/train_files/starvla_cotrain_oxe.yaml",
         help="Path to YAML config",
     )
     parser.add_argument(
@@ -2064,7 +2118,7 @@ if __name__ == "__main__":
 
     # Normalise legacy YAML keys into the current `version_id == "0.21"` schema.
     # This is idempotent and does not modify framework class signatures.
-    # See bar/config_收紧.md for the rationale.
+    # See bar/config_tighten.md for the rationale.
     cfg = apply_config_compat(cfg)
 
     # Store source config path for later copying to output dir

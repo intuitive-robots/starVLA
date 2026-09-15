@@ -8,7 +8,7 @@ import numpy as np
 from transforms3d.euler import euler2axangle
 
 from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
-from examples.SimplerEnv.eval_files.adaptive_ensemble import AdaptiveEnsembler
+from examples.simBenchmarks.SimplerEnv.eval_files.adaptive_ensemble import AdaptiveEnsembler
 
 
 class ModelClient:

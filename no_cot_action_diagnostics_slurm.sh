@@ -16,7 +16,7 @@ DIAG_ROOT=/e/project1/m3/blank4/code/encdec-vlm/train/encoder_decoder_training/e
 PYTHON=/e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/envs/starVLA/bin/python
 # Select exactly the rows used by the G-cam3d diagnostic.  The A/B action models never
 # receive the attached CoT conversation.
-DATA_CFG=examples/LIBERO/train_files/ervla_g_cam3d_cot05.yaml
+DATA_CFG=examples/simBenchmarks/LIBERO/train_files/ervla_g_cam3d_cot05.yaml
 RESULT_ROOT="$DIAG_ROOT/no_cot_action_diagnostic_results"
 RESULTS="$RESULT_ROOT/job_${SLURM_JOB_ID}"
 

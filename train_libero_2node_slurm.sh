@@ -17,7 +17,7 @@ set -euo pipefail
 STARVLA_REPO=/e/project1/m3/blank4/code/starVLA
 cd "$STARVLA_REPO"
 
-CONFIG_YAML=./examples/LIBERO/train_files/starvla_real_robot_qwen_08_base.yaml
+CONFIG_YAML=./examples/simBenchmarks/LIBERO/train_files/starvla_real_robot_qwen_08_base.yaml
 EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in

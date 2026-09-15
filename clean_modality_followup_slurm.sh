@@ -24,13 +24,13 @@ srun --nodes=1 --ntasks=4 --ntasks-per-node=4 --gpus-per-task=1 \
   --cpus-per-task=64 --gpu-bind=map_gpu:0,1,2,3 --kill-on-bad-exit=1 bash -c '
     set -euo pipefail
     case "$SLURM_LOCALID" in
-      0) arm=c; config=examples/LIBERO/train_files/ervla_c_action.yaml;
+      0) arm=c; config=examples/simBenchmarks/LIBERO/train_files/ervla_c_action.yaml;
          checkpoint=playground/Checkpoints/ervla_c_action_batchdrop/checkpoints/steps_20000_pytorch_model.pt ;;
-      1) arm=crand; config=examples/LIBERO/train_files/ervla_crand.yaml;
+      1) arm=crand; config=examples/simBenchmarks/LIBERO/train_files/ervla_crand.yaml;
          checkpoint=playground/Checkpoints/ervla_crand_batchdrop/checkpoints/steps_20000_pytorch_model.pt ;;
-      2) arm=d; config=examples/LIBERO/train_files/ervla_d_ground.yaml;
+      2) arm=d; config=examples/simBenchmarks/LIBERO/train_files/ervla_d_ground.yaml;
          checkpoint=playground/Checkpoints/ervla_d_ground_batchdrop/checkpoints/steps_20000_pytorch_model.pt ;;
-      3) arm=g; config=examples/LIBERO/train_files/ervla_g_cross_only.yaml;
+      3) arm=g; config=examples/simBenchmarks/LIBERO/train_files/ervla_g_cross_only.yaml;
          checkpoint=playground/Checkpoints/ervla_g_cross_only/checkpoints/steps_20000_pytorch_model.pt ;;
       *) echo "unexpected SLURM_LOCALID=$SLURM_LOCALID" >&2; exit 2 ;;
     esac

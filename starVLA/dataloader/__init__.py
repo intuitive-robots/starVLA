@@ -150,7 +150,11 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
         loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
         drop_last = bool(getattr(vla_dataset_cfg, "drop_last", False))
 
-        vla_dataset = get_vla_dataset(data_cfg=vla_dataset_cfg)
+        vla_dataset = get_vla_dataset(
+            data_cfg=vla_dataset_cfg,
+            balance_dataset_weights=vla_dataset_cfg.get("balance_dataset_weights", False),
+            balance_trajectory_weights=vla_dataset_cfg.get("balance_trajectory_weights", False),
+        )
         estimated_in_flight_samples = _estimate_in_flight_samples(
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
             loader_kwargs=loader_kwargs,
@@ -171,7 +175,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
                 drop_last,
                 estimated_in_flight_samples if estimated_in_flight_samples is not None else "n/a",
             )
-        
+
         vla_train_dataloader = DataLoader(
             vla_dataset,
             batch_size=cfg.datasets.vla_data.per_device_batch_size,
@@ -182,8 +186,7 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
         )
         if not dist.is_initialized() or dist.get_rank() == 0:
             logger.info("Built VLA DataLoader with dataset_len=%s", len(vla_dataset))
-        if dist.get_rank() == 0: 
-            
+        if not dist.is_initialized() or dist.get_rank() == 0:
             output_dir = Path(cfg.output_dir)
             vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
         return vla_train_dataloader
@@ -293,3 +296,12 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
         vlm_train_dataloader = vlm_data_module["train_dataloader"]
 
         return vlm_train_dataloader
+    elif dataset_py == "umi_datasets":
+        from starVLA.dataloader.umi_datasets import make_umi_dataloader
+
+        umi_train_dataloader = make_umi_dataloader(cfg)
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            output_dir = Path(cfg.output_dir)
+            umi_train_dataloader.dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
+        return umi_train_dataloader
+    raise ValueError(f"Unsupported dataset_py: {dataset_py!r}")

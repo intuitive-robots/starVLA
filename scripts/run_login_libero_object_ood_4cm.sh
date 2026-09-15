@@ -36,7 +36,7 @@ for i in "${!labels[@]}"; do
   export output_dir=${output_dirs[$i]}
   model_start=$(date +%s)
   echo "[$(date --iso-8601=seconds)] START ${label}: ${your_ckpt}"
-  bash examples/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh \
+  bash examples/simBenchmarks/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh \
     libero_object 1 16 20 0
   model_end=$(date +%s)
   echo "[$(date --iso-8601=seconds)] DONE ${label}: $((model_end - model_start)) seconds"

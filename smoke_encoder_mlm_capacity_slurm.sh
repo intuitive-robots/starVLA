@@ -17,7 +17,7 @@ export MASTER_PORT=29850
 
 RUN_ROOT="/e/scratch/m3/blank4/encoder_mlm_capacity_${SLURM_JOB_ID}"
 bash /e/project1/m3/blank4/code/starVLA/train_libero_slurm.sh \
-  --config /e/project1/m3/blank4/code/starVLA/examples/LIBERO/train_files/ervla_mlm_pi_encoder_cam3d.yaml \
+  --config /e/project1/m3/blank4/code/starVLA/examples/simBenchmarks/LIBERO/train_files/ervla_mlm_pi_encoder_cam3d.yaml \
   --run_root_dir "$RUN_ROOT" \
   --run_id encoder_mlm_capacity \
   --trainer.max_train_steps 1 \

@@ -8,7 +8,7 @@ from PIL import Image
 from starVLA.model.framework.VLM4A.QwenGR00T import Qwen_GR00T
 
 
-CONFIG = "examples/LIBERO/train_files/ervla_c_action.yaml"
+CONFIG = "examples/simBenchmarks/LIBERO/train_files/ervla_c_action.yaml"
 
 
 def main():

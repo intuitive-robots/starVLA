@@ -67,7 +67,7 @@ for i in "${!ENV_NAMES[@]}"; do
     task_log="${output_eval_dir}/${ckpt_name}_${env}_run${run_idx}.log"
     echo "▶️ Launching task [${env}] run#${run_idx}, log → ${task_log}"
 
-    ${sim_python} examples/SimplerEnv/eval_files/start_simpler_env.py \
+    ${sim_python} examples/simBenchmarks/SimplerEnv/eval_files/start_simpler_env.py \
       --ckpt-path ${ckpt_path} \
       --port ${port} \
       --robot ${robot} \
@@ -108,7 +108,7 @@ for i in "${!ENV_NAMES_V2[@]}"; do
     task_log="${output_eval_dir}/${ckpt_name}_${env}_run${run_idx}.log"
     echo "▶️ Launching V2 task [${env}] run#${run_idx}, log → ${task_log}"
 
-    ${sim_python} examples/SimplerEnv/eval_files/start_simpler_env.py\
+    ${sim_python} examples/simBenchmarks/SimplerEnv/eval_files/start_simpler_env.py\
       --ckpt-path ${ckpt_path} \
       --port ${port} \
       --robot ${robot} \

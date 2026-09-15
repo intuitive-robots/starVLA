@@ -221,6 +221,10 @@ class DiT(ModelMixin, ConfigMixin):
         compute_dtype=torch.float32,
         final_dropout: bool = True,
         positional_embeddings: Optional[str] = "sinusoidal",
+        # This is the single forward-mode switch:
+        #   False -> legacy all-cross attention; True -> canonical interleaving.
+        # Released checkpoints may come from an older repository snapshot;
+        # use the checkpoint-time code/config when exact reproduction matters.
         interleave_self_attention=False,
         use_canonical_forward: Optional[bool] = None,
         cross_attention_dim: Optional[int] = None,

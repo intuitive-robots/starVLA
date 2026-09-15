@@ -16,7 +16,7 @@ Key Points:
 
 Note: How to add special tokens to Qwen2.5:
   download our model checkpoint with special tokens added: https://huggingface.co/StarVLA/Qwen2.5-VL-3B-Instruct-Action
-  or /starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md （adpat a little code)
+  or /starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md (adapt a little code)
 
 """
 
@@ -25,7 +25,6 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
@@ -36,6 +35,20 @@ logger = initialize_overwatch(__name__)
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
+
+
+def masked_l1_loss(prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+    """Mean L1 over valid action cells, preserving legacy behavior without a mask."""
+    error = torch.abs(prediction - target)
+    if mask is None:
+        return error.mean()
+    valid = mask.to(device=error.device, dtype=error.dtype)
+    if valid.shape != error.shape:
+        raise ValueError(f"action_mask shape {tuple(valid.shape)} != action shape {tuple(error.shape)}")
+    denominator = valid.sum()
+    if not torch.any(mask):
+        raise ValueError("action_mask contains no valid targets")
+    return (error * valid).sum() / denominator
 
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.framework.share_tools import add_discretized_state_to_instruction, merge_framework_config
@@ -132,9 +145,6 @@ class Qwenvl_OFT(baseframework):
         self.action_token = "🔍"  # TODO also can add spacail token to Qwen, but too complex
         self.action_token_id = self.qwen_vl_interface.processor.tokenizer("🔍", add_special_tokens=False)["input_ids"][0]
 
-        # L1 loss
-        self.l1_loss = nn.L1Loss()
-
     def forward(
         self,
         examples: List[dict] = None,
@@ -159,9 +169,12 @@ class Qwenvl_OFT(baseframework):
             dict:
                 action_loss (torch.Tensor): Scalar diffusion noise prediction loss.
         """
-        batch_images = [example["image"] for example in examples]  #  [B，[PLT]]
+        batch_images = [example["image"] for example in examples]  #  [B, [PLT]]
         instructions = [example["lang"] for example in examples]  # [B, str]
-        actions = [example["action"] for example in examples]  # label [B， len, 7]
+        actions = [example["action"] for example in examples]  # label [B, len, 7]
+        action_masks = [example.get("action_mask") for example in examples]
+        if any(mask is not None for mask in action_masks) and not all(mask is not None for mask in action_masks):
+            raise ValueError("action_mask must be present for every example in a batch or for none")
         state = (
             [example["state"] for example in examples] if "state" in examples[0] else None
         )  # List[ndarray (1, state_dim)] or None
@@ -205,8 +218,12 @@ class Qwenvl_OFT(baseframework):
             )  # [B, T_full, action_dim]
             actions_target = actions[:, -self.action_horizon :, :]  # (B, action_horizon, action_dim)
 
-            # Compute L1 loss
-            action_loss = self.l1_loss(pred_actions, actions_target)
+            action_mask = None
+            if action_masks[0] is not None:
+                action_mask = torch.as_tensor(
+                    np.asarray(action_masks), device=pred_actions.device, dtype=torch.bool
+                )[:, -self.action_horizon :, :]
+            action_loss = masked_l1_loss(pred_actions, actions_target, action_mask)
 
         return {"action_loss": action_loss}
 
@@ -229,7 +246,7 @@ class Qwenvl_OFT(baseframework):
         """
         if type(examples) is not list:
             examples = [examples]
-        batch_images = [to_pil_preserve(example["image"]) for example in examples]  #  [B，[PLT]]
+        batch_images = [to_pil_preserve(example["image"]) for example in examples]  #  [B, [PLT]]
         instructions = [example["lang"] for example in examples]  # [B, str]
         state = (
             [example["state"] for example in examples] if "state" in examples[0] else None
@@ -335,7 +352,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config_yaml",
         type=str,
-        default="examples/LIBERO/train_files/starvla_cotrain_libero.yaml",
+        default="examples/simBenchmarks/LIBERO/train_files/starvla_cotrain_libero.yaml",
         help="Path to YAML config",
     )
     args, clipargs = parser.parse_known_args()

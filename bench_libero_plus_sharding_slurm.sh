@@ -35,7 +35,7 @@ CKPT="${bench_ckpt:-playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolat
 BENCH_ROOT="${bench_root:-${REPO_ROOT}/playground/bench/libero_plus_sharding_${SLURM_JOB_ID:-local}}"
 SUITE="${bench_suite:-libero_10}"
 EXACT="${bench_exact:-512}"
-AUTO_EVAL="${REPO_ROOT}/examples/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh"
+AUTO_EVAL="${REPO_ROOT}/examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/auto_eval_libero_plus.sh"
 SIF="${REPO_ROOT}/playground/sims/sif/libero-plus-v0.5.0-arm64.sif"
 
 echo "=========================================="
@@ -74,5 +74,5 @@ run_arm C_roundrobin_24w 24 2 0.0 1 10700
 echo ""
 echo "########## SUMMARY ##########"
 grep -h "^BENCH_RESULT" "${SLURM_OUTPUT:-/dev/null}" 2>/dev/null || true
-python3 "${REPO_ROOT}/examples/LIBERO-plus/eval_files/parallel_eval/bench_report.py" \
+python3 "${REPO_ROOT}/examples/simBenchmarks/LIBERO-plus/eval_files/parallel_eval/bench_report.py" \
     --bench_root "${BENCH_ROOT}" --suite "${SUITE}"

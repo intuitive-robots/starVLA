@@ -74,7 +74,7 @@ done
     || { echo "PREFLIGHT FAIL: StarVLA imports on $(hostname)"; preflight_ok=0; }
 (
     cd "$ROBOTWIN_REPO"
-    PYTHONPATH="$STARVLA_REPO:$STARVLA_REPO/examples/Robotwin/eval_files:${PYTHONPATH:-}" \
+    PYTHONPATH="$STARVLA_REPO:$STARVLA_REPO/examples/simBenchmarks/Robotwin/eval_files:${PYTHONPATH:-}" \
         "$ROBOTWIN_PY" -c "import sapien, mplib, torch, curobo; from envs.robot.planner import CuroboPlanner; import model2robotwin_interface"
 ) >/dev/null 2>&1 \
     || { echo "PREFLIGHT FAIL: RoboTwin imports on $(hostname)"; preflight_ok=0; }
@@ -103,7 +103,7 @@ echo "GPUs: $(nvidia-smi -L | wc -l)"
 echo "Jobs/GPU: $JOBS_PER_GPU"
 echo "Logs: $ROBOTWIN_LOG_ROOT"
 
-bash examples/Robotwin/eval_files/start_eval.sh \
+bash examples/simBenchmarks/Robotwin/eval_files/start_eval.sh \
     --mode "$MODE" \
     --name "$NAME" \
     --ckpt "$CKPT" \
