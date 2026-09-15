@@ -178,8 +178,34 @@ sbatch train_robocasa365_slurm.sh --config <yaml> --trainer.max_train_steps 5000
 ```
 
 `starvla_qwenoft_robocasa365_v3_atomic.yaml` trains `QwenOFT` on all 18
-Atomic-Seen tasks (2,231,049 steps indexed from 9,125 trajectories). Two
-deviations from the upstream YAML, both required here:
+Atomic-Seen tasks (2,231,049 steps indexed from 9,125 trajectories) at a 128
+effective batch for 30k steps.
+
+#### Why 30k steps and not 100k
+
+Compare epoch budgets, not step counts. The archived baselines ran far fewer
+passes over their data than their step counts suggest:
+
+| run | batch x steps | frames | epochs |
+| --- | --- | ---: | ---: |
+| LIBERO-plus configs in this repo | 128 x 30k | 2,238,036 | 1.72 |
+| StarVLA-GR00T (seen-34) | 128 x 120k | 8,233,612 | 1.87 |
+| StarVLA-PI (seen-34) | 128 x 150k | 8,233,612 | 2.33 |
+| StarVLA-OFT no-state (target-50) | 208 x 140k | 14,957,899 | 1.95 |
+| StarVLA-OFT (target-50) | 192 x 220k | 14,957,899 | 2.82 |
+| **this config (atomic-18)** | **128 x 30k** | **2,231,347** | **1.72** |
+
+Atomic-18 is 2,231,347 frames, within 0.3% of LIBERO-plus, so the LIBERO-plus
+recipe already in this repo transfers directly and lands inside the baselines'
+1.9-2.8 epoch band. The 120k-220k baseline step counts reflect datasets 4-7x
+larger, not a longer schedule per sample. 20k steps would be 1.15 epochs;
+40k would be 2.29.
+
+Note that no published StarVLA baseline trains on atomic-18 alone -- the 76.67%
+Atomic-Seen figure belongs to a seen-34 model. Use `robocasa365_v3_seen34_1cam`
+(needs the composite-seen mirror, 18.1 GB) to match that scope.
+
+Two deviations from the upstream YAML, both required here:
 
 * `base_vlm` is the local `Qwen3-VL-2B-Instruct`. `QwenOFT` marks action slots
   with a plain emoji token rather than FAST vocabulary, so no `*-Instruct-Action`

@@ -6,6 +6,13 @@
 #       shipped by the mirror and must be copied from the robocasa assets
 #       (see the README); without it the state/action sub-keys cannot resolve.
 #
+# Sizing: 32/GPU x 4 GPUs = 128 effective batch, 30k steps = 1.72 epochs over
+# this dataset's 2,231,347 frames. That is deliberately the same budget as the
+# LIBERO-plus configs in this repo (2,238,036 frames -- within 0.3% -- at 128 x
+# 30k), and it lands inside the 1.9-2.8 epochs the archived StarVLA baselines
+# used. Their 120k-220k step counts reflect datasets 4-7x larger (seen-34 is
+# 8.2M frames, target-50 is 15.0M), not a longer schedule per sample.
+#
 # Camera contract: uses the *_1cam mixture so training sees exactly the one view
 # (robot0_agentview_left) that the checked-in evaluation bridge sends.
 run_id: starvla_qwenoft_robocasa365_v3_atomic
@@ -40,16 +47,16 @@ datasets:
     lerobot_version: "v3.0"
     action_type: delta_ee
     sequential_step_sampling: false
-    per_device_batch_size: 8
+    per_device_batch_size: 32
     load_all_data_for_training: true
     obs_image_size: [224, 224]
     delete_pause_frame: false
     video_backend: decord
 
 trainer:
-  max_train_steps: 100000
+  max_train_steps: 30000
   num_warmup_steps: 1000
-  save_interval: 10000
+  save_interval: 5000
   eval_interval: 1000
   learning_rate:
     base: 2.5e-05
