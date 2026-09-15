@@ -48,12 +48,14 @@ class AdaLayerNorm(nn.Module):
         norm_elementwise_affine: bool = False,
         norm_eps: float = 1e-5,
         chunk_dim: int = 0,
+        conditioning_dim: Optional[int] = None,
     ):
         super().__init__()
         self.chunk_dim = chunk_dim
         output_dim = embedding_dim * 2
         self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, output_dim)
+        self.conditioning_dim = int(conditioning_dim or embedding_dim)
+        self.linear = nn.Linear(self.conditioning_dim, output_dim)
         self.norm = nn.LayerNorm(output_dim // 2, norm_eps, norm_elementwise_affine)
 
     def forward(
@@ -88,6 +90,7 @@ class BasicTransformerBlock(nn.Module):
         ff_inner_dim: Optional[int] = None,
         ff_bias: bool = True,
         attention_out_bias: bool = True,
+        conditioning_dim: Optional[int] = None,
     ):
         super().__init__()
         self.dim = dim
@@ -115,7 +118,7 @@ class BasicTransformerBlock(nn.Module):
         # Define 3 blocks. Each block has its own normalization layer.
         # 1. Self-Attn
         if norm_type == "ada_norm":
-            self.norm1 = AdaLayerNorm(dim)
+            self.norm1 = AdaLayerNorm(dim, conditioning_dim=conditioning_dim)
         else:
             self.norm1 = nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine, eps=norm_eps)
 
@@ -152,6 +155,7 @@ class BasicTransformerBlock(nn.Module):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         temb: Optional[torch.LongTensor] = None,
+        cross_attention_row_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
 
         # 0. Self-Attention
@@ -168,6 +172,15 @@ class BasicTransformerBlock(nn.Module):
             encoder_hidden_states=encoder_hidden_states,
             attention_mask=encoder_attention_mask,  # @JinhuiYE original attention_mask=attention_mask
         )
+        if encoder_hidden_states is not None and cross_attention_row_mask is not None:
+            if cross_attention_row_mask.ndim != 1 or cross_attention_row_mask.shape[0] != attn_output.shape[0]:
+                raise ValueError(
+                    "cross_attention_row_mask must be [B], got "
+                    f"{tuple(cross_attention_row_mask.shape)} for {tuple(attn_output.shape)}"
+                )
+            attn_output = attn_output * cross_attention_row_mask.to(
+                device=attn_output.device, dtype=attn_output.dtype
+            )[:, None, None]
         if self.final_dropout:
             attn_output = self.final_dropout(attn_output)
 
@@ -209,10 +222,21 @@ class DiT(ModelMixin, ConfigMixin):
         final_dropout: bool = True,
         positional_embeddings: Optional[str] = "sinusoidal",
         interleave_self_attention=False,
+        use_canonical_forward: Optional[bool] = None,
         cross_attention_dim: Optional[int] = None,
+        extra_conditioning_dim: int = 0,
         **kwargs,
     ):
         super().__init__()
+        # ``use_canonical_forward`` was the name used by the first upstream
+        # fix. Keep accepting it so configs/checkpoints made during that
+        # transition retain their intended attention layout.
+        if use_canonical_forward is not None:
+            interleave_self_attention = bool(use_canonical_forward)
+        self._interleave_self_attention = bool(interleave_self_attention)
+        self.extra_conditioning_dim = int(extra_conditioning_dim)
+        if self.extra_conditioning_dim < 0:
+            raise ValueError("extra_conditioning_dim must be non-negative")
         self.attention_head_dim = attention_head_dim
         self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
         self.gradient_checkpointing = False
@@ -229,7 +253,7 @@ class DiT(ModelMixin, ConfigMixin):
         all_blocks = []
         for idx in range(self.config.num_layers):
 
-            use_self_attn = idx % 2 == 1 and interleave_self_attention
+            use_self_attn = idx % 2 == 1 and self._interleave_self_attention
             curr_cross_attention_dim = cross_attention_dim if not use_self_attn else None
 
             all_blocks += [
@@ -248,6 +272,7 @@ class DiT(ModelMixin, ConfigMixin):
                     num_positional_embeddings=self.config.max_num_positional_embeddings,
                     final_dropout=final_dropout,
                     cross_attention_dim=curr_cross_attention_dim,
+                    conditioning_dim=self.inner_dim + self.extra_conditioning_dim,
                 )
             ]
         self.transformer_blocks = nn.ModuleList(all_blocks)
@@ -264,39 +289,97 @@ class DiT(ModelMixin, ConfigMixin):
     def forward(
         self,
         hidden_states: torch.Tensor,  # Shape: (B, T, D)
-        encoder_hidden_states: torch.Tensor,  # Shape: (B, S, D)
+        encoder_hidden_states: torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, ...],
         timestep: Optional[torch.LongTensor] = None,
         return_all_hidden_states: bool = False,
         encoder_attention_mask=None,
+        return_pre_output: bool = False,
+        force_layerwise_all_cross: bool = False,
+        extra_conditioning: Optional[torch.Tensor] = None,
+        cross_attention_row_mask: Optional[torch.Tensor] = None,
     ):
         # Encode timesteps
         temb = self.timestep_encoder(timestep)
+        extra_conditioning_dim = int(getattr(self, "extra_conditioning_dim", 0))
+        if extra_conditioning_dim:
+            if extra_conditioning is None:
+                raise ValueError(
+                    "DiT was configured with extra_conditioning_dim="
+                    f"{extra_conditioning_dim} but no extra_conditioning was passed"
+                )
+            if extra_conditioning.shape != (temb.shape[0], extra_conditioning_dim):
+                raise ValueError(
+                    "extra_conditioning shape mismatch: expected "
+                    f"{(temb.shape[0], extra_conditioning_dim)}, got "
+                    f"{tuple(extra_conditioning.shape)}"
+                )
+            block_conditioning = torch.cat(
+                [temb, extra_conditioning.to(device=temb.device, dtype=temb.dtype)], dim=-1
+            )
+        else:
+            if extra_conditioning is not None:
+                raise ValueError("extra_conditioning was passed to a DiT configured without it")
+            block_conditioning = temb
 
         # Process through transformer blocks - single pass through the blocks
         hidden_states = hidden_states.contiguous()
-        encoder_hidden_states = encoder_hidden_states.contiguous()
+        is_layerwise_encoder = isinstance(encoder_hidden_states, (list, tuple))
+        if is_layerwise_encoder:
+            if len(encoder_hidden_states) != len(self.transformer_blocks):
+                raise ValueError(
+                    "Layerwise encoder states must match the number of DiT blocks: "
+                    f"got {len(encoder_hidden_states)} states for "
+                    f"{len(self.transformer_blocks)} blocks."
+                )
+            encoder_hidden_states = [state.contiguous() for state in encoder_hidden_states]
+        else:
+            encoder_hidden_states = encoder_hidden_states.contiguous()
+        if force_layerwise_all_cross and not is_layerwise_encoder:
+            raise ValueError("force_layerwise_all_cross requires layerwise encoder states")
 
         all_hidden_states = [hidden_states]
 
         # Process through transformer blocks
         for idx, block in enumerate(self.transformer_blocks):
-            if idx % 2 == 1 and self.config.interleave_self_attention:
+            if force_layerwise_all_cross:
+                hidden_states = block(
+                    hidden_states,
+                    attention_mask=None,
+                    encoder_hidden_states=encoder_hidden_states[idx],
+                    encoder_attention_mask=encoder_attention_mask,
+                    temb=block_conditioning,
+                    **({"cross_attention_row_mask": cross_attention_row_mask}
+                       if cross_attention_row_mask is not None else {}),
+                )
+            elif idx % 2 == 1 and self._interleave_self_attention:
                 hidden_states = block(
                     hidden_states,
                     attention_mask=None,
                     encoder_hidden_states=None,
                     encoder_attention_mask=None,
-                    temb=temb,
+                    temb=block_conditioning,
                 )
             else:
+                block_encoder_hidden_states = (
+                    encoder_hidden_states[idx] if is_layerwise_encoder else encoder_hidden_states
+                )
                 hidden_states = block(
                     hidden_states,
                     attention_mask=None,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=block_encoder_hidden_states,
                     encoder_attention_mask=encoder_attention_mask,
-                    temb=temb,
+                    temb=block_conditioning,
+                    **({"cross_attention_row_mask": cross_attention_row_mask}
+                       if cross_attention_row_mask is not None else {}),
                 )
             all_hidden_states.append(hidden_states)
+
+        # LayerwiseFlowmatchingActionHead has its own decoder and therefore
+        # consumes the DiT hidden representation before DiT's output head.
+        if return_pre_output:
+            if return_all_hidden_states:
+                return hidden_states, all_hidden_states
+            return hidden_states
 
         # Output processing
         conditioning = temb

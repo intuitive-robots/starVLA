@@ -1,0 +1,6 @@
+Precise correction of this scientific figure. Keep layout, colors, all other text, thumbnails, and correct memory arrows unchanged. Four small fixes only:
+1) In panel (c), cross-attention block second formula currently says z double-prime. It must have ONE prime: "z′ = u + FFN(LN(u))". Keep the self-attention second formula z double-prime unchanged.
+2) In panel (b), show a vertical ellipsis "⋮" in the gap between block 4 and block 27, meaning omitted blocks 5 through 26.
+3) Panel (b) output: remove the vertical arrow directly from the Velocity MLP to the top orange final action strip, and remove the upward arrow from the small velocity box. The only output arrow should originate at the integration update box "x ← x + 0.1 v̂" and run upward on the right side to the final action strip, label "after 10 Euler steps". Keep the feedback loop from velocity via update back down to noisy action input. This makes clear that velocity is integrated into x before output, not itself an action.
+4) The small t circle in panel (b) must have only one dashed line with arrow pointing FROM the t circle INTO the stack, with label AdaNorm(t). Remove the downward arrowhead pointing into the t circle.
+Polished opaque white scientific paper figure with legible type. Do not change anything else.

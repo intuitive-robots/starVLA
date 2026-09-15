@@ -15,11 +15,24 @@ at batch=1 is memory-bandwidth-bound, leaving most of the GPU idle.
 
 Design (adapted from the vla-evaluation-harness's ``predict.py`` pattern): a
 single background dispatch loop pulls up to ``max_batch_size`` pending
-requests, waiting up to ``max_wait_time`` for more to arrive once at least
-one is queued, then runs ONE batched ``predict_action()`` call in a worker
-thread (via ``asyncio.to_thread``, so the event loop keeps accepting new
+requests, then runs ONE batched ``predict_action()`` call in a worker thread
+(via ``asyncio.to_thread``, so the event loop keeps accepting new
 connections/requests while the GPU call is in flight) and fans results back
 out to each caller.
+
+``max_wait_time=0`` (the default) dispatches immediately with whatever has
+accumulated, and batches still form on their own: requests that arrive while
+the previous batch is computing are all waiting in the queue when the next
+cycle starts, so batch size grows automatically with load and shrinks to 1
+when the server is idle. That is strictly better than a fixed wait here,
+because an explicit ``max_wait_time>0`` is only ever recovered when enough
+requests actually arrive within it -- and each client blocks on its own
+response, so at most ``connected clients`` requests can ever be in flight.
+Setting ``max_batch_size`` above that count (e.g. 32 with 4 sim workers per
+server) made EVERY batch burn the full wait before firing: a measured 1.0s
+stall in front of a 0.19s inference on the LIBERO-plus eval. ``client_count_fn``
+caps the target at the live client count so a deliberate wait cannot stall on
+requests that can never arrive.
 
 Requests are grouped by their non-``examples`` kwargs (``unnorm_key``,
 ``do_sample``, ``use_ddim``, ``num_ddim_steps``, ...) before batching --
@@ -34,7 +47,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass
@@ -67,10 +80,18 @@ def _kwargs_signature(kwargs: Dict[str, Any]) -> tuple:
 
 
 class BatchDispatcher:
-    def __init__(self, policy, max_batch_size: int = 32, max_wait_time: float = 1.0):
+    def __init__(
+        self,
+        policy,
+        max_batch_size: int = 32,
+        max_wait_time: float = 0.0,
+        client_count_fn: Optional[Callable[[], int]] = None,
+    ):
         self._policy = policy
         self.max_batch_size = max_batch_size
         self.max_wait_time = max_wait_time
+        # Returns how many clients are currently connected; see module docstring.
+        self._client_count_fn = client_count_fn
         self._queue: "asyncio.Queue[_PendingRequest]" = asyncio.Queue()
         self._loop_task: Optional[asyncio.Task] = None
 
@@ -106,25 +127,34 @@ class BatchDispatcher:
             except asyncio.CancelledError:
                 return
 
-            # Collect more requests sharing the SAME kwargs signature as `first`,
-            # waiting up to max_wait_time (from `first`'s arrival) for the batch to
-            # fill. Requests with a different signature are set aside and put back
-            # for the next dispatch cycle rather than dropped.
+            # Collect more requests sharing the SAME kwargs signature as `first`.
+            # Requests with a different signature are set aside and put back for
+            # the next dispatch cycle rather than dropped.
             batch = [first]
             deferred: List[_PendingRequest] = []
-            deadline = time.monotonic() + self.max_wait_time
 
-            while len(batch) < self.max_batch_size:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                try:
-                    item = await asyncio.wait_for(self._queue.get(), timeout=remaining)
-                except asyncio.TimeoutError:
-                    break
-                (batch if item.kwargs_key == first.kwargs_key else deferred).append(item)
+            # Only ever block for requests that could actually arrive: every client
+            # blocks on its own response, so `connected clients` is a hard ceiling
+            # on in-flight requests regardless of max_batch_size.
+            target = self.max_batch_size
+            if self._client_count_fn is not None:
+                target = min(target, max(1, self._client_count_fn()))
+
+            if self.max_wait_time > 0:
+                deadline = time.monotonic() + self.max_wait_time
+                while len(batch) < target:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        item = await asyncio.wait_for(self._queue.get(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        break
+                    (batch if item.kwargs_key == first.kwargs_key else deferred).append(item)
 
             # Drain anything else already queued (non-blocking) without extending the wait.
+            # With max_wait_time=0 this is the whole collection step: everything that
+            # queued up while the previous batch was on the GPU batches together now.
             while len(batch) < self.max_batch_size:
                 try:
                     item = self._queue.get_nowait()
@@ -143,10 +173,11 @@ class BatchDispatcher:
             combined_examples.extend(req.examples)
         shared_kwargs = batch[0].shared_kwargs
 
-        # Realized batch size vs. the configured ceiling: how well max_wait_time is
-        # actually working at your real request-arrival rate. If this sits well
-        # below max_batch_size under real load, max_wait_time is too short for how
-        # spread out your workers' requests actually are -- raise it.
+        # Realized batch size vs. the configured ceiling. Small batches here are
+        # not by themselves a problem: with max_wait_time=0 they mean the server
+        # is keeping up (requests are served as fast as they arrive). They only
+        # indicate a tuning issue if per-request latency is also climbing, which
+        # means the GPU is saturated and clients are queueing behind it anyway.
         batch_n = len(combined_examples)
         fill = batch_n / self.max_batch_size
 

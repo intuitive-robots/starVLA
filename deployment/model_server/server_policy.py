@@ -61,20 +61,26 @@ def build_argparser():
         "--max_batch_size",
         type=int,
         default=1,
-        help="Batch concurrent requests from multiple connections into one predict_action() "
+        help="CEILING on how many concurrent requests are batched into one predict_action() "
         "call. 1 (default) = unchanged behavior, one request at a time. Measured on this "
-        "model: ~30x throughput at 32, ~112x at 128, for a ~15%% latency cost per batch -- "
-        "set to (at least) your expected number of concurrent env workers per server.",
+        "model: ~30x throughput at 32, ~112x at 128, for a ~15%% latency cost per batch. "
+        "Batches fill on their own from requests that queue up during the previous batch's "
+        "inference, so this is a ceiling to leave room above the real client count, NOT a "
+        "target the dispatcher waits to reach (it does not wait at all unless you also set "
+        "--max_wait_time).",
     )
     parser.add_argument(
         "--max_wait_time",
         type=float,
-        default=1.0,
-        help="CEILING (not a fixed delay) on how long the batch dispatcher waits for more "
-        "requests before running an under-full batch -- it exits the moment the batch fills "
-        "or the queue goes idle, so raising this doesn't add latency on the happy path. Only "
-        "relevant when --max_batch_size > 1. Watch the '[BatchDispatcher] batch_size=X/Y "
-        "(Z% full)' log line and raise this if fill rate is consistently low under real load.",
+        default=0.0,
+        help="How long the batch dispatcher may block waiting for a batch to reach its target "
+        "size. 0 (default) = never block: dispatch whatever has queued up and let the next "
+        "batch collect during this one's inference. A positive value is a real stall whenever "
+        "the target is not reached -- each client blocks on its own response, so no more than "
+        "'connected clients' requests can ever be in flight, and the dispatcher caps its "
+        "target at that count (a 1.0s default against an unreachable --max_batch_size 32 used "
+        "to add a full second in front of every 0.19s inference). Only raise it if clients "
+        "genuinely burst and you measured that the larger batches pay for the wait.",
     )
     return parser
 

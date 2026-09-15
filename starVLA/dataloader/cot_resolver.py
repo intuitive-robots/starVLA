@@ -34,11 +34,12 @@ _BOX = re.compile(
 )
 _TRAJECTORY2D = re.compile(r"<trajectory(?:\s+[^>]*)?>(.*?)</trajectory>", re.DOTALL)
 _TRAJECTORY3D = re.compile(r"<trajectory3d(?:\s+[^>]*)?>(.*?)</trajectory3d>", re.DOTALL)
+_MOVEMENT = re.compile(r"<movement>(.*?)</movement>", re.DOTALL | re.IGNORECASE)
 _XY = re.compile(r"\((-?\d+),\s*(-?\d+)\)")
 _XYZ = re.compile(r"\((-?\d+),\s*(-?\d+),\s*(-?\d+)\)")
 
 
-def extract_structured_cot_targets(conversation: Optional[list]) -> dict[str, list[float]]:
+def extract_structured_cot_targets(conversation: Optional[list]) -> dict[str, object]:
     """Parse augmentation-aligned regression targets from a LIBERO CoT answer.
 
     The worker calls this only after ``CoTVideoAugment`` has rewritten the assistant
@@ -57,7 +58,7 @@ def extract_structured_cot_targets(conversation: Optional[list]) -> dict[str, li
         return {}
     cameras = {m.group("cam"): m.group("body") for m in _CAM_BLOCK.finditer(assistant)}
     cam1, cam2 = cameras.get("cam1", ""), cameras.get("cam2", "")
-    result: dict[str, list[float]] = {}
+    result: dict[str, object] = {}
 
     point = _POINT.search(cam1)
     if point:
@@ -65,6 +66,7 @@ def extract_structured_cot_targets(conversation: Optional[list]) -> dict[str, li
     box = _BOX.search(cam1)
     if box:
         result["object_box"] = [float(box.group(i)) / 1000.0 for i in range(1, 5)]
+    result["ground_visibility"] = [float(point is not None), float(box is not None)]
 
     traj2d = _TRAJECTORY2D.search(cam1)
     if traj2d:
@@ -77,6 +79,20 @@ def extract_structured_cot_targets(conversation: Optional[list]) -> dict[str, li
         points = _XYZ.findall(traj3d.group(1))
         if len(points) == 5:
             result["trajectory3d"] = [float(v) / 20.0 for point in points for v in point]
+
+    movement_match = _MOVEMENT.search(assistant)
+    if movement_match:
+        movement = movement_match.group(1).strip().lower()
+        # Four compact phases derived only from the annotated gripper transition:
+        # approach/open, grasp/closing, transport/closed, release/opening.
+        if "keep gripper closed" in movement or "keep the gripper closed" in movement:
+            result["phase"] = 2
+        elif "close gripper" in movement or "close the gripper" in movement:
+            result["phase"] = 1
+        elif "open gripper" in movement or "open the gripper" in movement:
+            result["phase"] = 3
+        elif "keep gripper open" in movement or "keep the gripper open" in movement:
+            result["phase"] = 0
     return result
 
 

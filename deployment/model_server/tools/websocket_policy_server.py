@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+import os
 import time
 import traceback
 
@@ -29,7 +30,7 @@ class WebsocketPolicyServer:
         idle_timeout: int = -1,  # Idle timeout in seconds, -1 means never auto-close
         metadata: dict | None = None,
         max_batch_size: int = 1,
-        max_wait_time: float = 1.0,
+        max_wait_time: float = 0.0,
     ) -> None:
         self._policy = policy  #
         self._host = host
@@ -37,6 +38,9 @@ class WebsocketPolicyServer:
         self._metadata = metadata or {}
         self._idle_timeout = idle_timeout
         self._last_active = time.time()
+        # Live client count, handed to the dispatcher so it never blocks waiting
+        # for requests that no connected client can send (see batch_dispatcher.py).
+        self._active_clients = 0
         logging.getLogger("websockets.server").setLevel(logging.INFO)
 
         # Opt-in: max_batch_size=1 (default) preserves the exact previous
@@ -46,7 +50,16 @@ class WebsocketPolicyServer:
         # call -- see batch_dispatcher.py for why this is a large win for this
         # model (measured ~30x throughput at batch=32, ~112x at batch=128, for a
         # ~15% per-batch latency cost) rather than one-request-at-a-time serving.
-        self._dispatcher = BatchDispatcher(policy, max_batch_size, max_wait_time) if max_batch_size > 1 else None
+        paired = os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1"
+        if paired and max_batch_size != 1:
+            raise ValueError("Paired rollout must use max_batch_size=1")
+        # Serialize even singleton requests in paired mode: the ordinary
+        # to_thread path can overlap calls and race model caches/global RNG.
+        self._dispatcher = (
+            BatchDispatcher(policy, max_batch_size, max_wait_time, client_count_fn=lambda: self._active_clients)
+            if max_batch_size > 1 or paired
+            else None
+        )
         if self._dispatcher is not None:
             logging.info(
                 f"[WebsocketPolicyServer] batching ON: max_batch_size={max_batch_size}, "
@@ -94,24 +107,31 @@ class WebsocketPolicyServer:
         logging.info(f"Connection from {websocket.remote_address} opened")
         packer = msgpack_numpy.Packer()
 
-        await websocket.send(packer.pack(self._metadata))
+        # Decremented in the `finally` below on every exit path (clean close,
+        # internal error, cancellation) -- a leaked count would keep the
+        # dispatcher waiting for a client that is already gone.
+        self._active_clients += 1
+        try:
+            await websocket.send(packer.pack(self._metadata))
 
-        while True:
-            try:
-                msg = msgpack_numpy.unpackb(await websocket.recv())
-                self._last_active = time.time()  # Refresh active time on each received message
-                ret = await self._route_message(msg)  # route message
-                await websocket.send(packer.pack(ret))
-            except websockets.ConnectionClosed:
-                logging.info(f"Connection from {websocket.remote_address} closed")
-                break
-            except Exception:
-                await websocket.send(traceback.format_exc())
-                await websocket.close(
-                    code=websockets.frames.CloseCode.INTERNAL_ERROR,
-                    reason="Internal server error. Traceback included in previous frame.",
-                )
-                raise
+            while True:
+                try:
+                    msg = msgpack_numpy.unpackb(await websocket.recv())
+                    self._last_active = time.time()  # Refresh active time on each received message
+                    ret = await self._route_message(msg)  # route message
+                    await websocket.send(packer.pack(ret))
+                except websockets.ConnectionClosed:
+                    logging.info(f"Connection from {websocket.remote_address} closed")
+                    break
+                except Exception:
+                    await websocket.send(traceback.format_exc())
+                    await websocket.close(
+                        code=websockets.frames.CloseCode.INTERNAL_ERROR,
+                        reason="Internal server error. Traceback included in previous frame.",
+                    )
+                    raise
+        finally:
+            self._active_clients -= 1
 
     # route logic: recognize request from client
     async def _route_message(self, msg: dict) -> dict:

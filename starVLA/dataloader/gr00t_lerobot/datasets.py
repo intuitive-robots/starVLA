@@ -959,6 +959,9 @@ class LeRobotSingleDataset(Dataset):
         self._last_packed_image_mib = 0.0
         self._last_action_mib = 0.0
         self._last_state_mib = 0.0
+        self._shared_z_future_offset = int(
+            self.data_cfg.get("shared_z_future_offset", 0) if self.data_cfg else 0
+        )
         if self.data_cfg:
             debug_enabled = self.data_cfg.get(
                 "worker_memory_debug",
@@ -1657,6 +1660,12 @@ class LeRobotSingleDataset(Dataset):
     def _build_valid_base_indices_by_trajectory(self) -> dict[int, np.ndarray]:
         valid_indices: dict[int, list[int]] = defaultdict(list)
         for trajectory_id, base_index in self.all_steps:
+            if self._shared_z_future_offset:
+                trajectory_index = self.get_trajectory_index(int(trajectory_id))
+                if int(base_index) + self._shared_z_future_offset >= int(
+                    self.trajectory_lengths[trajectory_index]
+                ):
+                    continue
             valid_indices[int(trajectory_id)].append(int(base_index))
         return {trajectory_id: np.array(indices, dtype=np.int64) for trajectory_id, indices in valid_indices.items()}
 
@@ -2253,6 +2262,8 @@ class LeRobotSingleDataset(Dataset):
         sample["action_time_mask"] = (
             np.arange(sample["action"].shape[0], dtype=np.int64) < remaining
         )
+        if self._shared_z_future_offset and remaining <= self._shared_z_future_offset:
+            sample.pop("future_image", None)
         self._maybe_log_worker_memory_debug(
             trajectory_id=trajectory_id,
             base_index=base_index,
@@ -2312,17 +2323,30 @@ class LeRobotSingleDataset(Dataset):
     def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
         step_images = []
+        future_images = []
         packed_image_mib = 0.0
         if selected_video_keys is None:
             selected_video_keys = self._resolve_sampled_video_keys()
         for video_key in selected_video_keys:
-            image = data[video_key][0]
+            video_value = data[video_key]
+            image = video_value[0]
             if isinstance(image, Image.Image):
                 pass
             else:
                 image = Image.fromarray(image)
             step_images.append(image)
             packed_image_mib += _estimate_value_mib(image)
+            if self._shared_z_future_offset:
+                if len(video_value) != 2:
+                    raise RuntimeError(
+                        "shared-z future loading expected [current,future] frames, got "
+                        f"{len(video_value)} for {video_key}"
+                    )
+                future = video_value[1]
+                if not isinstance(future, Image.Image):
+                    future = Image.fromarray(future)
+                future_images.append(future)
+                packed_image_mib += _estimate_value_mib(future)
 
         language = self._select_language(data)
         action = []
@@ -2339,6 +2363,8 @@ class LeRobotSingleDataset(Dataset):
             "lang": language,
             "robot_tag": self.tag
         }
+        if future_images:
+            sample["future_image"] = future_images
         # Presence of the key (including a None value) tells the model that lookup already
         # happened in the worker and prevents a duplicate resolver lookup / augmentation.
         sample["cot_conversation"] = data.get("_cot_conversation")
@@ -3408,6 +3434,13 @@ class LeRobotMixtureDataset(Dataset):
                 sample = dataset._pack_sample(data, selected_video_keys=selected_video_keys)
                 sample["trajectory_name"] = dataset._trajectory_name(trajectory_id)
                 sample["frame_index"] = int(step)
+                if dataset._shared_z_future_offset:
+                    trajectory_index = dataset.get_trajectory_index(int(trajectory_id))
+                    remaining = max(
+                        int(dataset.trajectory_lengths[trajectory_index]) - int(step), 0
+                    )
+                    if remaining <= dataset._shared_z_future_offset:
+                        sample.pop("future_image", None)
                 dataset._maybe_log_worker_memory_debug(
                     trajectory_id=int(trajectory_id),
                     base_index=int(step),

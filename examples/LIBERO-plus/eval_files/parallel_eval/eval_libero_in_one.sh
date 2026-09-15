@@ -68,10 +68,35 @@ stride=${13:-1}
 # worker range filters the same deterministic global index set, so their union
 # has this exact size without overlaps.
 exact_sample_count=${14:-0}
+# Deal this partition's task list out to the workers round-robin (worker i gets
+# tasks i, i+N, i+2N, ...) instead of giving each a contiguous block. LIBERO-plus
+# groups perturbation categories into large contiguous index blocks whose episodes
+# differ by >5x in cost, so contiguous blocks hand different workers wildly
+# different total workloads: measured on libero_10 with 32 workers, shards
+# finished spread over 52 minutes (median at +8 min) and the last five ran alone
+# on an otherwise idle node for 45 of the suite's 69 minutes. Round-robin gives
+# every worker the same category mix. The union of evaluated tasks is identical,
+# so results stay comparable to contiguously sharded runs. 0 = old behavior.
+interleave_shards="${STARVLA_INTERLEAVE_SHARDS:-1}"
+# This node's rank and the total node count, when driven multi-node by
+# auto_eval_libero_plus.sh. Under round-robin every node is handed the WHOLE
+# suite and takes global shards partition_idx*num_workers + i, so the stripe is
+# dealt across nodes as well as within one -- otherwise the node holding an
+# expensive perturbation band gates the whole job (1.80x measured on libero_10
+# over 4 nodes). Shard filenames carry the global index, so nodes writing into
+# the same shared output_dir never collide.
+partition_idx=${15:-0}
+num_partitions=${16:-1}
 # The NVIDIA EGL stack occasionally fails context initialization when several
 # simulator processes start together. A shard is safe to repeat because its
 # result filenames are deterministic and are overwritten on success.
 worker_max_attempts="${worker_max_attempts:-3}"
+# Exact-sample evaluations can isolate every selected task in its own simulator
+# process.  This avoids a native EGL/robosuite failure during environment
+# transitions from discarding all earlier results in a large raw-index shard.
+# Four long-lived launcher streams still keep exactly one simulator active on
+# each GPU; only the failed task is retried.
+isolate_exact_tasks="${STARVLA_ISOLATE_EXACT_TASKS:-0}"
 
 case "${LIBERO_PLUS_RUNTIME}" in
     auto)
@@ -145,6 +170,8 @@ run_eval_worker() {
             --env "OMP_NUM_THREADS=${OMP_NUM_THREADS}" \
             --env "OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS}" \
             --env "MKL_NUM_THREADS=${MKL_NUM_THREADS}" \
+            --env "STARVLA_FAST_GLASS_BLUR=${STARVLA_FAST_GLASS_BLUR:-0}" \
+            --env "STARVLA_PAIRED_ROLLOUT=${STARVLA_PAIRED_ROLLOUT:-0}" \
             "${LIBERO_PLUS_SIF}" \
             /opt/conda/envs/libero/bin/python "${EVAL_SCRIPT}" "$@"
     else
@@ -170,6 +197,92 @@ if [ "${num_gpu_slots}" -eq 0 ]; then
     exit 1
 fi
 
+if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
+    case "${task_suite_name}" in
+        libero_10) suite_size=2519 ;;
+        libero_goal) suite_size=2591 ;;
+        libero_object) suite_size=2518 ;;
+        libero_spatial) suite_size=2402 ;;
+        *)
+            echo "[ERROR] Unknown LIBERO-plus task suite for exact-task isolation: ${task_suite_name}."
+            exit 1
+            ;;
+    esac
+    if [ "${exact_sample_count}" -gt "${suite_size}" ]; then
+        echo "[ERROR] exact_sample_count=${exact_sample_count} exceeds suite size ${suite_size}."
+        exit 1
+    fi
+
+    exact_task_ids=()
+    for ((sample_idx=0; sample_idx<exact_sample_count; sample_idx++)); do
+        task_id=$((sample_idx * suite_size / exact_sample_count))
+        if [ "${task_id}" -ge "${start_idx}" ] && [ "${task_id}" -lt "${end_idx}" ]; then
+            exact_task_ids+=("${task_id}")
+        fi
+    done
+    echo "Exact-task isolation: ${#exact_task_ids[@]} selected tasks, ${num_gpu_slots} one-process-per-GPU streams."
+
+    isolated_launcher_pids=()
+    for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
+        gpu_id=${gpu_ids[$gpu_slot]}
+        (
+            stream_rc=0
+            for ((task_offset=gpu_slot; task_offset<${#exact_task_ids[@]}; task_offset+=num_gpu_slots)); do
+                task_id=${exact_task_ids[$task_offset]}
+                task_end=$((task_id + 1))
+                server_slot=$((task_offset % servers_per_gpu))
+                worker_port=$((base_port + gpu_slot * servers_per_gpu + server_slot))
+                echo "Exact task ${task_offset}/${#exact_task_ids[@]}: gpu=${gpu_id}, task=${task_id}, host=${server_host}, port=${worker_port}"
+                task_rc=1
+                for ((attempt=1; attempt<=worker_max_attempts; attempt++)); do
+                    if run_eval_worker "${gpu_id}" \
+                        --pretrained_path "$your_ckpt" \
+                        --task_suite_name "$task_suite_name" \
+                        --num_trials_per_task "$num_trials_per_task" \
+                        --output_dir "$output_dir" \
+                        --host "$server_host" \
+                        --port "$worker_port" \
+                        --use_server "$use_server" \
+                        --start_idx "$task_id" \
+                        --end_idx "$task_end" \
+                        --stride "$stride" \
+                        --exact_sample_count "$exact_sample_count" \
+                        --gripper_encoding "${gripper_encoding:-auto}" \
+                        --object_perturb_m "${object_perturb_m:-0.0}" \
+                        --object_perturb_roles "${object_perturb_roles:-source,target}" \
+                        --object_perturb_seed "${object_perturb_seed:-20260812}" \
+                        --save_video "${save_video:-False}" \
+                        --overlay_trace "${overlay_trace:-False}"; then
+                        task_rc=0
+                        break
+                    else
+                        task_rc=$?
+                    fi
+                    echo "[WARN] Exact task ${task_id} failed (rc=${task_rc}, attempt ${attempt}/${worker_max_attempts})."
+                    [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
+                done
+                if [ "${task_rc}" -ne 0 ]; then
+                    echo "[ERROR] Exact task ${task_id} exhausted ${worker_max_attempts} attempts."
+                    stream_rc=1
+                    break
+                fi
+            done
+            exit "${stream_rc}"
+        ) &
+        isolated_launcher_pids+=($!)
+    done
+
+    isolated_rc=0
+    for pid in "${isolated_launcher_pids[@]}"; do
+        wait "${pid}" || isolated_rc=1
+    done
+    if [ "${isolated_rc}" -ne 0 ]; then
+        echo "[ERROR] One or more exact-task streams failed; refusing to aggregate partial results."
+        exit 1
+    fi
+    exit 0
+fi
+
 num_workers=$((num_gpu_slots * workers_per_gpu))
 
 total=$((end_idx - start_idx))
@@ -177,7 +290,7 @@ chunk_size=$((total / num_workers))
 remainder=$((total % num_workers))
 current_start=$start_idx
 
-if [ "${tasks_per_gpu}" -gt 0 ]; then
+if [ "${tasks_per_gpu}" -gt 0 ] && [ "${interleave_shards}" != "1" ]; then
     expected_total=$((tasks_per_gpu * num_gpu_slots))
     if [ "${expected_total}" -ne "${total}" ]; then
         echo "[WARN] Range size ${total} does not match visible_gpus * tasks_per_gpu = ${expected_total}. Using the explicit start/end range."
@@ -187,8 +300,23 @@ fi
 # ── Precompute every worker's task range up front (cheap, pure arithmetic) ──
 # so the actual (costly, EGL-staggered) launch loop below can run one
 # independent stream per GPU in parallel instead of one big serial queue.
-worker_start=(); worker_end=()
+worker_start=(); worker_end=(); worker_shard=(); worker_num_shards=()
+if [ "${interleave_shards}" = "1" ]; then
+    # Every worker sees the whole range and filters it to its own round-robin
+    # slice (eval_libero_model.py --shard_idx/--num_shards). Every node uses the
+    # same num_workers, so global shard ids partition the suite exactly once.
+    total_shards=$((num_partitions * num_workers))
+    shard_base=$((partition_idx * num_workers))
+    for ((i=0; i<num_workers; i++)); do
+        worker_start+=("$start_idx")
+        worker_end+=("$end_idx")
+        worker_shard+=("$((shard_base + i))")
+        worker_num_shards+=("${total_shards}")
+    done
+    echo "Shard layout: round-robin, global shards ${shard_base}..$((shard_base + num_workers - 1)) of ${total_shards} (node ${partition_idx}/${num_partitions}) over [${start_idx}, ${end_idx})"
+fi
 for ((i=0; i<num_workers; i++)); do
+    if [ "${interleave_shards}" = "1" ]; then break; fi
     if [ $i -lt $remainder ]; then
         current_end=$((current_start + chunk_size + 1))
     else
@@ -202,6 +330,8 @@ for ((i=0; i<num_workers; i++)); do
     fi
     worker_start+=("$current_start")
     worker_end+=("$current_end")
+    worker_shard+=("0")
+    worker_num_shards+=("1")
     current_start=$current_end
     if [ $current_start -ge $end_idx ]; then
         break
@@ -231,9 +361,11 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
 
             current_start=${worker_start[$i]}
             current_end=${worker_end[$i]}
+            current_shard=${worker_shard[$i]}
+            current_num_shards=${worker_num_shards[$i]}
             server_slot=$((local_worker % servers_per_gpu))
             worker_port=$((base_port + gpu_slot * servers_per_gpu + server_slot))
-            echo "Part ${i}: gpu=${gpu_id}, worker=${local_worker}, start=$current_start, end=$current_end ([$current_start, $current_end)), host=${server_host}, port=${worker_port}, use_server=${use_server}"
+            echo "Part ${i}: gpu=${gpu_id}, worker=${local_worker}, start=$current_start, end=$current_end ([$current_start, $current_end)), shard=${current_shard}/${current_num_shards}, host=${server_host}, port=${worker_port}, use_server=${use_server}"
 
             sleep 2
 
@@ -251,6 +383,8 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
                         --end_idx "$current_end" \
                         --stride "$stride" \
                         --exact_sample_count "$exact_sample_count" \
+                        --shard_idx "$current_shard" \
+                        --num_shards "$current_num_shards" \
                         --gripper_encoding "${gripper_encoding:-auto}" \
                         --object_perturb_m "${object_perturb_m:-0.0}" \
                         --object_perturb_roles "${object_perturb_roles:-source,target}" \
@@ -261,10 +395,10 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
                     else
                         rc=$?
                     fi
-                    echo "[WARN] Part ${i} [${current_start},${current_end}) failed (rc=${rc}, attempt ${attempt}/${worker_max_attempts})."
+                    echo "[WARN] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} failed (rc=${rc}, attempt ${attempt}/${worker_max_attempts})."
                     [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
                 done
-                echo "[ERROR] Part ${i} [${current_start},${current_end}) exhausted ${worker_max_attempts} attempts."
+                echo "[ERROR] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} exhausted ${worker_max_attempts} attempts."
                 exit "${rc}"
             ) &
             pids+=($!)

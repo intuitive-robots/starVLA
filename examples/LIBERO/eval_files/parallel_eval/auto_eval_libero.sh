@@ -79,6 +79,7 @@ cot_max_new_tokens="${cot_max_new_tokens:-0}"
 object_perturb_m="${object_perturb_m:-0.0}"
 object_perturb_roles="${object_perturb_roles:-source,target}"
 object_perturb_seed="${object_perturb_seed:-20260812}"
+capture_successful_dir="${capture_successful_dir:-}"
 # EGL initialization on the Booster driver can fail transiently when several
 # contexts start together. Retry the complete shard so a successful job always
 # has complete episode coverage. Override to 1 to disable retries.
@@ -205,6 +206,7 @@ echo " Max batch size   : ${max_batch_size}  (max_wait_time=${max_wait_time}s)"
 echo " CoT max tokens   : ${cot_max_new_tokens}  (0 = checkpoint default)"
 echo " Save video       : ${save_video}"
 echo " Object perturb   : ${object_perturb_m}m roles=${object_perturb_roles} seed=${object_perturb_seed}"
+echo " Success capture  : ${capture_successful_dir:-disabled}"
 echo "=========================================="
 
 server_pids=(); server_logs=()
@@ -328,6 +330,7 @@ for ((g=0; g<num_gpus; g++)); do
                             --args.object-perturb-m "${object_perturb_m}" \
                             --args.object-perturb-roles "${object_perturb_roles}" \
                             --args.object-perturb-seed "${object_perturb_seed}" \
+                            $( [ -n "${capture_successful_dir}" ] && echo "--args.capture-successful-dir ${capture_successful_dir}" ) \
                             $( [ "${save_video}" = "true" ] && echo "--args.save-video" || echo "--args.no-save-video" ); then
                         exit 0
                     else

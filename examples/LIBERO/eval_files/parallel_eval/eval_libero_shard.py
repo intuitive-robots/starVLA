@@ -171,6 +171,13 @@ class Args:
     object_perturb_roles: str = "source,target"
     object_perturb_seed: int = 20260812
 
+    # Optional research capture. When set, retain state/action sequences only
+    # for episodes that the evaluated policy actually completes. The state is
+    # recorded immediately before the corresponding executed action, allowing
+    # the same physical trajectory to be re-rendered under appearance-only
+    # counterfactuals. Normal evaluation leaves this empty and is unchanged.
+    capture_successful_dir: str = ""
+
 
 def _stable_perturb_rng(seed: int, suite: str, task_id: int, episode_idx: int, object_name: str):
     key = f"{seed}|{suite}|{task_id}|{episode_idx}|{object_name}".encode("utf-8")
@@ -394,6 +401,11 @@ def eval_libero(args: Args) -> None:
         logging.info(f"=== task {task_id}: {task_description} ({len(episode_indices)} episodes in this shard)")
 
         for episode_idx in tqdm.tqdm(episode_indices, desc=f"task{task_id}"):
+            if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1":
+                key = f"{args.seed}|{args.task_suite_name}|{task_id}|{episode_idx}".encode()
+                episode_seed = int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "little")
+                np.random.seed(episode_seed)
+                env.seed(episode_seed)
             client_model.reset(task_description=task_description)
             env.reset()
             obs = env.set_init_state(initial_states[episode_idx])
@@ -417,6 +429,9 @@ def eval_libero(args: Args) -> None:
             done = False
             replay_images = []
             initial_cot_text = None
+            captured_sim_states = []
+            captured_policy_states = []
+            captured_actions = []
 
             while t < max_steps + args.num_steps_wait:
                 # IMPORTANT: Do nothing for the first few timesteps because the simulator drops objects
@@ -454,6 +469,9 @@ def eval_libero(args: Args) -> None:
                         raise RuntimeError(f"expected 8-D LIBERO state, got {state.shape}")
                     example_dict["state"] = state[None]
 
+                if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1":
+                    key = f"{args.seed}|{args.task_suite_name}|{task_id}|{episode_idx}|{step}".encode()
+                    example_dict["_paired_policy_seed"] = int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "little")
                 response = client_model.step(example=example_dict, step=step)
                 if initial_cot_text is None and response.get("cot_is_fresh"):
                     initial_cot_text = response.get("cot_text")
@@ -471,6 +489,18 @@ def eval_libero(args: Args) -> None:
                     )
                 delta_action = np.concatenate([world_vector_delta, rotation_delta, gripper], axis=0)
 
+                if args.capture_successful_dir:
+                    policy_state = np.concatenate(
+                        (
+                            obs["robot0_eef_pos"],
+                            _quat2axisangle(obs["robot0_eef_quat"]),
+                            obs["robot0_gripper_qpos"],
+                        )
+                    ).astype(np.float32)
+                    captured_sim_states.append(np.asarray(env.get_sim_state(), dtype=np.float64).copy())
+                    captured_policy_states.append(policy_state)
+                    captured_actions.append(delta_action.astype(np.float32, copy=True))
+
                 obs, reward, done, info = env.step(delta_action.tolist())
                 if done:
                     task_successes += 1
@@ -483,6 +513,34 @@ def eval_libero(args: Args) -> None:
             total_episodes += 1
 
             suffix = "success" if done else "failure"
+            capture_record = None
+            if done and args.capture_successful_dir:
+                capture_root = pathlib.Path(args.capture_successful_dir)
+                capture_root.mkdir(parents=True, exist_ok=True)
+                capture_stem = f"{args.task_suite_name}_task{task_id:02d}_episode{episode_idx:02d}"
+                capture_npz = capture_root / f"{capture_stem}.npz"
+                np.savez_compressed(
+                    capture_npz,
+                    sim_state=np.stack(captured_sim_states),
+                    policy_state=np.stack(captured_policy_states),
+                    action=np.stack(captured_actions),
+                    step=np.arange(len(captured_actions), dtype=np.int32),
+                )
+                capture_meta = {
+                    "format": "starvla_successful_libero_trajectory_v1",
+                    "suite": args.task_suite_name,
+                    "task_id": task_id,
+                    "episode_idx": episode_idx,
+                    "task_name": str(task.name),
+                    "task_description": str(task_description),
+                    "bddl_file": str(task.bddl_file),
+                    "steps": len(captured_actions),
+                    "npz": str(capture_npz.resolve()),
+                }
+                capture_json = capture_root / f"{capture_stem}.json"
+                capture_json.write_text(json.dumps(capture_meta, indent=2) + "\n")
+                capture_record = str(capture_json.resolve())
+                logging.info(f"Captured successful trajectory: {capture_json}")
             if args.save_video and replay_images:
                 task_segment = task_description.replace(" ", "_")
                 imageio.mimwrite(
@@ -500,6 +558,8 @@ def eval_libero(args: Args) -> None:
                     "success": bool(done),
                     "perturbation": perturbation,
                     "initial_cot_text": initial_cot_text,
+                    "successful_trajectory_capture": capture_record,
+                    "paired_episode_seed": episode_seed if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1" else None,
                 }
             )
             logging.info(f"# episodes completed so far: {total_episodes}")

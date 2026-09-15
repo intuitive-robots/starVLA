@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Tuple
@@ -23,6 +24,7 @@ from typing import Tuple
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 import wandb
 from accelerate import Accelerator, DeepSpeedPlugin
 from accelerate.logging import get_logger
@@ -311,8 +313,6 @@ def log_eval_backend_banner(cfg, accelerator: Accelerator) -> None:
 
     attn_impl = str(getattr(cfg.framework.qwenvl, "attn_implementation", "unknown")).strip()
     open_loop_disabled_by_config = not bool(getattr(cfg.trainer, "open_loop_eval", True))
-    open_loop_disabled_by_backend = "flash_attention" in attn_impl.lower()
-    open_loop_disabled = open_loop_disabled_by_config or open_loop_disabled_by_backend
 
     banner_lines = [
         "",
@@ -320,8 +320,8 @@ def log_eval_backend_banner(cfg, accelerator: Accelerator) -> None:
         "STARTUP CONFIG",
         f"Attention backend: {attn_impl}",
         (
-            "Open-loop eval: DISABLED by trainer.open_loop_eval or attention backend"
-            if open_loop_disabled
+            "Open-loop eval: DISABLED by trainer.open_loop_eval"
+            if open_loop_disabled_by_config
             else "Open-loop eval: ENABLED"
         ),
         "=" * 88,
@@ -371,6 +371,19 @@ def _dataloader_state_path(checkpoint_path: str | Path) -> Path:
     return Path(checkpoint_path).with_name(f"{stem}_dataloader_state.json")
 
 
+def _training_state_dir(checkpoint_path: str | Path) -> Path:
+    """Return the Accelerate/DeepSpeed state directory paired with a model checkpoint."""
+    name = Path(checkpoint_path).name
+    match = re.match(r"(steps_\d+)(?:_(?:pytorch_model\.pt|model\.safetensors))?$", name)
+    stem = match.group(1) if match else Path(checkpoint_path).stem
+    return Path(checkpoint_path).with_name(f"{stem}_training_state")
+
+
+def _is_complete_training_state(path: str | Path) -> bool:
+    path = Path(path)
+    return path.is_dir() and (path / "_SUCCESS").is_file()
+
+
 def _prune_old_checkpoints(checkpoint_dir: str | Path, save_total_limit: int | None, logger_fn=logger.info) -> None:
     if save_total_limit is None or save_total_limit <= 0:
         return
@@ -391,6 +404,30 @@ def _prune_old_checkpoints(checkpoint_dir: str | Path, save_total_limit: int | N
                 if path.exists():
                     path.unlink()
                     logger_fn("Deleted old checkpoint file: %s", path)
+        training_state = checkpoint_dir / f"steps_{step}_training_state"
+        if training_state.exists():
+            shutil.rmtree(training_state)
+            logger_fn("Deleted old full training state: %s", training_state)
+
+
+def _prune_full_training_states(
+    checkpoint_dir: str | Path,
+    save_total_limit: int | None,
+    logger_fn=logger.info,
+) -> None:
+    """Bound large distributed optimizer checkpoints independently of model snapshots."""
+    if save_total_limit is None or save_total_limit <= 0:
+        return
+    checkpoint_dir = Path(checkpoint_dir)
+    states: list[tuple[int, Path]] = []
+    for path in checkpoint_dir.glob("steps_*_training_state"):
+        match = re.fullmatch(r"steps_(\d+)_training_state", path.name)
+        if match and _is_complete_training_state(path):
+            states.append((int(match.group(1)), path))
+    states.sort(key=lambda item: item[0])
+    for _, path in states[: max(0, len(states) - save_total_limit)]:
+        shutil.rmtree(path)
+        logger_fn("Deleted old full training state: %s", path)
 
 
 def _estimated_resume_batches(cfg, completed_steps: int) -> int:
@@ -502,6 +539,7 @@ class VLATrainer(TrainerUtils):
         self.step_timers = StepTimeAccumulator()
         self._last_timing_flush_step = -1
         self._stopped_for_preemption = False
+        self._resume_training_state_dir: Path | None = None
 
         self.completed_steps = 0
         self.dataloader_batches_consumed = int(
@@ -536,12 +574,37 @@ class VLATrainer(TrainerUtils):
             self.optimizer,
             self.vla_train_dataloader,
         )
-        if getattr(self.config.datasets.vla_data, "dataset_py", "") == "lerobot_datasets":
+        # The scheduler is intentionally stepped outside Accelerate's prepare wrapper.
+        # Register it explicitly so a full-state checkpoint restores its exact phase.
+        self.accelerator.register_for_checkpointing(self.lr_scheduler)
+        if self._resume_training_state_dir is not None:
+            self.accelerator.load_state(str(self._resume_training_state_dir))
+            logger.info(
+                "Restored full DeepSpeed training state (model, optimizer, scheduler, RNG) from %s",
+                self._resume_training_state_dir,
+            )
+        dataset_py = str(getattr(self.config.datasets.vla_data, "dataset_py", ""))
+        if dataset_py == "lerobot_datasets":
             try:
                 self.vla_eval_dataset = get_vla_dataset(data_cfg=self.config.datasets.vla_data, mode="eval")
             except ValueError as exc:
                 if self.accelerator.is_main_process:
                     logger.warning(f"Skipping dedicated open-loop eval dataset construction: {exc}")
+                self.vla_eval_dataset = None
+        elif dataset_py == "marigold_data_datasets":
+            # Every rank enters the factory because Marigold distributes its
+            # processed config through collectives. Only rank zero later
+            # decodes the fixed finite evaluation episodes.
+            from starVLA.dataloader.marigold_data_datasets import get_marigold_data_vla_dataset
+
+            try:
+                self.vla_eval_dataset = get_marigold_data_vla_dataset(
+                    data_cfg=self.config.datasets.vla_data,
+                    mode="eval",
+                )
+            except (ValueError, RuntimeError, FileNotFoundError) as exc:
+                if self.accelerator.is_main_process:
+                    logger.warning(f"Skipping dedicated Marigold open-loop eval dataset: {exc}")
                 self.vla_eval_dataset = None
 
         self._init_wandb()
@@ -557,12 +620,31 @@ class VLATrainer(TrainerUtils):
     def _init_wandb(self):
         """Initialize Weights & Biases."""
         if self.accelerator.is_main_process:
+            # Keep one W&B identity across Slurm continuations.  Offline W&B
+            # otherwise generates a fresh random ID on every allocation, so a
+            # resumed training run appears as several unrelated cloud runs.
+            output_dir = Path(self.config.output_dir)
+            wandb_id_path = output_dir / ".wandb_run_id"
+            if wandb_id_path.exists():
+                wandb_run_id = wandb_id_path.read_text().strip()
+            else:
+                wandb_run_id = wandb.util.generate_id()
+                wandb_id_path.write_text(f"{wandb_run_id}\n")
+
+            wandb_group_path = output_dir / ".wandb_group"
+            if wandb_group_path.exists():
+                wandb_group = wandb_group_path.read_text().strip()
+            else:
+                wandb_group = getattr(self.config, "wandb_group", "vla-train")
+
             wandb.init(
+                id=wandb_run_id,
+                resume="allow",
                 name=self.config.run_id,
                 dir=os.path.join(self.config.output_dir, "wandb"),
                 project=self.config.wandb_project,
                 entity=self.config.wandb_entity,
-                group="vla-train",
+                group=wandb_group,
             )
             for metric_name in (
                 "train/cot_loss",
@@ -572,6 +654,8 @@ class VLATrainer(TrainerUtils):
                 "cot_coverage",
                 "train/cot_keep_rate",
                 "cot_keep_rate",
+                "train/state_keep_rate",
+                "state_keep_rate",
                 "eval/cot_loss",
                 "eval_cot_loss",
                 "eval/cot_coverage",
@@ -615,6 +699,15 @@ class VLATrainer(TrainerUtils):
             resume_from_checkpoint, self.completed_steps = self._get_latest_checkpoint(self.checkpoint_dir)
             if resume_from_checkpoint:
                 self.resume_from_checkpoint = resume_from_checkpoint
+                training_state_dir = _training_state_dir(resume_from_checkpoint)
+                if _is_complete_training_state(training_state_dir):
+                    self._resume_training_state_dir = training_state_dir
+                else:
+                    logger.warning(
+                        "No complete full training state paired with %s; optimizer moments and RNG "
+                        "will restart for this continuation.",
+                        resume_from_checkpoint,
+                    )
                 self.model = self.load_pretrained_backbones(self.model, self.resume_from_checkpoint, reload_modules=None)
                 logger.info(
                     f"Resuming training from checkpoint: {self.resume_from_checkpoint}, steps: {self.completed_steps}"
@@ -636,7 +729,7 @@ class VLATrainer(TrainerUtils):
 
     def _adjust_lr_scheduler_for_resume(self):
         """Adjust LR scheduler state after resuming from non-zero steps."""
-        if self.completed_steps > 0:
+        if self.completed_steps > 0 and self._resume_training_state_dir is None:
             logger.info(f"Adjusting LR scheduler for resume from step {self.completed_steps}")
             for _ in range(self.completed_steps):
                 self.lr_scheduler.step()
@@ -644,16 +737,37 @@ class VLATrainer(TrainerUtils):
                 f"LR scheduler adjusted to step {self.completed_steps}, current LR: {self.lr_scheduler.get_last_lr()}"
             )
 
-    def _load_checkpoint(self, checkpoint_path):
-        """Load checkpoint."""
-        self.accelerator.load_state(checkpoint_path)
-        self.accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
+    def _save_full_training_state(self, checkpoint_path: str) -> None:
+        """Collectively save an atomic Accelerate/DeepSpeed optimizer checkpoint."""
+        final_dir = _training_state_dir(checkpoint_path)
+        partial_dir = final_dir.with_name(f"{final_dir.name}.partial")
+
+        if self.accelerator.is_main_process:
+            if partial_dir.exists():
+                shutil.rmtree(partial_dir)
+        self.accelerator.wait_for_everyone()
+
+        # Under DeepSpeed every rank must enter save_state; optimizer shards are
+        # rank-local and cannot be reconstructed from rank zero alone.
+        self.accelerator.save_state(str(partial_dir), safe_serialization=False)
+        self.accelerator.wait_for_everyone()
+
+        if self.accelerator.is_main_process:
+            (partial_dir / "_SUCCESS").write_text(f"step={self.completed_steps}\n", encoding="utf-8")
+            if final_dir.exists():
+                shutil.rmtree(final_dir)
+            os.replace(partial_dir, final_dir)
+            logger.info("Saved full DeepSpeed training state at %s", final_dir)
+        self.accelerator.wait_for_everyone()
 
     def _save_checkpoint(self):
         """Save current training state."""
+        checkpoint_path = os.path.join(self.checkpoint_dir, f"steps_{self.completed_steps}")
+        if bool(getattr(self.config.trainer, "save_full_training_state", False)):
+            self._save_full_training_state(checkpoint_path)
+
         if self.accelerator.is_main_process:
             save_format = getattr(self.config.trainer, "save_format", "pt")
-            checkpoint_path = os.path.join(self.checkpoint_dir, f"steps_{self.completed_steps}")
 
             state_dict = self.accelerator.get_state_dict(self.model)
             if save_format == "safetensors":
@@ -701,6 +815,11 @@ class VLATrainer(TrainerUtils):
             _prune_old_checkpoints(
                 self.checkpoint_dir,
                 getattr(self.config.trainer, "save_total_limit", None),
+                logger_fn=logger.info,
+            )
+            _prune_full_training_states(
+                self.checkpoint_dir,
+                getattr(self.config.trainer, "full_state_save_total_limit", 2),
                 logger_fn=logger.info,
             )
 
@@ -879,7 +998,13 @@ class VLATrainer(TrainerUtils):
         step_metrics = step_metrics or {}
         examples = self._get_next_batch()
         actions = [example["action"] for example in examples]
-        output_dict = self.accelerator.unwrap_model(self.model).predict_action(
+        eval_model = self.accelerator.unwrap_model(self.model)
+        was_training = eval_model.training
+        # torch.inference_mode()/no_grad do not disable dropout. Evaluation
+        # must use module eval mode or GR00T's DiT dropout makes checkpoint
+        # comparisons noisy and perturbs their apparent scale.
+        eval_model.eval()
+        output_dict = eval_model.predict_action(
             examples=examples, use_ddim=True, num_ddim_steps=20
         )
 
@@ -890,7 +1015,7 @@ class VLATrainer(TrainerUtils):
             score = TrainerUtils.euclidean_distance(normalized_actions, actions)
             step_metrics["mse_score"] = score / num_pots
             if self._should_skip_open_loop_eval():
-                logger.info("Skipping open-loop eval because it is disabled by config or attention backend.")
+                logger.info("Skipping open-loop eval because trainer.open_loop_eval is disabled.")
             else:
                 open_loop_metrics = self._eval_open_loop_trajectories()
                 step_metrics.update(open_loop_metrics)
@@ -898,11 +1023,14 @@ class VLATrainer(TrainerUtils):
         # Eval CoT loss: run forward (not predict_action) on the same batch to get
         # the language CE loss over CoT tokens. Logged separately from train/cot_loss.
         with torch.no_grad():
-            eval_fwd = self.accelerator.unwrap_model(self.model).forward(examples)
+            eval_fwd = eval_model.forward(examples)
             eval_cot_loss = eval_fwd.get("cot_loss", None)
             if eval_cot_loss is not None and self.accelerator.is_main_process:
                 step_metrics["eval/cot_loss"] = eval_cot_loss.item()
                 step_metrics["eval_cot_loss"] = eval_cot_loss.item()
+            eval_encoder_mlm_loss = eval_fwd.get("encoder_mlm_loss", None)
+            if eval_encoder_mlm_loss is not None and self.accelerator.is_main_process:
+                step_metrics["eval/encoder_mlm_loss"] = float(eval_encoder_mlm_loss)
             eval_cot_coverage = eval_fwd.get("cot_coverage", None)
             if eval_cot_coverage is not None and self.accelerator.is_main_process:
                 step_metrics["eval/cot_coverage"] = float(eval_cot_coverage)
@@ -912,6 +1040,11 @@ class VLATrainer(TrainerUtils):
                 step_metrics["eval/cot_keep_rate"] = float(eval_cot_keep_rate)
                 step_metrics["eval_cot_keep_rate"] = float(eval_cot_keep_rate)
             if self.accelerator.is_main_process:
+                if eval_fwd.get("structured_aux_loss") is not None:
+                    step_metrics["eval/structured_aux_loss"] = float(eval_fwd["structured_aux_loss"])
+                    for key, value in eval_fwd.items():
+                        if key.startswith("structured_aux/"):
+                            step_metrics[f"eval/{key}"] = float(value)
                 for key in (
                     "choice_loss", "score_loss", "choice_min_error",
                     "choice_score_mae", "choice_diversity",
@@ -924,6 +1057,8 @@ class VLATrainer(TrainerUtils):
                     for idx, value in enumerate(winner_histogram):
                         step_metrics[f"eval/choice_winner_{idx}"] = float(value)
 
+        if was_training:
+            eval_model.train()
         del examples
         dist.barrier()
         return step_metrics
@@ -938,6 +1073,9 @@ class VLATrainer(TrainerUtils):
         if self.vla_eval_dataset is None:
             logger.warning("No dedicated eval dataset available for open-loop eval.")
             return {}
+
+        if callable(getattr(self.vla_eval_dataset, "build_open_loop_episodes", None)):
+            return self._eval_marigold_open_loop_trajectories(eval_root, action_horizon)
 
         trajectories = self._select_open_loop_trajectories(self.vla_eval_dataset)
         if not trajectories:
@@ -1020,12 +1158,170 @@ class VLATrainer(TrainerUtils):
 
         return metrics
 
+    def _eval_marigold_open_loop_trajectories(
+        self,
+        eval_root: Path,
+        action_horizon: int,
+    ) -> dict:
+        """Run StarVLA's stitched-chunk protocol through native Marigold samplers.
+
+        This preserves the established defaults (one final trajectory per
+        subdataset and normalized-space MSE), while respecting Marigold's
+        instruction masks and source/target-FPS mapping. Plots concatenate only
+        valid actions onto StarVLA's continuous stitched-timestep axis; source
+        frames and chunk lengths remain available in the saved NPZ for auditing.
+        """
+        trainer_cfg = self.config.trainer
+        num_episodes = int(trainer_cfg.get("open_loop_num_episodes_per_subdataset", 1))
+        batch_size = max(1, int(trainer_cfg.get("open_loop_batch_size", 8)))
+        configured_max_anchors = trainer_cfg.get("open_loop_max_anchors", None)
+        max_anchors = None if configured_max_anchors is None else int(configured_max_anchors)
+        seed = int(getattr(self.config, "seed", 42))
+
+        episodes = self.vla_eval_dataset.build_open_loop_episodes(
+            action_horizon=action_horizon,
+            num_episodes_per_subdataset=num_episodes,
+            max_anchors=max_anchors,
+        )
+        if not episodes:
+            logger.warning("No Marigold episodes available for open-loop eval.")
+            return {}
+
+        model = self.accelerator.unwrap_model(self.model)
+        all_squared_errors: list[np.ndarray] = []
+        metrics: dict = {}
+
+        for episode in episodes:
+            dataset_name = episode["dataset_name"]
+            episode_idx = int(episode["episode_idx"])
+            episode_seed = seed + episode_idx
+            samples = self.vla_eval_dataset.materialize_open_loop_episode(
+                episode,
+                seed=episode_seed,
+            )
+            if not samples:
+                continue
+
+            gt_chunks: list[np.ndarray] = []
+            pred_chunks: list[np.ndarray] = []
+            source_frame_chunks: list[np.ndarray] = []
+            chunk_lengths: list[int] = []
+            action_indices = samples[0]["action_indices"]
+
+            for batch_start in range(0, len(samples), batch_size):
+                batch = samples[batch_start : batch_start + batch_size]
+                # Diffusion starts from noise. Fork the RNG so evaluation is
+                # repeatable without changing subsequent training randomness.
+                devices = [torch.cuda.current_device()] if torch.cuda.is_available() else []
+                with torch.random.fork_rng(devices=devices):
+                    batch_seed = episode_seed + 10_000_000 + batch_start
+                    torch.manual_seed(batch_seed)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed_all(batch_seed)
+                    output = model.predict_action(
+                        examples=[item["example"] for item in batch],
+                        use_ddim=True,
+                        num_ddim_steps=20,
+                    )
+                predictions = np.asarray(output["normalized_actions"], dtype=np.float32)
+                if predictions.shape[0] != len(batch):
+                    raise RuntimeError(
+                        f"Marigold open-loop prediction batch mismatch: "
+                        f"{predictions.shape[0]} vs {len(batch)}"
+                    )
+
+                for item, prediction in zip(batch, predictions):
+                    mask = item["valid_mask"]
+                    gt_chunk = item["gt_normalized"][mask]
+                    pred_chunk = prediction[: mask.shape[0]][mask]
+                    source_chunk = item["source_frames"][mask]
+                    if gt_chunk.shape != pred_chunk.shape:
+                        raise RuntimeError(
+                            f"Marigold open-loop target/prediction mismatch: "
+                            f"{gt_chunk.shape} vs {pred_chunk.shape}"
+                        )
+                    if gt_chunk.shape[0] == 0:
+                        continue
+                    gt_chunks.append(gt_chunk)
+                    pred_chunks.append(pred_chunk)
+                    source_frame_chunks.append(source_chunk)
+                    chunk_lengths.append(int(gt_chunk.shape[0]))
+
+            if not gt_chunks:
+                continue
+
+            gt_traj = np.concatenate(gt_chunks, axis=0)
+            pred_traj = np.concatenate(pred_chunks, axis=0)
+            source_frames = np.concatenate(source_frame_chunks, axis=0)
+            squared_error = (pred_traj - gt_traj) ** 2
+            all_squared_errors.append(squared_error)
+
+            per_dim_mse = squared_error.mean(axis=0)
+            traj_prefix = f"open_loop/{dataset_name}/traj_{episode_idx}"
+            metrics[f"{traj_prefix}/mse_mean"] = float(per_dim_mse.mean())
+            for dim_idx, dim_mse in enumerate(per_dim_mse):
+                metrics[f"{traj_prefix}/mse_dim_{dim_idx}"] = float(dim_mse)
+
+            safe_dataset = re.sub(r"[^A-Za-z0-9_.-]+", "_", dataset_name)
+            safe_uuid = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(episode["uuid"]))[-100:]
+            stem = f"{safe_dataset}_traj_{episode_idx}_{safe_uuid}"
+            normalized_plot = eval_root / f"{stem}_normalized.png"
+            self._plot_open_loop_trajectory(
+                gt_traj=gt_traj,
+                pred_traj=pred_traj,
+                save_path=normalized_plot,
+                title=f"{dataset_name} trajectory {episode_idx} @ step {self.completed_steps}",
+                ylabel="normalized action",
+            )
+            metrics[f"{traj_prefix}/plot"] = wandb.Image(str(normalized_plot))
+
+            gt_physical = self.vla_eval_dataset.normalizer.unnormalize_actions(
+                gt_traj, action_indices
+            )
+            pred_physical = self.vla_eval_dataset.normalizer.unnormalize_actions(
+                pred_traj, action_indices
+            )
+            physical_plot = eval_root / f"{stem}_physical.png"
+            self._plot_open_loop_trajectory(
+                gt_traj=gt_physical,
+                pred_traj=pred_physical,
+                save_path=physical_plot,
+                title=(
+                    f"{dataset_name} trajectory {episode_idx} @ step "
+                    f"{self.completed_steps} (dataset units)"
+                ),
+                ylabel="action in dataset units",
+            )
+            metrics[f"{traj_prefix}/plot_physical"] = wandb.Image(str(physical_plot))
+            physical_mse = ((pred_physical - gt_physical) ** 2).mean(axis=0)
+            for dim_idx, dim_mse in enumerate(physical_mse):
+                metrics[f"{traj_prefix}/physical_mse_dim_{dim_idx}"] = float(dim_mse)
+
+            np.savez_compressed(
+                eval_root / f"{stem}.npz",
+                source_frames=source_frames,
+                chunk_lengths=np.asarray(chunk_lengths, dtype=np.int64),
+                gt_normalized=gt_traj,
+                pred_normalized=pred_traj,
+                gt_physical=gt_physical,
+                pred_physical=pred_physical,
+            )
+
+        if not all_squared_errors:
+            return metrics
+
+        stacked_squared_error = np.concatenate(all_squared_errors, axis=0)
+        per_dim_mse = stacked_squared_error.mean(axis=0)
+        metrics["open_loop/mse_mean"] = float(per_dim_mse.mean())
+        for dim_idx, dim_mse in enumerate(per_dim_mse):
+            metrics[f"open_loop/mse_dim_{dim_idx}"] = float(dim_mse)
+
+        wandb.log(metrics, step=self.completed_steps)
+        return metrics
+
     def _should_skip_open_loop_eval(self) -> bool:
-        """Skip stitched open-loop eval when explicitly disabled or unsupported."""
-        if not bool(getattr(self.config.trainer, "open_loop_eval", True)):
-            return True
-        attn_impl = str(getattr(self.config.framework.qwenvl, "attn_implementation", "")).strip().lower()
-        return "flash_attention" in attn_impl
+        """Skip stitched open-loop eval only when explicitly disabled."""
+        return not bool(getattr(self.config.trainer, "open_loop_eval", True))
 
     def _select_open_loop_trajectories(self, mixture_dataset):
         """Pick one deterministic holdout trajectory from each subdataset."""
@@ -1040,7 +1336,17 @@ class VLATrainer(TrainerUtils):
             selected.append((dataset_name, dataset, trajectory_id))
         return selected
 
-    def _plot_open_loop_trajectory(self, gt_traj: np.ndarray, pred_traj: np.ndarray, save_path: Path, title: str) -> None:
+    def _plot_open_loop_trajectory(
+        self,
+        gt_traj: np.ndarray,
+        pred_traj: np.ndarray,
+        save_path: Path,
+        title: str,
+        *,
+        timesteps: np.ndarray | None = None,
+        chunk_lengths: list[int] | None = None,
+        ylabel: str = "action",
+    ) -> None:
         """Save a per-dimension line plot for one stitched open-loop trajectory."""
         import math
 
@@ -1052,12 +1358,38 @@ class VLATrainer(TrainerUtils):
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
         axes = axes.flatten()
 
+        x = np.arange(gt_traj.shape[0]) if timesteps is None else np.asarray(timesteps)
+        if x.shape[0] != gt_traj.shape[0]:
+            raise ValueError(f"Plot timestep/action mismatch: {x.shape} vs {gt_traj.shape}")
+        lengths = chunk_lengths or [int(gt_traj.shape[0])]
+        if sum(lengths) != gt_traj.shape[0]:
+            raise ValueError(
+                f"Plot chunk lengths sum to {sum(lengths)}, expected {gt_traj.shape[0]}"
+            )
+
         for dim_idx in range(action_dim):
             ax = axes[dim_idx]
-            ax.plot(gt_traj[:, dim_idx], label="gt", linewidth=2)
-            ax.plot(pred_traj[:, dim_idx], label="pred", linewidth=1.5)
+            start = 0
+            for chunk_idx, length in enumerate(lengths):
+                stop = start + length
+                ax.plot(
+                    x[start:stop],
+                    gt_traj[start:stop, dim_idx],
+                    label="gt" if chunk_idx == 0 else None,
+                    linewidth=2,
+                    color="C0",
+                )
+                ax.plot(
+                    x[start:stop],
+                    pred_traj[start:stop, dim_idx],
+                    label="pred" if chunk_idx == 0 else None,
+                    linewidth=1.5,
+                    color="C1",
+                )
+                start = stop
             ax.set_title(f"action_dim_{dim_idx}")
-            ax.set_xlabel("timestep")
+            ax.set_xlabel("episode-local source frame" if timesteps is not None else "timestep")
+            ax.set_ylabel(ylabel)
             ax.grid(True, alpha=0.3)
 
         for ax in axes[action_dim:]:
@@ -1162,9 +1494,43 @@ class VLATrainer(TrainerUtils):
             return lm.layers[int(lm.n_encoder_layers):]
         return None
 
+    def _scheduled_loss_scale(self, name, default=1.0):
+        """Resolve a scalar or delayed linear-ramp scale at the optimizer step.
+
+        Mapping values accept ``start``, ``end``, and either the explicit
+        ``start_step``/``end_step`` pair or the legacy ``ramp_steps`` duration.
+        Scalar values retain their historical behavior.
+        """
+        loss_scale = getattr(self.config.trainer, "loss_scale", None)
+        value = getattr(loss_scale, name, default)
+        if not hasattr(value, "get"):
+            return float(value)
+        start = float(value.get("start", default))
+        end = float(value.get("end", start))
+        start_step = int(value.get("start_step", 0))
+        ramp_steps = int(value.get("ramp_steps", 0))
+        end_step = int(value.get("end_step", start_step + ramp_steps))
+        if start_step < 0:
+            raise ValueError(f"loss_scale.{name}.start_step must be nonnegative")
+        if ramp_steps < 0:
+            raise ValueError(f"loss_scale.{name}.ramp_steps must be nonnegative")
+        if end_step < start_step:
+            raise ValueError(
+                f"loss_scale.{name}.end_step must be >= start_step"
+            )
+        if self.completed_steps <= start_step:
+            return start
+        if end_step == start_step or self.completed_steps >= end_step:
+            return end
+        progress = (self.completed_steps - start_step) / (end_step - start_step)
+        return start + (end - start) * progress
+
     def _log_encoder_grad_split(
         self, action_loss, cot_loss, metrics, choice_loss=None, score_loss=None,
-        cot_scale=1.0, choice_scale=1.0, score_scale=1.0,
+        structured_aux_loss=None, cot_scale=1.0, choice_scale=1.0, score_scale=1.0,
+        structured_aux_scale=1.0, representation_anchor_loss=None,
+        tied_dynamics_loss=None, representation_anchor_scale=1.0,
+        tied_dynamics_scale=1.0,
     ):
         """Report how hard each loss pulls on the shared encoder.
 
@@ -1193,7 +1559,21 @@ class VLATrainer(TrainerUtils):
         # matrix from the final encoder block instead.  Ratios across objectives
         # remain directly comparable, and the diagnostic no longer perturbs the
         # memory envelope of the actual training step.
-        last_block = blocks[-1]
+        probe_block_index = len(blocks) - 1
+        action_model = getattr(unwrapped, "action_model", None)
+        if (
+            action_model is not None
+            and getattr(action_model, "layerwise_attention_layout", None) == "alternating"
+        ):
+            # Corrected PI gives encoder memory only to even-numbered DiT blocks.
+            # Its encoder-state list and encoder block list are depth-aligned, so
+            # probe the deepest actually consumed layer (26 for a 28-layer model),
+            # not layer 27 whose action gradient is correctly zero.
+            consumed = [index for index in range(min(len(blocks), len(action_model.model.transformer_blocks))) if index % 2 == 0]
+            if consumed:
+                probe_block_index = consumed[-1]
+        metrics["grad/enc_probe_layer"] = float(probe_block_index)
+        last_block = blocks[probe_block_index]
         named_probe = [
             (name, prm) for name, prm in last_block.named_parameters()
             if prm.requires_grad and name.endswith("self_attn.q_proj.weight")
@@ -1214,6 +1594,47 @@ class VLATrainer(TrainerUtils):
 
         try:
             metrics["grad/enc_from_flow"] = norm(action_loss)
+            shared_z = getattr(unwrapped, "_last_shared_z", None)
+            if shared_z is not None and shared_z.requires_grad:
+                def z_grad(loss):
+                    value = torch.autograd.grad(
+                        loss, shared_z, retain_graph=True, allow_unused=True
+                    )[0]
+                    return value.detach().float() if value is not None else None
+
+                z_action = z_grad(action_loss)
+                if z_action is not None:
+                    metrics["grad/z_from_flow"] = float(z_action.norm())
+                if structured_aux_loss is not None:
+                    z_aux = z_grad(structured_aux_loss)
+                    if z_aux is not None:
+                        metrics["grad/z_from_structured_aux"] = float(z_aux.norm())
+                        if z_action is not None and z_action.norm() > 0:
+                            metrics["grad/z_structured_aux_over_flow"] = float(
+                                z_aux.norm() / z_action.norm()
+                            )
+                            metrics["grad/z_weighted_structured_aux_over_flow"] = float(
+                                structured_aux_scale * z_aux.norm() / z_action.norm()
+                            )
+                            metrics["grad/z_structured_aux_flow_cosine"] = float(
+                                F.cosine_similarity(
+                                    z_aux.flatten(), z_action.flatten(), dim=0
+                                )
+                            )
+                if cot_loss is not None:
+                    z_cot = z_grad(cot_loss)
+                    if z_cot is not None and z_action is not None and z_action.norm() > 0:
+                        metrics["grad/z_reason_over_flow"] = float(
+                            z_cot.norm() / z_action.norm()
+                        )
+                        metrics["grad/z_weighted_reason_over_flow"] = float(
+                            cot_scale * z_cot.norm() / z_action.norm()
+                        )
+                        metrics["grad/z_reason_flow_cosine"] = float(
+                            F.cosine_similarity(
+                                z_cot.flatten(), z_action.flatten(), dim=0
+                            )
+                        )
             if cot_loss is not None:
                 metrics["grad/enc_from_reason"] = norm(cot_loss)
                 if metrics["grad/enc_from_flow"] > 0:
@@ -1221,6 +1642,39 @@ class VLATrainer(TrainerUtils):
                         metrics["grad/enc_from_reason"] / metrics["grad/enc_from_flow"])
                     metrics["grad/weighted_reason_over_flow"] = (
                         float(cot_scale) * metrics["grad/reason_over_flow"])
+            if structured_aux_loss is not None:
+                metrics["grad/enc_from_structured_aux"] = norm(structured_aux_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/structured_aux_over_flow"] = (
+                        metrics["grad/enc_from_structured_aux"]
+                        / metrics["grad/enc_from_flow"]
+                    )
+                    metrics["grad/weighted_structured_aux_over_flow"] = (
+                        float(structured_aux_scale)
+                        * metrics["grad/structured_aux_over_flow"]
+                    )
+            if representation_anchor_loss is not None:
+                metrics["grad/enc_from_representation_anchor"] = norm(representation_anchor_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/representation_anchor_over_flow"] = (
+                        metrics["grad/enc_from_representation_anchor"]
+                        / metrics["grad/enc_from_flow"]
+                    )
+                    metrics["grad/weighted_representation_anchor_over_flow"] = (
+                        float(representation_anchor_scale)
+                        * metrics["grad/representation_anchor_over_flow"]
+                    )
+            if tied_dynamics_loss is not None:
+                metrics["grad/enc_from_tied_dynamics"] = norm(tied_dynamics_loss)
+                if metrics["grad/enc_from_flow"] > 0:
+                    metrics["grad/tied_dynamics_over_flow"] = (
+                        metrics["grad/enc_from_tied_dynamics"]
+                        / metrics["grad/enc_from_flow"]
+                    )
+                    metrics["grad/weighted_tied_dynamics_over_flow"] = (
+                        float(tied_dynamics_scale)
+                        * metrics["grad/tied_dynamics_over_flow"]
+                    )
             if choice_loss is not None:
                 metrics["grad/enc_from_choice"] = norm(choice_loss)
                 if metrics["grad/enc_from_flow"] > 0:
@@ -1258,12 +1712,16 @@ class VLATrainer(TrainerUtils):
                 action_loss = output_dict["action_loss"]
                 cot_loss = output_dict.get("cot_loss", None)
                 structured_aux_loss = output_dict.get("structured_aux_loss", None)
+                representation_anchor_loss = output_dict.get("representation_anchor_loss", None)
+                tied_dynamics_loss = output_dict.get("tied_dynamics_loss", None)
                 choice_loss = output_dict.get("choice_loss", None)
                 score_loss = output_dict.get("score_loss", None)
 
                 loss_scale = getattr(self.config.trainer, "loss_scale", None)
-                cot_scale = getattr(loss_scale, "cot", 0.1)
-                structured_aux_scale = getattr(loss_scale, "structured_aux", 1.0)
+                cot_scale = self._scheduled_loss_scale("cot", 0.1)
+                structured_aux_scale = self._scheduled_loss_scale("structured_aux", 1.0)
+                representation_anchor_scale = self._scheduled_loss_scale("representation_anchor", 1.0)
+                tied_dynamics_scale = self._scheduled_loss_scale("tied_dynamics", 1.0)
                 choice_scale = getattr(loss_scale, "choice", 1.0)
                 score_scale = getattr(loss_scale, "score", 1.0)
                 total_loss = action_loss
@@ -1271,6 +1729,10 @@ class VLATrainer(TrainerUtils):
                     total_loss = total_loss + cot_scale * cot_loss
                 if structured_aux_loss is not None:
                     total_loss = total_loss + structured_aux_scale * structured_aux_loss
+                if representation_anchor_loss is not None:
+                    total_loss = total_loss + representation_anchor_scale * representation_anchor_loss
+                if tied_dynamics_loss is not None:
+                    total_loss = total_loss + tied_dynamics_scale * tied_dynamics_loss
                 if choice_loss is not None:
                     total_loss = total_loss + choice_scale * choice_loss
                 if score_loss is not None:
@@ -1283,7 +1745,7 @@ class VLATrainer(TrainerUtils):
             if (
                 self._ds_sync_gradients
                 and self.config.trainer.logging_frequency
-                and self.completed_steps % self.config.trainer.logging_frequency == 0
+                and (self.completed_steps + 1) % self.config.trainer.logging_frequency == 0
             ):
                 self._log_encoder_grad_split(
                     action_loss,
@@ -1291,9 +1753,15 @@ class VLATrainer(TrainerUtils):
                     grad_split,
                     choice_loss=choice_loss,
                     score_loss=score_loss,
+                    structured_aux_loss=structured_aux_loss,
                     cot_scale=cot_scale,
                     choice_scale=choice_scale,
                     score_scale=score_scale,
+                    structured_aux_scale=structured_aux_scale,
+                    representation_anchor_loss=representation_anchor_loss,
+                    tied_dynamics_loss=tied_dynamics_loss,
+                    representation_anchor_scale=representation_anchor_scale,
+                    tied_dynamics_scale=tied_dynamics_scale,
                 )
 
             self.accelerator.backward(total_loss / grad_accum)
@@ -1311,12 +1779,39 @@ class VLATrainer(TrainerUtils):
                 metrics["train/cot_loss"] = cot_loss.item()
                 metrics["train_cot_loss"] = cot_loss.item()
                 metrics["cot_loss"] = cot_loss.item()
+                metrics["train/cot_scale"] = float(cot_scale)
+                metrics["train/cot_weighted_loss"] = float(cot_scale) * cot_loss.item()
+                if "encoder_mlm_loss" in output_dict:
+                    metrics["train/encoder_mlm_loss"] = float(
+                        output_dict["encoder_mlm_loss"]
+                    )
             if structured_aux_loss is not None:
                 metrics["train/structured_aux_loss"] = structured_aux_loss.item()
                 metrics["structured_aux_loss"] = structured_aux_loss.item()
+                aux_contribution = structured_aux_scale * structured_aux_loss.item()
+                base_contribution = action_loss.item()
+                if cot_loss is not None:
+                    base_contribution += float(cot_scale) * cot_loss.item()
+                metrics["train/structured_aux_scale"] = float(structured_aux_scale)
+                metrics["train/structured_aux_weighted_loss"] = aux_contribution
+                metrics["train/structured_aux_fraction"] = (
+                    aux_contribution / max(base_contribution + aux_contribution, 1e-12)
+                )
                 for key, value in output_dict.items():
-                    if key.startswith("structured_aux/"):
+                    if key.startswith(("structured_aux/", "shared_z/")):
                         metrics[f"train/{key}"] = float(value)
+                if "shared_z_memory_keep_rate" in output_dict:
+                    metrics["train/shared_z_memory_keep_rate"] = float(
+                        output_dict["shared_z_memory_keep_rate"]
+                    )
+            for name, loss, scale in (
+                ("representation_anchor", representation_anchor_loss, representation_anchor_scale),
+                ("tied_dynamics", tied_dynamics_loss, tied_dynamics_scale),
+            ):
+                if loss is not None:
+                    metrics[f"train/{name}_loss"] = loss.item()
+                    metrics[f"train/{name}_scale"] = float(scale)
+                    metrics[f"train/{name}_weighted_loss"] = float(scale) * loss.item()
             if choice_loss is not None:
                 metrics["train/choice_loss"] = choice_loss.item()
                 metrics["choice_loss"] = choice_loss.item()
@@ -1339,6 +1834,10 @@ class VLATrainer(TrainerUtils):
             if cot_keep_rate is not None:
                 metrics["train/cot_keep_rate"] = float(cot_keep_rate)
                 metrics["cot_keep_rate"] = float(cot_keep_rate)
+            state_keep_rate = output_dict.get("state_keep_rate", None)
+            if state_keep_rate is not None:
+                metrics["train/state_keep_rate"] = float(state_keep_rate)
+                metrics["state_keep_rate"] = float(state_keep_rate)
             return metrics
 
         with self.accelerator.accumulate(self.model):
@@ -1349,13 +1848,15 @@ class VLATrainer(TrainerUtils):
                 action_loss = output_dict["action_loss"]
                 cot_loss = output_dict.get("cot_loss", None)
                 structured_aux_loss = output_dict.get("structured_aux_loss", None)
+                representation_anchor_loss = output_dict.get("representation_anchor_loss", None)
+                tied_dynamics_loss = output_dict.get("tied_dynamics_loss", None)
                 choice_loss = output_dict.get("choice_loss", None)
                 score_loss = output_dict.get("score_loss", None)
 
-                cot_scale = getattr(getattr(self.config.trainer, "loss_scale", None), "cot", 0.1)
-                structured_aux_scale = getattr(
-                    getattr(self.config.trainer, "loss_scale", None), "structured_aux", 1.0
-                )
+                cot_scale = self._scheduled_loss_scale("cot", 0.1)
+                structured_aux_scale = self._scheduled_loss_scale("structured_aux", 1.0)
+                representation_anchor_scale = self._scheduled_loss_scale("representation_anchor", 1.0)
+                tied_dynamics_scale = self._scheduled_loss_scale("tied_dynamics", 1.0)
                 choice_scale = getattr(
                     getattr(self.config.trainer, "loss_scale", None), "choice", 1.0
                 )
@@ -1367,6 +1868,10 @@ class VLATrainer(TrainerUtils):
                     total_loss = total_loss + cot_scale * cot_loss
                 if structured_aux_loss is not None:
                     total_loss = total_loss + structured_aux_scale * structured_aux_loss
+                if representation_anchor_loss is not None:
+                    total_loss = total_loss + representation_anchor_scale * representation_anchor_loss
+                if tied_dynamics_loss is not None:
+                    total_loss = total_loss + tied_dynamics_scale * tied_dynamics_loss
                 if choice_loss is not None:
                     total_loss = total_loss + choice_scale * choice_loss
                 if score_loss is not None:
@@ -1375,12 +1880,17 @@ class VLATrainer(TrainerUtils):
             # Must run BEFORE backward(): it needs the graph both losses still hold.
             grad_split = {}
             if (self.config.trainer.logging_frequency
-                    and self.completed_steps % self.config.trainer.logging_frequency == 0):
+                    and (self.completed_steps + 1) % self.config.trainer.logging_frequency == 0):
                 self._log_encoder_grad_split(
                     action_loss, cot_loss, grad_split,
                     choice_loss=choice_loss, score_loss=score_loss,
+                    structured_aux_loss=structured_aux_loss,
                     cot_scale=cot_scale, choice_scale=choice_scale,
-                    score_scale=score_scale,
+                    score_scale=score_scale, structured_aux_scale=structured_aux_scale,
+                    representation_anchor_loss=representation_anchor_loss,
+                    tied_dynamics_loss=tied_dynamics_loss,
+                    representation_anchor_scale=representation_anchor_scale,
+                    tied_dynamics_scale=tied_dynamics_scale,
                 )
 
             self.accelerator.backward(total_loss)
@@ -1403,12 +1913,39 @@ class VLATrainer(TrainerUtils):
             metrics["train/cot_loss"] = cot_loss.item()
             metrics["train_cot_loss"] = cot_loss.item()
             metrics["cot_loss"] = cot_loss.item()
+            metrics["train/cot_scale"] = float(cot_scale)
+            metrics["train/cot_weighted_loss"] = float(cot_scale) * cot_loss.item()
+            if "encoder_mlm_loss" in output_dict:
+                metrics["train/encoder_mlm_loss"] = float(
+                    output_dict["encoder_mlm_loss"]
+                )
         if structured_aux_loss is not None:
             metrics["train/structured_aux_loss"] = structured_aux_loss.item()
             metrics["structured_aux_loss"] = structured_aux_loss.item()
+            aux_contribution = structured_aux_scale * structured_aux_loss.item()
+            base_contribution = action_loss.item()
+            if cot_loss is not None:
+                base_contribution += float(cot_scale) * cot_loss.item()
+            metrics["train/structured_aux_scale"] = float(structured_aux_scale)
+            metrics["train/structured_aux_weighted_loss"] = aux_contribution
+            metrics["train/structured_aux_fraction"] = (
+                aux_contribution / max(base_contribution + aux_contribution, 1e-12)
+            )
             for key, value in output_dict.items():
-                if key.startswith("structured_aux/"):
+                if key.startswith(("structured_aux/", "shared_z/")):
                     metrics[f"train/{key}"] = float(value)
+            if "shared_z_memory_keep_rate" in output_dict:
+                metrics["train/shared_z_memory_keep_rate"] = float(
+                    output_dict["shared_z_memory_keep_rate"]
+                )
+        for name, loss, scale in (
+            ("representation_anchor", representation_anchor_loss, representation_anchor_scale),
+            ("tied_dynamics", tied_dynamics_loss, tied_dynamics_scale),
+        ):
+            if loss is not None:
+                metrics[f"train/{name}_loss"] = loss.item()
+                metrics[f"train/{name}_scale"] = float(scale)
+                metrics[f"train/{name}_weighted_loss"] = float(scale) * loss.item()
         if choice_loss is not None:
             metrics["train/choice_loss"] = choice_loss.item()
             metrics["choice_loss"] = choice_loss.item()
@@ -1431,6 +1968,10 @@ class VLATrainer(TrainerUtils):
         if cot_keep_rate is not None:
             metrics["train/cot_keep_rate"] = float(cot_keep_rate)
             metrics["cot_keep_rate"] = float(cot_keep_rate)
+        state_keep_rate = output_dict.get("state_keep_rate", None)
+        if state_keep_rate is not None:
+            metrics["train/state_keep_rate"] = float(state_keep_rate)
+            metrics["state_keep_rate"] = float(state_keep_rate)
         return metrics
 
     def _finalize_training(self):

@@ -43,6 +43,23 @@ GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 NUM_MACHINES="$SLURM_NNODES"
 NUM_PROCESSES="$((NUM_MACHINES * GPUS_PER_NODE))"
 
+# JUPITER switched its Slurm backend from slurmd to psid/psslurm in August
+# 2026. Load the site module in the batch shell (before creating a job step),
+# and do not involve an MPI plugin: srun only starts one Accelerate launcher per
+# node; Accelerate/NCCL create and coordinate the actual GPU workers.
+ml load CUDA
+export SLURM_MPI_TYPE=none
+
+# With the new GPU/task mapping, a one-task job step otherwise sees one GPU by
+# default. Every allocated Booster node belongs wholly to this job, so expose
+# all requested devices to the per-node Accelerate launcher explicitly.
+if (( GPUS_PER_NODE < 1 || GPUS_PER_NODE > 4 )); then
+    echo "PREFLIGHT FAIL: GPUS_PER_NODE must be in [1, 4], got $GPUS_PER_NODE"
+    exit 1
+fi
+gpu_ids="$(seq -s, 0 "$((GPUS_PER_NODE - 1))")"
+export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-$gpu_ids}"
+
 MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)}"
 if [[ "${SYSTEMNAME:-}" =~ ^(juwelsbooster|juwels|jurecadc|jusuf)$ ]]; then
     MASTER_ADDR="${MASTER_ADDR}i"
@@ -77,17 +94,18 @@ echo "Master port:   $MASTER_PORT"
 echo "Repository:    $STARVLA_REPO"
 echo "Config:        $CONFIG_YAML"
 echo "Accelerate:    $ACCELERATE_CONFIG_FILE"
+echo "Slurm MPI:     $SLURM_MPI_TYPE"
+echo "Visible GPUs:  $CUDA_VISIBLE_DEVICES"
 echo "Extra args:    ${EXTRA_ARGS[*]:-<none>}"
 
 srun --nodes="$NUM_MACHINES" --ntasks="$NUM_MACHINES" --ntasks-per-node=1 \
-    --cpus-per-task="$SLURM_CPUS_PER_TASK" --gpus-per-task="$GPUS_PER_NODE" \
+    --cpus-per-task="$SLURM_CPUS_PER_TASK" --mpi=none --cpu-bind=none \
     --kill-on-bad-exit=1 bash -c '
         set -eo pipefail
         config_yaml="$1"
         shift
 
         cd "$STARVLA_REPO"
-        ml load CUDA
         source /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/etc/profile.d/conda.sh
         conda activate starVLA
         set -u

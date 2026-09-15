@@ -38,6 +38,13 @@ NUM_MACHINES="$SLURM_NNODES"
 NUM_PROCESSES="$((SLURM_NNODES * 4))"
 ACCELERATE_CONFIG_FILE="${STARVLA_ACCELERATE_CONFIG:-starVLA/config/deepseeds/deepspeed_zero2_memory.yaml}"
 
+# JUPITER's post-August-2026 psid/psslurm backend requires site modules to be
+# loaded before srun. srun only starts one shell per node here; Accelerate and
+# NCCL handle the distributed workers, so no Slurm MPI plugin is needed.
+ml load CUDA
+export SLURM_MPI_TYPE=none
+export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+
 export MASTER_ADDR MASTER_PORT NUM_MACHINES NUM_PROCESSES ACCELERATE_CONFIG_FILE
 
 echo "Job ID:        $SLURM_JOB_ID"
@@ -45,10 +52,12 @@ echo "Nodes:         $(scontrol show hostnames "$SLURM_JOB_NODELIST" | tr '\n' '
 echo "GPUs:          $NUM_PROCESSES (4 per node)"
 echo "Config:        $CONFIG_YAML"
 echo "Accelerate:    $ACCELERATE_CONFIG_FILE"
+echo "Slurm MPI:     $SLURM_MPI_TYPE"
+echo "Visible GPUs:  $CUDA_VISIBLE_DEVICES"
 echo "Extra args:    ${EXTRA_ARGS[*]:-<none>}"
 
 srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
-    --cpus-per-task="$SLURM_CPUS_PER_TASK" --gpus-per-task=4 \
+    --cpus-per-task="$SLURM_CPUS_PER_TASK" --mpi=none --cpu-bind=none \
     --kill-on-bad-exit=1 bash -c '
         # The Conda CUDA activation hook probes optional variables before defining them,
         # so match the proven single-node launcher and enable nounset only afterwards.
@@ -57,7 +66,6 @@ srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
         shift
 
         cd /e/project1/m3/blank4/code/starVLA
-        ml load CUDA
         source /e/home/jusers/blank4/jupiter/blank4/envs/miniforge3/etc/profile.d/conda.sh
         conda activate starVLA
         set -u

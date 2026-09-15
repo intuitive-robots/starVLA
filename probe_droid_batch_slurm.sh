@@ -17,6 +17,7 @@ set -euo pipefail
 
 BATCH_SIZE="${BATCH_SIZE:?submit with --export=ALL,BATCH_SIZE=<n>}"
 PROBE_RUN_ID="${PROBE_RUN_ID:-droid_bsz_probe_${BATCH_SIZE}_${SLURM_JOB_ID}}"
+CONFIG_YAML="${CONFIG_YAML:-examples/DROID/train_files/train_droid_delta_eef.yaml}"
 STARVLA_REPO="${STARVLA_REPO:-${SLURM_SUBMIT_DIR:-$(pwd)}}"
 MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
 if [[ "${SYSTEMNAME:-}" =~ ^(juwelsbooster|juwels|jurecadc|jusuf)$ ]]; then
@@ -58,7 +59,7 @@ srun --nodes=1 --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --gpus-per-task
         export LEROBOT_PREFETCH_MP4=0
         export LEROBOT_SKIP_FILE_CHECK=1
 
-        echo "PROBE_START batch_size=$2 host=$(hostname) visible_gpus=$(nvidia-smi -L | wc -l)"
+        echo "PROBE_START batch_size=$2 config=$6 host=$(hostname) visible_gpus=$(nvidia-smi -L | wc -l)"
 
         accelerate launch \
             --config_file starVLA/config/deepseeds/deepspeed_zero2_memory.yaml \
@@ -68,7 +69,7 @@ srun --nodes=1 --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --gpus-per-task
             --main_process_ip "$3" \
             --main_process_port "$4" \
             starVLA/training/train_starvla.py \
-            --config_yaml examples/DROID/train_files/train_droid_delta_eef.yaml \
+            --config_yaml "$6" \
             --use_deepspeed true \
             --run_id "$5" \
             --run_root_dir /e/scratch/m3/blank4/starvla_batch_probes \
@@ -79,7 +80,8 @@ srun --nodes=1 --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --gpus-per-task
             --trainer.save_interval 1000000 \
             --trainer.logging_frequency 1 \
             --trainer.save_final_checkpoint false \
-            --trainer.open_loop_eval false
+            --trainer.open_loop_eval false \
+            --datasets.vla_data.persistent_workers false
 
         echo "PROBE_PASS batch_size=$2"
-    ' _ "$STARVLA_REPO" "$BATCH_SIZE" "$MASTER_ADDR" "$MASTER_PORT" "$PROBE_RUN_ID"
+    ' _ "$STARVLA_REPO" "$BATCH_SIZE" "$MASTER_ADDR" "$MASTER_PORT" "$PROBE_RUN_ID" "$CONFIG_YAML"

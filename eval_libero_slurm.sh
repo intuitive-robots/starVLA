@@ -50,8 +50,11 @@
 #                            Leave at 1 now that batching exists -- see above.
 #   --max_batch_size <n>     batch concurrent requests into one predict_action() call,
 #                            default: 32 (or $max_batch_size env var). 1 = old unbatched behavior.
-#   --max_wait_time <s>      ceiling on how long the dispatcher waits to fill a batch before
-#                            running it under-full, default: 1.0 (or $max_wait_time env var).
+#   --max_wait_time <s>      how long the dispatcher may BLOCK waiting for a batch to reach
+#                            --max_batch_size, default: 0 (or $max_wait_time env var). Only
+#                            workers_per_gpu/servers_per_gpu clients can ever have a request
+#                            in flight, so a positive value stalls on requests that cannot
+#                            arrive; batches fill on their own during the previous inference.
 #                            Exits early the moment the batch fills, so this rarely costs the
 #                            full amount -- watch the server log's "[BatchDispatcher] batch_size=
 #                            X/Y (Z% full)" line and raise it if fill rate is consistently low.
@@ -78,7 +81,7 @@ NUM_TRIALS="${num_trials:-20}"
 WORKERS_PER_GPU="${workers_per_gpu:-4}"
 SERVERS_PER_GPU="${servers_per_gpu:-1}"
 MAX_BATCH_SIZE="${max_batch_size:-32}"
-MAX_WAIT_TIME="${max_wait_time:-1.0}"
+MAX_WAIT_TIME="${max_wait_time:-0.0}"
 COT_MAX_NEW_TOKENS="${cot_max_new_tokens:-0}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"

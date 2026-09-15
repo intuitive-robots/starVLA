@@ -40,7 +40,7 @@
 #   --tasks_per_unit <n>     tasks per work unit        (default: 1 = finest;
 #                            0 = one unit per whole suite x level)
 #   --max_batch_size <n>     server request batching    (default: 32; 1 = off)
-#   --max_wait_time <s>      batch fill timeout         (default: 1.0)
+#   --max_wait_time <s>      batch fill block, 0 = never blocks (default: 0)
 #   --save_video_mode <m>    all|first_success_failure|none
 #   --overlay_trace          draw the generated 2D trace on saved videos
 #   --gpu_ids <csv>          explicit GPU ids per node
@@ -67,7 +67,7 @@ TASKS_PER_UNIT="${tasks_per_unit:-1}"
 WORKERS_PER_GPU="${workers_per_gpu:-2}"
 SERVERS_PER_GPU="${servers_per_gpu:-1}"
 MAX_BATCH_SIZE="${max_batch_size:-32}"
-MAX_WAIT_TIME="${max_wait_time:-1.0}"
+MAX_WAIT_TIME="${max_wait_time:-0.0}"
 SAVE_VIDEO_MODE="${save_video_mode:-first_success_failure}"
 OVERLAY_TRACE="${overlay_trace:-false}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"

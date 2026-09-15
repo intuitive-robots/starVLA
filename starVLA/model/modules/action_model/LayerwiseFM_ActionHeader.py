@@ -4,6 +4,9 @@
 
 
 from dataclasses import dataclass, field
+import math
+import os
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -248,6 +251,14 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         # head never reads `future_action_window_size`.
         self.action_horizon = int(action_config.action_horizon)
         self.num_inference_timesteps = action_config.num_inference_timesteps
+        self.layerwise_attention_layout = str(
+            action_config.get("layerwise_attention_layout", "legacy_all_cross")
+        ).lower()
+        if self.layerwise_attention_layout not in {"legacy_all_cross", "alternating"}:
+            raise ValueError(
+                "layerwise_attention_layout must be 'legacy_all_cross' or 'alternating', "
+                f"got {self.layerwise_attention_layout!r}"
+            )
 
         self.state_encoder = (
             MLP(
@@ -267,8 +278,18 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             hidden_dim=1024,
             output_dim=self.action_dim,
         )
-        self.future_tokens = nn.Embedding(action_config.num_target_vision_tokens, self.input_embedding_dim)
-        nn.init.normal_(self.future_tokens.weight, mean=0.0, std=0.02)
+        num_future_tokens = int(action_config.num_target_vision_tokens)
+        if num_future_tokens < 0:
+            raise ValueError("num_target_vision_tokens must be non-negative")
+        # Avoid a zero-sized parameter: it is unnecessary and can upset
+        # parameter partitioning/checkpointing in distributed training.
+        self.future_tokens = (
+            nn.Embedding(num_future_tokens, self.input_embedding_dim)
+            if num_future_tokens > 0
+            else None
+        )
+        if self.future_tokens is not None:
+            nn.init.normal_(self.future_tokens.weight, mean=0.0, std=0.02)
 
         if action_config.add_pos_embed:
             self.position_embedding = nn.Embedding(action_config.max_seq_len, self.input_embedding_dim)
@@ -278,6 +299,72 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         self.num_timestep_buckets = action_config.num_timestep_buckets
         self.config = action_config
 
+        # Optional inference-only successful-pair residual readout.  It is
+        # loaded lazily after checkpoint restoration, leaving existing
+        # checkpoint/state-dict behavior unchanged when the environment
+        # variable is unset.
+        self._flow_residual_readout_path = None
+        self._flow_residual_readout = None
+        self._flow_residual_mean = None
+        self._flow_residual_scale = None
+        self._flow_residual_strength = None
+        self._flow_residual_norm_cap_ratio = None
+
+    def _maybe_load_flow_residual_readout(self, device: torch.device) -> None:
+        requested = os.environ.get("STARVLA_FLOW_RESIDUAL_READOUT", "").strip()
+        if not requested:
+            return
+        resolved = str(Path(requested).expanduser().resolve())
+        if self._flow_residual_readout_path == resolved:
+            return
+        if self._flow_residual_readout_path is not None:
+            raise RuntimeError(
+                "Changing STARVLA_FLOW_RESIDUAL_READOUT after inference started is unsupported"
+            )
+        payload = torch.load(resolved, map_location="cpu", weights_only=False)
+        if payload.get("format") != "starvla_successful_pair_linear_readout_v1":
+            raise ValueError(f"unsupported flow residual readout: {payload.get('format')!r}")
+        if payload.get("locus") != "pi_late" or payload.get("arm") != "paired_balanced":
+            raise ValueError(
+                "closed-loop flow correction requires the paired_balanced pi_late readout"
+            )
+        mean = torch.as_tensor(payload["feature_mean"], dtype=torch.float32).reshape(1, 1, -1)
+        scale = torch.as_tensor(payload["feature_scale"], dtype=torch.float32).reshape(1, 1, -1)
+        weight = torch.as_tensor(payload["state_dict"]["weight"], dtype=torch.float32)
+        bias = torch.as_tensor(payload["state_dict"]["bias"], dtype=torch.float32)
+        if weight.shape != (self.action_dim, mean.shape[-1]) or bias.shape != (self.action_dim,):
+            raise ValueError(
+                f"flow residual readout shape mismatch: weight={tuple(weight.shape)}, "
+                f"bias={tuple(bias.shape)}, expected=({self.action_dim}, {mean.shape[-1]})"
+            )
+        adapter = nn.Linear(mean.shape[-1], self.action_dim)
+        adapter.load_state_dict({"weight": weight, "bias": bias})
+        adapter.requires_grad_(False).eval().to(device=device, dtype=torch.float32)
+        strength = float(os.environ.get("STARVLA_FLOW_RESIDUAL_STRENGTH", "1.0"))
+        if not math.isfinite(strength) or strength < 0.0:
+            raise ValueError(f"invalid STARVLA_FLOW_RESIDUAL_STRENGTH={strength!r}")
+        cap_value = os.environ.get("STARVLA_FLOW_RESIDUAL_NORM_CAP_RATIO", "").strip()
+        norm_cap_ratio = None if not cap_value else float(cap_value)
+        if norm_cap_ratio is not None and (
+            not math.isfinite(norm_cap_ratio) or norm_cap_ratio <= 0.0
+        ):
+            raise ValueError(
+                "STARVLA_FLOW_RESIDUAL_NORM_CAP_RATIO must be finite and positive, "
+                f"got {norm_cap_ratio!r}"
+            )
+        self._flow_residual_readout = adapter
+        self._flow_residual_mean = mean.to(device=device)
+        self._flow_residual_scale = scale.to(device=device)
+        self._flow_residual_readout_path = resolved
+        self._flow_residual_strength = strength
+        self._flow_residual_norm_cap_ratio = norm_cap_ratio
+        print(
+            "Loaded paired PI pi_late flow residual readout "
+            f"from {resolved} (base={payload.get('checkpoint')}, strength={strength}, "
+            f"norm_cap_ratio={norm_cap_ratio})",
+            flush=True,
+        )
+
     def sample_time(self, batch_size, device, dtype):
         sample = self.beta_dist.sample([batch_size]).to(device, dtype=dtype)
         return self.config.noise_s * (1 - sample)
@@ -285,20 +372,32 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
     def prepare_input(self, batch: dict) -> BatchFeature:
         return BatchFeature(data=batch)
 
+    def _assemble_action_tokens(self, action_features, state_features=None):
+        token_groups = []
+        if state_features is not None:
+            token_groups.append(state_features)
+        if self.future_tokens is not None:
+            token_groups.append(
+                self.future_tokens.weight.unsqueeze(0).expand(action_features.shape[0], -1, -1)
+            )
+        token_groups.append(action_features)
+        return action_features if len(token_groups) == 1 else torch.cat(token_groups, dim=1)
+
     def forward(
         self,
         vl_embs_list: list,
         actions: torch.Tensor,
         state: torch.Tensor = None,
         encoder_attention_mask: torch.Tensor = None,
+        return_clean_actions: bool = False,
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ):
         """
         vl_embs: list of torch.Tensor, each shape (B, seq_length, feature_dim)
         actions: shape (B, action_horizon, D_action)
         """
         device = actions.device
-        num_layers = len(vl_embs_list)
-        B, L, D = vl_embs_list[0].shape
         # Embed noised action trajectory.
         noise = torch.randn(actions.shape, device=actions.device, dtype=actions.dtype)
         t = self.sample_time(actions.shape[0], device=actions.device, dtype=actions.dtype)
@@ -320,34 +419,38 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             pos_embs = self.position_embedding(pos_ids).unsqueeze(0)
             action_features = action_features + pos_embs
 
-        # state and action embedding along sequence dimension.
-        future_tokens = self.future_tokens.weight.unsqueeze(0).expand(B, -1, -1)
-        sa_embs = (
-            torch.cat((state_features, future_tokens, action_features), dim=1)
-            if state_features is not None
-            else torch.cat((future_tokens, action_features), dim=1)
+        sa_embs = self._assemble_action_tokens(action_features, state_features)
+
+        # Route through DiT.forward so the configured cross/self-attention
+        # interleaving is honored. The former hand-written loop passed VLM
+        # states to every block, silently turning intended self-attention
+        # blocks into cross-attention blocks.
+        model_output = self.model(
+            hidden_states=sa_embs,
+            encoder_hidden_states=vl_embs_list,
+            timestep=t_discretized,
+            encoder_attention_mask=encoder_attention_mask,
+            return_pre_output=True,
+            force_layerwise_all_cross=self.layerwise_attention_layout == "legacy_all_cross",
+            extra_conditioning=z_conditioning,
+            cross_attention_row_mask=encoder_memory_keep,
         )
 
-        # Encode timesteps
-        temb = self.model.timestep_encoder(t_discretized)
-
-        # Layerwise cross-attention with vl_embs
-        model_output = sa_embs
-        for layer_idx, layer in enumerate(self.model.transformer_blocks):
-            model_output = layer(
-                hidden_states=model_output,
-                encoder_hidden_states=vl_embs_list[layer_idx],  # Use layer-specific vl_embs
-                encoder_attention_mask=encoder_attention_mask,
-                temb=temb,
-            )
-
-        # TODO miss self att and _process_output, but work well
         pred = self.action_decoder(model_output)
         pred_actions = pred[:, -actions.shape[1] :]
 
         # Slice out only the action portion of pred and target.
         loss = ((pred_actions - velocity) ** 2).mean()
-        return loss
+        if not return_clean_actions:
+            return loss
+
+        # Linear conditional-flow path:
+        #   x_t = (1-t) * noise + t * action,  v = action - noise
+        # hence action = x_t + (1-t) * v.  Exposing this differentiable clean-action
+        # estimate lets framework-side objectives regularise multi-horizon motion without
+        # duplicating or reaching into the DiT implementation.
+        clean_actions = noisy_trajectory + (1 - t) * pred_actions
+        return loss, clean_actions
 
     @torch.no_grad()
     def predict_action(
@@ -355,6 +458,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
         vl_embs_list: list,
         state: torch.Tensor = None,
         encoder_attention_mask: torch.Tensor = None,
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ) -> torch.Tensor:
         # Set initial actions as the sampled noise.
         batch_size = vl_embs_list[0].shape[0]
@@ -364,6 +469,8 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
             dtype=vl_embs_list[0].dtype,
             device=device,
         )
+
+        self._maybe_load_flow_residual_readout(device)
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
@@ -387,28 +494,44 @@ class LayerwiseFlowmatchingActionHead(nn.Module):
                 pos_embs = self.position_embedding(pos_ids).unsqueeze(0)
                 action_features = action_features + pos_embs
 
-            future_tokens = self.future_tokens.weight.unsqueeze(0).expand(batch_size, -1, -1)
-            sa_embs = (
-                torch.cat((state_features, future_tokens, action_features), dim=1)
-                if state_features is not None
-                else torch.cat((future_tokens, action_features), dim=1)
+            sa_embs = self._assemble_action_tokens(action_features, state_features)
+
+            model_kwargs = dict(
+                hidden_states=sa_embs,
+                encoder_hidden_states=vl_embs_list,
+                timestep=timesteps_tensor,
+                encoder_attention_mask=encoder_attention_mask,
+                return_pre_output=True,
+                force_layerwise_all_cross=self.layerwise_attention_layout == "legacy_all_cross",
+                extra_conditioning=z_conditioning,
+                cross_attention_row_mask=encoder_memory_keep,
             )
-
-            # Encode timestep
-            temb = self.model.timestep_encoder(timesteps_tensor)
-
-            # Layerwise cross-attention with vl_embs_list
-            model_output = sa_embs
-            for layer_idx, layer in enumerate(self.model.transformer_blocks):
-                model_output = layer(
-                    hidden_states=model_output,
-                    encoder_hidden_states=vl_embs_list[layer_idx],
-                    encoder_attention_mask=encoder_attention_mask,
-                    temb=temb,
+            if self._flow_residual_readout is None:
+                model_output = self.model(**model_kwargs)
+                late_hidden = None
+            else:
+                model_output, hidden_states = self.model(
+                    **model_kwargs, return_all_hidden_states=True
                 )
-            # TODO miss self att and _process_output
+                late_hidden = hidden_states[-1][:, -self.action_horizon :]
             pred = self.action_decoder(model_output)
             pred_velocity = pred[:, -self.action_horizon :]
+
+            if late_hidden is not None:
+                standardized = (
+                    late_hidden.float() - self._flow_residual_mean
+                ) / self._flow_residual_scale
+                residual = self._flow_residual_readout(standardized)
+                if self._flow_residual_norm_cap_ratio is not None:
+                    base_norm = pred_velocity.float().norm(dim=-1, keepdim=True)
+                    residual_norm = residual.norm(dim=-1, keepdim=True)
+                    maximum = self._flow_residual_norm_cap_ratio * base_norm
+                    residual = residual * torch.clamp(
+                        maximum / residual_norm.clamp_min(1e-12), max=1.0
+                    )
+                pred_velocity = pred_velocity + self._flow_residual_strength * residual.to(
+                    pred_velocity.dtype
+                )
 
             # Euler integration
             actions = actions + dt * pred_velocity

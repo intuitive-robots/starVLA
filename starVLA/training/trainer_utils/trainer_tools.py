@@ -138,6 +138,13 @@ def build_param_lr_groups(model, cfg):
         except AttributeError:
             print(f"⚠️ module path `{module_name}` not found in vla")
             continue
+        # Optional experiment modules are deliberately registered as ``None`` when
+        # their loss is disabled.  Keeping their LR entries identical across matched
+        # configs is useful, so treat a disabled module like a missing path instead of
+        # trying to call ``None.parameters()``.
+        if module is None:
+            print(f"⚠️ module path `{module_name}` is disabled (None)")
+            continue
         params = [p for p in module.parameters()
                   if id(p) not in frozen_params and id(p) not in used_params]
         if params:  # only add param group if there are trainable parameters

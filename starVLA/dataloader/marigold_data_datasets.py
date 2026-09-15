@@ -114,6 +114,10 @@ def collate_fn(batch):
 
 _ROBOT_TYPE_TO_MARIGOLD = {
     "droid_lerobot_joint_pos": ("DROID", "franka_robotiq_gripper"),
+    "droid_lerobot_relative_joint": (
+        "DROIDRelativeJointAbsGripper",
+        "franka_robotiq_gripper",
+    ),
     "droid_lerobot_delta_eef": (
         "DROIDDeltaEEFAbsGripper",
         "franka_robotiq_gripper",
@@ -363,6 +367,32 @@ def _stats_from_lerobot_meta(
     action_representation: str = "joint_position_abs_gripper",
 ) -> tuple[dict, dict] | None:
     """Convert LeRobot meta/stats.json into Marigold's 24-dim trajectory layout."""
+    if action_representation == "relative_joint_abs_gripper":
+        required = (
+            "action.relative_joint_position",
+            "action.gripper_position",
+            "observation.state.joint_position",
+            "observation.state.gripper_position",
+        )
+        if not all(key in stats_payload for key in required):
+            return None
+
+        action_stats = _empty_trajectory_stats()
+        _fill_stats_slice(
+            action_stats, stats_payload["action.relative_joint_position"], slice(0, 7)
+        )
+        _fill_stats_slice(
+            action_stats, stats_payload["action.gripper_position"], slice(7, 8)
+        )
+        state_stats = _empty_trajectory_stats()
+        _fill_stats_slice(
+            state_stats, stats_payload["observation.state.joint_position"], slice(0, 7)
+        )
+        _fill_stats_slice(
+            state_stats, stats_payload["observation.state.gripper_position"], slice(7, 8)
+        )
+        return action_stats, state_stats
+
     if action_representation == "delta_eef_abs_gripper":
         required = (
             "action.cartesian_velocity",
@@ -389,7 +419,7 @@ def _stats_from_lerobot_meta(
         raise ValueError(
             "unknown marigold_action_representation "
             f"{action_representation!r}; expected 'joint_position_abs_gripper' "
-            "or 'delta_eef_abs_gripper'"
+            "'relative_joint_abs_gripper', or 'delta_eef_abs_gripper'"
         )
 
     required = (
@@ -481,6 +511,30 @@ class _Q99Normalizer:
             return x.astype(np.float32)
         return self._q99_with_binary_last(x, self.state_stats, indices)
 
+    def unnormalize_actions(self, x: np.ndarray, indices: list[int]) -> np.ndarray:
+        """Map StarVLA action targets/predictions back to dataset units.
+
+        Motion channels use the inverse of the q01/q99 transform applied by
+        :meth:`actions`.  The final absolute-gripper channel is already in its
+        physical ``[0, 1]`` convention and must not be remapped as if it lived
+        in ``[-1, 1]``.
+        """
+        out = np.asarray(x, dtype=np.float32).copy()
+        if not self.enabled or out.shape[-1] == 0:
+            return out
+
+        motion_indices = indices[:-1]
+        if motion_indices:
+            q01 = np.asarray(self.action_stats["q01"], dtype=np.float32)[motion_indices]
+            q99 = np.asarray(self.action_stats["q99"], dtype=np.float32)[motion_indices]
+            mask = q01 != q99
+            motion = out[..., :-1]
+            motion[..., mask] = 0.5 * (motion[..., mask] + 1.0) * (
+                q99[mask] - q01[mask]
+            ) + q01[mask]
+            out[..., :-1] = motion
+        return out
+
 
 class StarVLAMarigoldDataReader(IterableDataset):
     def __init__(
@@ -498,9 +552,19 @@ class StarVLAMarigoldDataReader(IterableDataset):
         self.data_cfg = data_cfg
         self.train = train
         self.include_state = data_cfg.get("include_state", False) not in (False, "False", "false", 0, "0")
+        self.action_representation = str(
+            data_cfg.get("marigold_action_representation", "joint_position_abs_gripper")
+        )
         self.estimated_len = self._estimate_len()
         self.action_dim = int(data_cfg.get("action_dim", 0)) or None
         self.state_dim = int(data_cfg.get("state_dim", 0)) or self.action_dim
+        self.invert_gripper = data_cfg.get("marigold_invert_gripper", False) not in (
+            False,
+            "False",
+            "false",
+            0,
+            "0",
+        )
         self.frame_index = int(data_cfg.get("marigold_image_frame_index", -1))
         self.camera_groups = data_cfg.get(
             "marigold_camera_groups",
@@ -585,10 +649,175 @@ class StarVLAMarigoldDataReader(IterableDataset):
         for group in self.camera_groups:
             candidates = [key for key in group if key in images]
             if candidates:
-                selected.append(random.choice(candidates))
+                # Evaluation must use the same view on every checkpoint and
+                # must not advance the training process's Python RNG state.
+                selected.append(random.choice(candidates) if self.train else candidates[0])
         if not selected:
             selected = sorted(images.keys())
         return selected
+
+    def _get_open_loop_states(self):
+        """Build deterministic finite-episode views over the Marigold config."""
+        if self.train:
+            raise RuntimeError("Open-loop episodes require a Marigold reader created with mode='eval'")
+        cached = getattr(self, "_open_loop_states", None)
+        if cached is not None:
+            return cached
+
+        from marigold_data.dataset import SubdatasetState
+        from marigold_data.utils.sharding_plan import flatten_subdatasets
+
+        mode = str(
+            self.data_cfg.get(
+                "instruction_mode",
+                self.data_cfg.get("marigold_instruction_mode", "local"),
+            )
+        )
+        video_backend = self.data_cfg.get(
+            "marigold_video_backend",
+            self.data_cfg.get("video_backend", None),
+        )
+        cached = []
+        for entry in flatten_subdatasets(self.processed_data_config):
+            state = SubdatasetState(
+                entry["cfg"],
+                train=False,
+                mode=mode,
+                video_backend=video_backend,
+                subdataset_lang_aug=None,
+            )
+            cached.append((entry["name"], state))
+        self._open_loop_states = cached
+        return cached
+
+    def build_open_loop_episodes(
+        self,
+        *,
+        action_horizon: int,
+        num_episodes_per_subdataset: int = 1,
+        max_anchors: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Select fixed, non-empty episodes and non-overlapping action chunks.
+
+        The returned descriptors retain the sampler state needed to materialize
+        exactly the same transformed examples used by training.  Selection is
+        deterministic (final eligible episodes), but it is not a held-out split
+        when the training config enables ``load_all_data_for_training``.
+        """
+        if num_episodes_per_subdataset < 1:
+            raise ValueError("num_episodes_per_subdataset must be >= 1")
+        if max_anchors is not None and max_anchors < 1:
+            raise ValueError("max_anchors must be >= 1 when provided")
+
+        episodes: list[dict[str, Any]] = []
+        for dataset_name, state in self._get_open_loop_states():
+            sampler = state.sampler
+            if int(sampler.num_actions) != int(action_horizon):
+                raise ValueError(
+                    f"Marigold/model action-horizon mismatch for {dataset_name}: "
+                    f"sampler={sampler.num_actions}, model={action_horizon}"
+                )
+            target_stride = int(sampler.action_frame_stride) * int(action_horizon)
+            source_position = sampler._target_frame_offset_to_source_position(target_stride)
+            anchor_stride = max(1, int(sampler._round_source_position(source_position)))
+
+            found = 0
+            candidates = sampler.filter_episode_indices(list(range(sampler.num_episodes)))
+            for episode_idx in reversed(candidates):
+                info = sampler.get_episode_info(episode_idx)
+                inventory = sampler._build_instruction_inventory(info)
+                anchors = sampler.plan_episode_samples(
+                    episode_idx=episode_idx,
+                    train=False,
+                    frame_stride=anchor_stride,
+                    mode=state.mode,
+                    inventory=inventory,
+                )
+                if not anchors:
+                    continue
+                if max_anchors is not None:
+                    anchors = anchors[:max_anchors]
+                episodes.append(
+                    {
+                        "dataset_name": str(dataset_name),
+                        "state": state,
+                        "episode_idx": int(episode_idx),
+                        "uuid": sampler.episode_uuid(info),
+                        "inventory": inventory,
+                        "anchors": list(anchors),
+                        "anchor_stride_source_frames": anchor_stride,
+                    }
+                )
+                found += 1
+                if found >= num_episodes_per_subdataset:
+                    break
+            if found != num_episodes_per_subdataset:
+                raise RuntimeError(
+                    f"Requested {num_episodes_per_subdataset} open-loop episodes from "
+                    f"{dataset_name}, found {found}"
+                )
+        return episodes
+
+    def materialize_open_loop_episode(
+        self,
+        episode: dict[str, Any],
+        *,
+        seed: int,
+    ) -> list[dict[str, Any]]:
+        """Decode and transform every selected anchor without perturbing RNG state."""
+        state = episode["state"]
+        sampler = state.sampler
+        action_source_offsets = np.asarray(
+            sampler._output_target_source_offsets()[-sampler.num_actions :],
+            dtype=np.int64,
+        )
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        random.seed(int(seed))
+        np.random.seed(int(seed) % (2**32))
+        samples: list[dict[str, Any]] = []
+        try:
+            for anchor in episode["anchors"]:
+                raw = sampler.sample_episode_at(
+                    episode_idx=episode["episode_idx"],
+                    sample_spec=anchor,
+                    image_aug=None,
+                    lang_aug_map=None,
+                    uuid=episode["uuid"],
+                    inventory=episode["inventory"],
+                )
+                raw["root"] = state.cfg["root"]
+                mask = torch.as_tensor(raw["action_valid_mask"], dtype=torch.bool).cpu().numpy()
+                action_indices = _active_indices(
+                    raw.get("trajectory_fields", []),
+                    raw.get("trajectory_mask"),
+                    self.action_dim,
+                )
+                converted = self._convert_sample(raw)
+                gt_normalized = np.asarray(converted["action"], dtype=np.float32)
+                if mask.shape[0] != gt_normalized.shape[0]:
+                    raise RuntimeError(
+                        f"Marigold action-mask mismatch at anchor {anchor}: "
+                        f"{mask.shape} vs {gt_normalized.shape}"
+                    )
+                local_anchor = int(raw.get("frame_index", int(anchor)))
+                samples.append(
+                    {
+                        "anchor": int(anchor),
+                        "example": converted,
+                        "gt_normalized": gt_normalized,
+                        "gt_physical": self.normalizer.unnormalize_actions(
+                            gt_normalized, action_indices
+                        ),
+                        "valid_mask": mask,
+                        "source_frames": local_anchor + action_source_offsets,
+                        "action_indices": action_indices,
+                    }
+                )
+        finally:
+            random.setstate(python_state)
+            np.random.set_state(numpy_state)
+        return samples
 
     def _convert_sample(self, sample: dict) -> dict:
         fields = sample.get("trajectory_fields", [])
@@ -596,9 +825,41 @@ class StarVLAMarigoldDataReader(IterableDataset):
         state_indices = action_indices[: self.state_dim] if self.state_dim is not None else action_indices
 
         actions = torch.as_tensor(sample["actions"]).detach().cpu().numpy()[..., action_indices]
-        proprio = None
-        if self.include_state:
-            proprio = torch.as_tensor(sample["proprio"]).detach().cpu().numpy()[..., state_indices]
+        needs_joint_reference = self.action_representation == "relative_joint_abs_gripper"
+        raw_proprio = None
+        if self.include_state or needs_joint_reference:
+            raw_proprio = (
+                torch.as_tensor(sample["proprio"])
+                .detach()
+                .cpu()
+                .numpy()[..., state_indices]
+            )
+        proprio = raw_proprio if self.include_state else None
+
+        if needs_joint_reference:
+            if actions.shape[-1] != 8 or raw_proprio is None or raw_proprio.shape[-1] != 8:
+                raise ValueError(
+                    "relative_joint_abs_gripper requires seven selected Franka joints plus "
+                    "one absolute gripper channel in both action and proprio"
+                )
+            if raw_proprio.shape[-2] < 1:
+                raise ValueError("relative_joint_abs_gripper requires a current proprio sample")
+            # DreamZero DROID convention: every future joint target in a chunk is
+            # expressed relative to the one observed joint configuration at the
+            # chunk anchor. The gripper target remains absolute.
+            actions = actions.copy()
+            actions[..., :-1] -= raw_proprio[..., -1, :-1]
+
+        # The legacy DROID joint sampler exposes the dataset's closedness
+        # channel directly (0=open, 1=closed). Allow configs using that sampler
+        # to adopt StarVLA's shared opening convention (1=open, 0=closed).
+        # Delta-EEF samplers already perform this conversion and leave the flag off.
+        if getattr(self, "invert_gripper", False):
+            actions = actions.copy()
+            actions[..., -1] = 1.0 - actions[..., -1]
+            if proprio is not None:
+                proprio = proprio.copy()
+                proprio[..., -1] = 1.0 - proprio[..., -1]
 
         actions = self.normalizer.actions(actions, action_indices).astype(np.float16)
         if proprio is not None:

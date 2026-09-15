@@ -173,6 +173,14 @@ def make_LeRobotSingleDataset(
         modality_config = data_config.modality_config(action_horizon=int(action_horizon_override))
     else:
         modality_config = data_config.modality_config()
+    shared_z_future_offset = int(data_cfg.get("shared_z_future_offset", 0) or 0)
+    if shared_z_future_offset:
+        if shared_z_future_offset < 1:
+            raise ValueError("shared_z_future_offset must be positive")
+        video_config = modality_config.get("video")
+        if video_config is None:
+            raise ValueError("shared-z temporal supervision requires a video modality")
+        video_config.delta_indices = [0, shared_z_future_offset]
     # Benchmark transforms may use dataset-level options (for example LIBERO's opt-in
     # photometric/crop augmentation). Keep backward compatibility with configs whose
     # transform() takes no arguments.

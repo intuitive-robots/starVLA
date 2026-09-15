@@ -164,6 +164,18 @@ class Qwen_PI(baseframework):
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
 
+    def _repeated_diffusion_steps(self) -> int:
+        """Read the action-side Monte Carlo repeat count from its canonical config."""
+        value = int(
+            self.config.framework.action_model.get("repeated_diffusion_steps", 2)
+        )
+        if value < 1:
+            raise ValueError(
+                "framework.action_model.repeated_diffusion_steps must be at least 1, "
+                f"got {value}"
+            )
+        return value
+
     def _encode_vl_hidden_states(
         self, batch_images: List, instructions: List[str]
     ) -> List[torch.Tensor]:
@@ -215,12 +227,7 @@ class Qwen_PI(baseframework):
             )  # [B, T_full, action_dim]
             actions_target = actions[:, -self.action_horizon :, :]  # (B, action_horizon, action_dim)
 
-            repeated_diffusion_steps = (
-                self.config.framework.action_model.get("repeated_diffusion_steps", 4)
-                if self.config and hasattr(self.config, "framework")
-                else 4
-            )
-            repeated_diffusion_steps = 2  # NO repeat for big action FM
+            repeated_diffusion_steps = self._repeated_diffusion_steps()
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
             # Repeat features for each layer
             vl_embs_list_repeated = [h.repeat(repeated_diffusion_steps, 1, 1) for h in vl_embs_list]

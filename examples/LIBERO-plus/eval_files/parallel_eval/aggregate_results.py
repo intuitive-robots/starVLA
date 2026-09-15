@@ -17,15 +17,46 @@ import argparse
 import glob
 import json
 import os
+import sys
 from pathlib import Path
 
 ALL_SUITES = ["libero_10", "libero_goal", "libero_object", "libero_spatial"]
 
 
-def aggregate_suite(root_path: str, task_suite: str) -> dict:
-    cur_root = os.path.join(root_path, "logs", task_suite)
-    json_files = glob.glob(os.path.join(cur_root, "*.json"))
+def _aggregate_from_episodes(json_files: list) -> dict:
+    """Count each (task_id, episode_idx) once, from the per-shard episode records.
 
+    Summing the per-shard summary JSONs instead is only correct while every file
+    in the directory belongs to the same shard layout: the shard set is whatever
+    happens to match the glob, so a leftover file from an earlier run with a
+    different worker count (or contiguous vs. round-robin sharding) overlaps the
+    current shards and is silently added to the totals rather than rejected.
+    Episode identity makes that impossible -- an overlapping shard re-reports the
+    same episodes, and they collapse.
+    """
+    episodes = {}
+    for file in json_files:
+        ep_file = file[: -len(".json")] + "_episodes.jsonl"
+        with open(ep_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                episodes[(record["task_id"], record["episode_idx"])] = record
+
+    suite_results = {"overall": {"total_count": 0, "success_count": 0}}
+    for record in episodes.values():
+        success = 1 if record["success"] else 0
+        for key in ("overall", record["category"]):
+            bucket = suite_results.setdefault(key, {"total_count": 0, "success_count": 0})
+            bucket["total_count"] += 1
+            bucket["success_count"] += success
+    return suite_results
+
+
+def _aggregate_from_summaries(json_files: list) -> dict:
+    """Legacy path: sum the per-shard summary JSONs (see _aggregate_from_episodes)."""
     suite_results = {"overall": {"total_count": 0, "success_count": 0}}
     for file in json_files:
         with open(file, encoding="utf-8") as f:
@@ -38,6 +69,27 @@ def aggregate_suite(root_path: str, task_suite: str) -> dict:
             else:
                 suite_results[item]["total_count"] += r["total_count"]
                 suite_results[item]["success_count"] += r["success_count"]
+    return suite_results
+
+
+def aggregate_suite(root_path: str, task_suite: str) -> dict:
+    cur_root = os.path.join(root_path, "logs", task_suite)
+    json_files = [
+        f for f in glob.glob(os.path.join(cur_root, "*.json"))
+        if not f.endswith("overall_results.json")
+    ]
+
+    missing = [f for f in json_files if not os.path.exists(f[: -len(".json")] + "_episodes.jsonl")]
+    if missing:
+        print(
+            f"[WARN] {task_suite}: {len(missing)}/{len(json_files)} shards have no episode records "
+            f"(e.g. {os.path.basename(missing[0])}); falling back to summing shard summaries, which "
+            f"double-counts any shards left over from a run with a different worker count.",
+            file=sys.stderr,
+        )
+        suite_results = _aggregate_from_summaries(json_files)
+    else:
+        suite_results = _aggregate_from_episodes(json_files)
 
     for category, r in suite_results.items():
         total = r["total_count"]

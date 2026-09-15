@@ -24,6 +24,11 @@ import tqdm
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 
+if os.environ.get("STARVLA_FAST_GLASS_BLUR", "0") == "1":
+    from fast_glass_blur import install as install_fast_glass_blur
+    install_fast_glass_blur()
+    print("Validated fast LIBERO-Plus glass blur enabled", flush=True)
+
 EVAL_FILES_DIR = pathlib.Path(__file__).resolve().parents[1]
 if str(EVAL_FILES_DIR) not in sys.path:
     sys.path.insert(0, str(EVAL_FILES_DIR))
@@ -288,6 +293,20 @@ class Args:
     # Exactly K indices floor(k * suite_size / K), k=0..K-1, filtered to this
     # worker's [start_idx,end_idx). Zero keeps the legacy stride behavior.
     exact_sample_count: int = 0
+    # Round-robin sharding WITHIN [start_idx,end_idx): this worker evaluates
+    # task_ids[shard_idx::num_shards] instead of a contiguous block of them.
+    # Perturbation categories are large contiguous index blocks, and their cost
+    # per episode differs by >5x (a camera-viewpoint episode mostly fails and
+    # runs to max_steps; a background-texture one succeeds early), so contiguous
+    # blocks gave every worker a different total workload -- measured on
+    # libero_10, 32 contiguous shards finished spread over 52 minutes, the last
+    # five running alone on an otherwise idle node for 45 of the suite's 69
+    # minutes. Interleaving gives every worker the same category mix, so they
+    # finish together. The UNION of evaluated tasks is unchanged (same
+    # deterministic set, just dealt out differently), so results stay directly
+    # comparable to contiguously sharded runs.
+    shard_idx: int = 0
+    num_shards: int = 1
     output_dir: str = "./output"
 
     # Gripper output convention: "auto" reads dataset_statistics.json next to the
@@ -668,9 +687,24 @@ def eval_libero(args: Args) -> None:
     else:
         task_ids = list(range(args.start_idx, args.end_idx, args.stride))
         sample_tag = "" if args.stride == 1 else f"_stride{args.stride}"
+    if args.num_shards > 1:
+        if not 0 <= args.shard_idx < args.num_shards:
+            raise ValueError(
+                f"shard_idx must be in [0, {args.num_shards}), got {args.shard_idx}"
+            )
+        # Deal out the already-deterministic task list round-robin. Every shard
+        # of the same (range, stride/exact) selection covers it exactly once
+        # between them, so the union is identical to contiguous sharding.
+        task_ids = task_ids[args.shard_idx :: args.num_shards]
+        # Distinct per shard AND distinct from a contiguous-shard file covering
+        # the same range -- shard results are merged by globbing this directory,
+        # so an overlapping leftover file from a differently sharded earlier run
+        # would otherwise be silently double-counted.
+        sample_tag += f"_shard{args.shard_idx}of{args.num_shards}"
     print(
         f"processing {len(task_ids)} tasks from {args.start_idx} to {args.end_idx} "
-        f"(stride={args.stride}, exact_sample_count={args.exact_sample_count})"
+        f"(stride={args.stride}, exact_sample_count={args.exact_sample_count}, "
+        f"shard={args.shard_idx}/{args.num_shards})"
     )
     # args.video_out_path = f"{date_base}+{args.job_name}"
     # stride suffix keeps a subsampled shard's filename distinct from a
@@ -682,6 +716,15 @@ def eval_libero(args: Args) -> None:
     pathlib.Path(log_path).mkdir(parents=True, exist_ok=True)
     logger = get_logger(log_file)
     logger.info(f"Arguments: {json.dumps(dataclasses.asdict(args), indent=4)}")
+    if not task_ids:
+        # An exact global sample may miss a narrow raw-index shard at high
+        # concurrency. This is zero assigned work, not a simulator failure.
+        # Emit empty shard artifacts and avoid policy/EGL startup and 0/0 below.
+        with open(os.path.join(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}.json"), "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        pathlib.Path(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}_episodes.jsonl").write_text("", encoding="utf-8")
+        logger.info("No sampled tasks in this shard; completed without simulator startup.")
+        return
     video_out_path = os.path.join(args.output_dir, args.task_suite_name)
     pathlib.Path(video_out_path).mkdir(parents=True, exist_ok=True)
 
@@ -761,6 +804,12 @@ def eval_libero(args: Args) -> None:
         # Start episodes
         task_episodes, task_successes = 0, 0
         for episode_idx in tqdm.tqdm(range(args.num_trials_per_task)):
+
+            if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1":
+                key = f"{args.seed}|{args.task_suite_name}|{task_id}|{episode_idx}".encode()
+                episode_seed = int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "little")
+                np.random.seed(episode_seed)
+                env.seed(episode_seed)
 
             logger.info(f"\nTask: {task_description}")
 
@@ -852,6 +901,9 @@ def eval_libero(args: Args) -> None:
                 start_time = time.time()
 
                 # response = client_model.step(example=example_dict)
+                if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1":
+                    key = f"{args.seed}|{args.task_suite_name}|{task_id}|{episode_idx}|{step}".encode()
+                    example_dict["_paired_policy_seed"] = int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "little")
                 response = client_model.step(example=example_dict, step=step)
                 if initial_cot_text is None and response.get("cot_is_fresh"):
                     initial_cot_text = response.get("cot_text")
@@ -927,6 +979,7 @@ def eval_libero(args: Args) -> None:
                 "task_id": task_id, "episode_idx": episode_idx, "success": bool(done),
                 "category": ID2CATEGORY[task_id + 1][0],
                 "perturbation": perturbation, "initial_cot_text": initial_cot_text,
+                "paired_episode_seed": episode_seed if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1" else None,
             })
             logger.info(f"# episodes completed so far: {total_episodes}")
             logger.info(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)")
@@ -1020,6 +1073,8 @@ def _parse_stdlib_args() -> Args:
     parser.add_argument("--end_idx", type=int, default=-1)
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--exact_sample_count", type=int, default=0)
+    parser.add_argument("--shard_idx", type=int, default=0)
+    parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--output_dir", default="./output")
     parser.add_argument(
         "--gripper_encoding",

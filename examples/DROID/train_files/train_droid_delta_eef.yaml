@@ -113,6 +113,13 @@ datasets:
 
 trainer:
   max_train_steps: 100000
+  # Match StarVLA's existing open-loop convention: the final eligible episode
+  # from each subdataset, evaluated in non-overlapping action chunks. Marigold
+  # additionally respects instruction validity masks and target/source FPS.
+  open_loop_eval: true
+  open_loop_num_episodes_per_subdataset: 1
+  open_loop_batch_size: 8
+  open_loop_max_anchors: null
   # Initial launch starts from scratch when no checkpoint exists; subsequent
   # launches with the same run_id automatically select the latest step file.
   is_resume: true

@@ -38,9 +38,17 @@ server_idle_timeout="${server_idle_timeout:--1}"
 # Batches concurrent requests from multiple workers into one predict_action()
 # call instead of serving one at a time -- see batch_dispatcher.py. Measured
 # on this model: ~30x throughput at batch 32, ~112x at batch 128, for a ~15%
-# latency cost per batch. Set to (at least) workers_per_gpu; 1 = old behavior.
+# latency cost per batch. This is a CEILING, not a target: batches fill from
+# whatever queued during the previous batch's inference, so leaving headroom
+# above the real client count (workers_per_gpu / servers_per_gpu) costs nothing.
+# 1 = old one-at-a-time behavior.
 max_batch_size="${max_batch_size:-32}"
-max_wait_time="${max_wait_time:-1.0}"
+# 0 = never block waiting for a batch to fill. A positive value is a real stall
+# whenever the target is not reached, and the target is unreachable by
+# construction once max_batch_size exceeds the clients per server: the previous
+# 1.0s default put a full second in front of every ~0.19s inference (measured,
+# 8 workers / 2 servers per GPU -- batches never exceeded 4 of a nominal 32).
+max_wait_time="${max_wait_time:-0.0}"
 # 0 (default) = full suite (~2400-2600 task instances). Set to e.g. 500 to
 # only evaluate ~500 task instances of this suite. IMPORTANT: this suite's task
 # indices are grouped into large contiguous blocks by perturbation category
@@ -88,6 +96,15 @@ num_partitions="${9:-1}"
 # aggregate a partial (racy) snapshot of the shared output_dir; the wrapper
 # does one aggregation itself after every partition has finished instead.
 skip_aggregate="${SKIP_AGGREGATE:-false}"
+# Round-robin sharding (see eval_libero_in_one.sh). When on, the per-node slice
+# below is NOT used: every node is handed the whole suite and takes its own
+# stripe of the global shard set instead. Slicing the suite into contiguous
+# per-node blocks and only balancing inside each node leaves the nodes
+# imbalanced against each other, and the job waits for the slowest: measured on
+# libero_10 over 4 nodes, the node holding the Sensor Noise index band drew
+# 263 worker-minutes against 72 for the lightest node -- a 1.80x penalty on
+# total wall clock that no amount of within-node balancing can recover.
+interleave_shards="${STARVLA_INTERLEAVE_SHARDS:-1}"
 
 case "${LIBERO_PLUS_RUNTIME}" in
     auto)
@@ -173,6 +190,18 @@ if [ -z "${gpu_ids_csv}" ]; then
     gpu_ids_csv=$(IFS=,; echo "${gpu_ids[*]}")
 else
     IFS=',' read -r -a gpu_ids <<< "${gpu_ids_csv}"
+    # The psslurm environment can pad CUDA_VISIBLE_DEVICES with spaces.
+    # MuJoCo requires each EGL device ID to contain digits only.
+    for gpu_idx in "${!gpu_ids[@]}"; do
+        gpu_id="${gpu_ids[$gpu_idx]}"
+        gpu_id="${gpu_id#"${gpu_id%%[![:space:]]*}"}"
+        gpu_id="${gpu_id%"${gpu_id##*[![:space:]]}"}"
+        if [[ ! "${gpu_id}" =~ ^[0-9]+$ ]]; then
+            echo "[ERROR] LIBERO-Plus requires numeric GPU IDs; got '${gpu_id}'."
+            exit 1
+        fi
+        gpu_ids[$gpu_idx]="${gpu_id}"
+    done
     # Respect the num_gpus argument: truncate if CUDA_VISIBLE_DEVICES has more
     if [ "${#gpu_ids[@]}" -gt "${num_gpus}" ]; then
         gpu_ids=("${gpu_ids[@]:0:${num_gpus}}")
@@ -214,6 +243,25 @@ if [ "${max_tasks_per_suite}" -gt 0 ] && [ "${max_tasks_per_suite}" -lt "${suite
     stride=$((suite_size / max_tasks_per_suite))
 fi
 
+# The stride protocol's SAMPLE is defined by the contiguous shard layout: each
+# shard restarts the stride inside its own range, which is why max_tasks_per_suite=50
+# evaluates 64 instances per suite and not suite_size/stride = 51. Round-robin
+# sharding applies the stride once globally, so it would quietly evaluate 51
+# DIFFERENT instances (2 of 64 in common) and report them under the same protocol
+# name -- silently incomparable with the completed G/D/D-rand results. Exact-sample
+# mode has no such coupling (its index set is computed globally, so every layout
+# selects the same tasks), which is why it keeps round-robin.
+if [ "${stride}" -gt 1 ] && [ "${interleave_shards}" = "1" ]; then
+    echo "[WARN] max_tasks_per_suite=${max_tasks_per_suite} (stride=${stride}) pins the sample to the"
+    echo "       contiguous shard layout; forcing contiguous shards so the instance set stays"
+    echo "       comparable with earlier stride runs. Use exact_tasks_per_suite for a"
+    echo "       layout-independent sample that also gets round-robin load balancing."
+    interleave_shards=0
+fi
+# eval_libero_in_one.sh reads this from the environment; export it unconditionally
+# so the two scripts can never disagree about the layout.
+export STARVLA_INTERLEAVE_SHARDS="${interleave_shards}"
+
 # Auto-size tasks_per_gpu from the true suite length so num_partitions
 # partitions (nodes) cover the suite exactly once between them, each getting
 # ceil(suite_size / (num_partitions * num_gpus)) tasks per GPU.
@@ -222,15 +270,25 @@ if [ "${tasks_per_gpu}" -le 0 ]; then
 fi
 
 tasks_per_partition=$((num_gpus * tasks_per_gpu))
-start_idx=$((partition_idx * tasks_per_partition))
-end_idx=$((start_idx + tasks_per_partition))
-if [ "${end_idx}" -gt "${suite_size}" ]; then
+if [ "${interleave_shards}" = "1" ]; then
+    # Whole suite to every node; the global shard stripe does the partitioning.
+    start_idx=0
     end_idx=${suite_size}
-fi
+    if [ "${partition_idx}" -ge "${num_partitions}" ]; then
+        echo "[ERROR] Partition ${partition_idx} is outside num_partitions=${num_partitions}."
+        exit 1
+    fi
+else
+    start_idx=$((partition_idx * tasks_per_partition))
+    end_idx=$((start_idx + tasks_per_partition))
+    if [ "${end_idx}" -gt "${suite_size}" ]; then
+        end_idx=${suite_size}
+    fi
 
-if [ "${start_idx}" -ge "${suite_size}" ]; then
-    echo "[ERROR] Partition ${partition_idx} starts at ${start_idx}, beyond suite size ${suite_size}."
-    exit 1
+    if [ "${start_idx}" -ge "${suite_size}" ]; then
+        echo "[ERROR] Partition ${partition_idx} starts at ${start_idx}, beyond suite size ${suite_size}."
+        exit 1
+    fi
 fi
 
 num_servers=$((num_gpus * servers_per_gpu))
@@ -251,10 +309,16 @@ echo " GPUs             : ${gpu_ids_csv}"
 echo " Tasks / GPU      : ${tasks_per_gpu}"
 echo " Workers / GPU    : ${workers_per_gpu}"
 echo " Servers / GPU    : ${servers_per_gpu}  (total servers: ${num_servers}, ports ${base_port}..$((base_port + num_servers - 1)))"
-echo " Max batch size   : ${max_batch_size}  (max_wait_time=${max_wait_time}s)"
+echo " Clients / server : $(( (workers_per_gpu + servers_per_gpu - 1) / servers_per_gpu ))  (upper bound on in-flight requests per server)"
+echo " Max batch size   : ${max_batch_size}  (ceiling; max_wait_time=${max_wait_time}s)"
 echo " Object perturb   : ${object_perturb_m}m roles=${object_perturb_roles} seed=${object_perturb_seed}"
 echo " Partition index  : ${partition_idx} / ${num_partitions}"
 echo " Trials / task    : ${num_trials_per_task}"
+if [ "${interleave_shards}" = "1" ]; then
+    echo " Shard mode       : round-robin, global stripe ${partition_idx} of ${num_partitions} node(s)"
+else
+    echo " Shard mode       : contiguous per-node blocks"
+fi
 if [ "${exact_tasks_per_suite}" -gt 0 ]; then
     echo " Task range       : [${start_idx}, ${end_idx}) of ${suite_size}  (raw partition range)"
     echo " Exact global sample: ${exact_tasks_per_suite} evenly spaced tasks/suite"
@@ -317,7 +381,9 @@ bash "${SCRIPT_PATH}" \
     "true" \
     "${servers_per_gpu}" \
     "${stride}" \
-    "${exact_tasks_per_suite}"
+    "${exact_tasks_per_suite}" \
+    "${partition_idx}" \
+    "${num_partitions}"
 
 if [ "${skip_aggregate}" != "true" ]; then
     # Suite-scoped (writes <output_dir>/<suite>/overall_results.json), not the

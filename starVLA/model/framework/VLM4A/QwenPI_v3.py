@@ -41,19 +41,27 @@ Parameter breakdown (Qwen3-VL-4B + action_dit_hidden_dim=1024)
   TOTAL                     5,071,087,137  100.0%
 ═══════════════════════════════════════════════════════════════
 """
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
 
 from deployment.model_server.tools.image_tools import to_pil_preserve
 from starVLA.dataloader.cot_augmentation import augment_cot_batch
-from starVLA.dataloader.cot_resolver import assert_cot_prompt_consistent, build_cot_resolver
+from starVLA.dataloader.cot_resolver import (
+    assert_cot_prompt_consistent,
+    build_cot_resolver,
+    extract_structured_cot_targets,
+)
 from starVLA.model.framework.base_framework import baseframework
 from starVLA.model.framework.share_tools import merge_framework_config, populate_layerwise_dit_cfg
+from starVLA.model.framework.VLM4A.QwenGR00T import StructuredEncoderRegressionHead
 from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader import LayerwiseFlowmatchingActionHead, get_action_model
 from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.model.tools import FRAMEWORK_REGISTRY
@@ -64,6 +72,56 @@ logger = initialize_overwatch(__name__)
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
+
+
+class SharedZPooler(nn.Module):
+    """One-way learned-query pooler: queries read encoder tokens, never vice versa."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        z_dim: int,
+        num_queries: int = 4,
+        query_dim: int = 512,
+        num_heads: int = 8,
+    ) -> None:
+        super().__init__()
+        if num_queries < 1 or z_dim < 1 or query_dim % num_heads:
+            raise ValueError("invalid shared-z query dimensions")
+        self.input_norm = nn.LayerNorm(input_dim)
+        self.kv_proj = nn.Linear(input_dim, query_dim)
+        self.queries = nn.Parameter(torch.randn(num_queries, query_dim) * 0.02)
+        self.attention = nn.MultiheadAttention(
+            query_dim, num_heads=num_heads, batch_first=True
+        )
+        self.output = nn.Sequential(
+            nn.Linear(num_queries * query_dim, z_dim),
+            nn.LayerNorm(z_dim),
+        )
+
+    def forward(self, hidden: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        if hidden.ndim != 3 or valid.shape != hidden.shape[:2]:
+            raise ValueError(
+                f"shared-z hidden/mask mismatch: {tuple(hidden.shape)} vs {tuple(valid.shape)}"
+            )
+        memory = self.kv_proj(self.input_norm(hidden))
+        query = self.queries.to(memory.dtype)[None].expand(hidden.shape[0], -1, -1)
+        pooled, _ = self.attention(
+            query, memory, memory, key_padding_mask=~valid.bool(), need_weights=False
+        )
+        return self.output(pooled.flatten(1))
+
+
+class SharedZRegressionHead(nn.Module):
+    def __init__(self, z_dim: int, output_dim: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(z_dim), nn.Linear(z_dim, z_dim), nn.SiLU(),
+            nn.Linear(z_dim, output_dim),
+        )
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        return self.net(z)
 
 ####################################################
 # ⚠️ Warning: This framework has been restructured and is NOT compatible with checkpoints created before 2025-10-20.
@@ -92,6 +150,11 @@ class QwenPI_v3DefaultConfig:
 
     name: str = "QwenPI_v3"
 
+    # Probability of omitting the complete discretised proprioceptive-state
+    # suffix for an individual training example. Evaluation/inference always
+    # retains state. This is separate from the Action DiT's feature dropout.
+    state_dropout_rate: float = 0.0
+
     # === VLM backbone (Qwen2.5-VL / Qwen3-VL) ===
     qwenvl: dict = field(
         default_factory=lambda: {
@@ -117,6 +180,11 @@ class QwenPI_v3DefaultConfig:
             "add_pos_embed": True,
             "max_seq_len": 1024,
             "num_target_vision_tokens": 32,
+            # Old PI checkpoints were trained by a hand-written loop that sent
+            # encoder memory to every DiT block. New runs must opt explicitly
+            # into the corrected alternating cross/self-attention topology so
+            # loading an old checkpoint cannot silently change its forward.
+            "layerwise_attention_layout": "legacy_all_cross",
             "noise_beta_alpha": 1.5,
             "noise_beta_beta": 1.0,
             "noise_s": 0.999,
@@ -171,7 +239,32 @@ class Qwen_PI_v3(baseframework):
         super().__init__()
         # Merge framework defaults with YAML config (YAML wins on conflicts).
         self.config = merge_framework_config(QwenPI_v3DefaultConfig, config)
+        self.state_dropout_rate = float(self.config.framework.get("state_dropout_rate", 0.0))
+        if not 0.0 <= self.state_dropout_rate <= 1.0:
+            raise ValueError(
+                "framework.state_dropout_rate must be between 0 and 1, "
+                f"got {self.state_dropout_rate}"
+            )
         self.qwen_vl_interface = get_vlm_model(config=self.config)
+        encoder_mlm_cfg = dict(
+            self.config.framework.qwenvl.get("encoder_mlm", {}) or {}
+        )
+        self.encoder_mlm_enabled = bool(encoder_mlm_cfg.get("enabled", False))
+        # On a sampled fraction of training rows, make every PI cross-attention
+        # block consume only the fixed masked-reasoning slots. This is distinct
+        # from label dropout: cloze targets remain supervised on every row, and
+        # rollout/evaluation always retains the full encoder memory.
+        self.encoder_mlm_action_slot_dropout_rate = float(
+            encoder_mlm_cfg.get("action_slot_dropout_rate", 0.0)
+        )
+        if not 0.0 <= self.encoder_mlm_action_slot_dropout_rate <= 1.0:
+            raise ValueError(
+                "framework.qwenvl.encoder_mlm.action_slot_dropout_rate must be in [0,1]"
+            )
+        if self.encoder_mlm_action_slot_dropout_rate > 0.0 and not self.encoder_mlm_enabled:
+            raise ValueError(
+                "action_slot_dropout_rate requires framework.qwenvl.encoder_mlm.enabled=true"
+            )
 
         # Read the actual hidden size and layer count from the loaded VLM.
         # `output_hidden_states=True` returns (num_hidden_layers + 1) tensors
@@ -206,6 +299,37 @@ class Qwen_PI_v3(baseframework):
         # the canonical DiT-shape fields (input_embedding_dim, cross_attention_dim,
         # num_attention_heads).
         diffusion_model_cfg = self.config.framework.action_model.diffusion_model_cfg
+        shared_z_cfg = dict(self.config.framework.get("shared_z", {}) or {})
+        self.shared_z_enabled = bool(shared_z_cfg.get("enabled", False))
+        self.shared_z_dim = int(shared_z_cfg.get("dim", 128))
+        self.shared_z_memory_dropout_rate = float(
+            shared_z_cfg.get("memory_dropout_rate", 0.15)
+        )
+        if not 0.0 <= self.shared_z_memory_dropout_rate <= 1.0:
+            raise ValueError("framework.shared_z.memory_dropout_rate must be in [0,1]")
+        self.shared_z_shuffle_targets = bool(shared_z_cfg.get("shuffle_targets", False))
+        self.shared_z_distribution_weight = float(
+            shared_z_cfg.get("distribution_weight", 0.01)
+        )
+        self.shared_z_separation_weight = float(
+            shared_z_cfg.get("separation_weight", 0.1)
+        )
+        self.shared_z_separation_margin = float(
+            shared_z_cfg.get("separation_margin", 0.5)
+        )
+        self.shared_z_target_specs = {
+            str(name): dict(spec)
+            for name, spec in dict(shared_z_cfg.get("targets", {}) or {}).items()
+        }
+        temporal_cfg = dict(shared_z_cfg.get("temporal", {}) or {})
+        self.shared_z_temporal_enabled = bool(temporal_cfg.get("enabled", False))
+        self.shared_z_future_offset = int(temporal_cfg.get("future_offset", 8))
+        self.shared_z_temporal_weight = float(temporal_cfg.get("weight", 1.0))
+        self.shared_z_decoder_memory = bool(shared_z_cfg.get("decoder_memory", False))
+        if self.shared_z_enabled:
+            diffusion_model_cfg["extra_conditioning_dim"] = self.shared_z_dim
+        else:
+            diffusion_model_cfg["extra_conditioning_dim"] = 0
         action_dit_hidden_dim = diffusion_model_cfg.get("action_dit_hidden_dim", None)
         if action_dit_hidden_dim is None:
             action_dit_hidden_dim = llm_hidden_size
@@ -238,12 +362,160 @@ class Qwen_PI_v3(baseframework):
             ]
         )
 
+        self.shared_z_pooler = None
+        self.shared_z_heads = nn.ModuleDict()
+        self.shared_z_future_predictor = None
+        self.shared_z_difference_decoder = None
+        self.shared_z_decoder_up = None
+        if self.shared_z_enabled:
+            self.shared_z_pooler = SharedZPooler(
+                input_dim=llm_hidden_size,
+                z_dim=self.shared_z_dim,
+                num_queries=int(shared_z_cfg.get("num_queries", 4)),
+                query_dim=int(shared_z_cfg.get("query_dim", 512)),
+                num_heads=int(shared_z_cfg.get("num_heads", 8)),
+            )
+            self.shared_z_heads = nn.ModuleDict({
+                name: SharedZRegressionHead(self.shared_z_dim, int(spec["dim"]))
+                for name, spec in self.shared_z_target_specs.items()
+                if str(spec.get("loss", "smooth_l1")) != "cross_entropy"
+            })
+            for name, spec in self.shared_z_target_specs.items():
+                if str(spec.get("loss", "smooth_l1")) == "cross_entropy":
+                    self.shared_z_heads[name] = SharedZRegressionHead(
+                        self.shared_z_dim, int(spec["dim"])
+                    )
+            if self.shared_z_temporal_enabled:
+                action_flat_dim = self.shared_z_future_offset * int(
+                    self.config.framework.action_model.action_dim
+                )
+                self.shared_z_future_predictor = SharedZRegressionHead(
+                    self.shared_z_dim + action_flat_dim, self.shared_z_dim
+                )
+                self.shared_z_difference_decoder = SharedZRegressionHead(
+                    self.shared_z_dim, action_flat_dim
+                )
+            if self.shared_z_decoder_memory:
+                if bool(self.config.framework.qwenvl.get("skip_decoder", True)):
+                    raise ValueError("shared_z.decoder_memory requires qwenvl.skip_decoder=false")
+                if bool(self.config.framework.qwenvl.get("layerwise_decoder_cross_attention", False)):
+                    raise ValueError("shared-z decoder memory must not use layerwise raw-H memory")
+                self.shared_z_decoder_up = nn.Linear(self.shared_z_dim, llm_hidden_size)
+                lm = self.qwen_vl_interface._text_model()
+
+                def _z_only_decoder_memory(memory, valid, visual):
+                    z_value = self.shared_z_pooler(memory, valid.bool())
+                    self._shared_z_from_decoder = z_value
+                    projected = self.shared_z_decoder_up(z_value).to(memory.dtype)
+                    return projected[:, None, :].expand_as(memory)
+
+                lm._decoder_encoder_intervention = _z_only_decoder_memory
+                logger.info("shared-z decoder memory enabled: decoder K/V contains only z")
+
+            # Preserve the existing timestep columns while making z initially a small,
+            # nonzero perturbation. The effective neutral scale remains zero.
+            for block in self.action_model.model.transformer_blocks:
+                linear = getattr(getattr(block, "norm1", None), "linear", None)
+                if linear is not None:
+                    nn.init.normal_(linear.weight[:, -self.shared_z_dim:], std=1.0e-3)
+
         # `action_horizon` is the single source of truth for chunk length.
         # Legacy aliases (`future_action_window_size`, `past_action_window_size`)
         # are normalised upstream by `share_tools.apply_config_compat`, so we
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
         self.is_inference = bool(kwargs.get("is_inference", False))
+
+        # Optional soft anchor to the *initial* pretrained encoder.  Keep the
+        # teacher outside nn.Module registration: it is fixed reference state,
+        # must not enter AdamW/DeepSpeed, and must not bloat policy checkpoints.
+        anchor_cfg = dict(self.config.framework.get("representation_anchor", {}) or {})
+        self.representation_anchor_enabled = bool(anchor_cfg.get("enabled", False))
+        self.representation_anchor_layers = [
+            int(index) for index in anchor_cfg.get("layer_indices", [2, 10, 18, 26])
+        ]
+        object.__setattr__(self, "_representation_anchor_teacher", None)
+        object.__setattr__(self, "_representation_anchor_teacher_device", None)
+        if self.representation_anchor_enabled and not self.is_inference:
+            teacher = get_vlm_model(config=self.config)
+            teacher.requires_grad_(False)
+            teacher.eval()
+            object.__setattr__(self, "_representation_anchor_teacher", teacher)
+
+        dynamics_cfg = dict(self.config.framework.get("tied_dynamics", {}) or {})
+        self.tied_dynamics_enabled = bool(dynamics_cfg.get("enabled", False))
+        self.tied_dynamics_horizons = [
+            int(horizon) for horizon in dynamics_cfg.get("horizons", [4, 8, 16])
+        ]
+        self.tied_dynamics_position_dims = int(dynamics_cfg.get("position_dims", 3))
+        self.tied_dynamics_beta = float(dynamics_cfg.get("smooth_l1_beta", 0.1))
+        if self.tied_dynamics_enabled:
+            if not self.tied_dynamics_horizons:
+                raise ValueError("framework.tied_dynamics.horizons must not be empty")
+            if min(self.tied_dynamics_horizons) < 1 or max(self.tied_dynamics_horizons) > self.action_horizon:
+                raise ValueError(
+                    "framework.tied_dynamics.horizons must lie in [1, action_horizon], "
+                    f"got {self.tied_dynamics_horizons} for horizon {self.action_horizon}"
+                )
+            if not 1 <= self.tied_dynamics_position_dims <= int(self.config.framework.action_model.action_dim):
+                raise ValueError("framework.tied_dynamics.position_dims is outside the action dimension")
+            if self.tied_dynamics_beta <= 0.0:
+                raise ValueError("framework.tied_dynamics.smooth_l1_beta must be positive")
+
+        # Keep structured representation supervision on raw encoder states. PI's
+        # per-depth projectors are part of the action expert and must not become a
+        # shortcut or silently change N's 2048-D encoder-probe objective.
+        structured_cfg = dict(self.config.framework.get("structured_aux", {}) or {})
+        self.structured_aux_enabled = bool(structured_cfg.get("enabled", False))
+        self.structured_aux_specs = {
+            str(name): dict(spec)
+            for name, spec in dict(structured_cfg.get("targets", {}) or {}).items()
+        } if self.structured_aux_enabled else {}
+        self.structured_aux_heads = nn.ModuleDict({
+            name: StructuredEncoderRegressionHead(llm_hidden_size, int(spec["dim"]))
+            for name, spec in self.structured_aux_specs.items()
+        })
+
+        numeric_cfg = dict(self.config.framework.get("projected_numeric_aux", {}) or {})
+        self.projected_numeric_aux = None
+        self._numeric_aux_steps = 0
+        self.numeric_aux_grad_interval = int(numeric_cfg.get("gradient_interval", 100))
+        if numeric_cfg.get("enabled", False):
+            if self.structured_aux_enabled or self.shared_z_enabled or not self.encoder_mlm_enabled:
+                raise ValueError("Projected numeric heads require MLM slots and no other auxiliary heads")
+            if self.qwen_vl_interface.encoder_mlm_loss_enabled:
+                raise ValueError("Projected numeric experiment must disable token CE")
+            from starVLA.model.modules.projected_numeric_aux import ProjectedNumericAux
+            self.projected_numeric_aux = ProjectedNumericAux(
+                int(action_dit_hidden_dim or llm_hidden_size), self.qwen_vl_interface.encoder_mlm_fields,
+                numeric_cfg.get("layers", [12, 16, 20]), numeric_cfg.get("beta", 0.1))
+
+        alignment_cfg = dict(self.config.framework.get("decoder_latent_alignment", {}) or {})
+        self.decoder_latent_alignment = None
+        self._latent_alignment_steps = 0
+        self._latent_alignment_audited = False
+        self.latent_alignment_gradient_interval = int(alignment_cfg.get("gradient_interval", 100))
+        object.__setattr__(self, "_decoder_latent_teacher", None)
+        if alignment_cfg.get("enabled", False):
+            if (self.projected_numeric_aux is not None or self.structured_aux_enabled
+                    or self.shared_z_enabled or not self.encoder_mlm_enabled
+                    or self.qwen_vl_interface.encoder_mlm_loss_enabled):
+                raise ValueError("Decoder alignment requires mask slots, no token CE/other auxiliaries")
+            teacher_layers = alignment_cfg.get("teacher_layers", None)
+            if teacher_layers is not None and list(teacher_layers) != list(alignment_cfg.get("layers", [])):
+                raise ValueError("Intermediate alignment requires equal student/teacher layer indices")
+            from starVLA.model.modules.decoder_latent_alignment import (
+                DecoderLatentAlignment, FrozenDecoderTeacher)
+            with torch.random.fork_rng(devices=[]):
+                self.decoder_latent_alignment = DecoderLatentAlignment(
+                    int(action_dit_hidden_dim or llm_hidden_size), int(alignment_cfg.get("teacher_dim", 2048)),
+                    self.qwen_vl_interface.encoder_mlm_fields, alignment_cfg.get("layers", [4, 8, 12]))
+            if not self.is_inference:
+                object.__setattr__(self, "_decoder_latent_teacher", FrozenDecoderTeacher(
+                    alignment_cfg["teacher_checkpoint"], alignment_cfg.get("teacher_layer", 23),
+                    alignment_cfg.get("teacher_micro_batch_size", 4),
+                    layers=alignment_cfg.get("teacher_layers", None),
+                    benchmark_batches=alignment_cfg.get("benchmark_batches", False)))
 
         # Match QwenGR00T's CoT execution semantics. Full training resolves mappings and
         # performs dropout in dataloader workers; the lazy resolver is only a fallback for
@@ -258,6 +530,9 @@ class Qwen_PI_v3(baseframework):
         self.cot_dropout_rate = float(
             cot_cfg.get("dropout_rate", 0.5) if cot_cfg is not None else 0.0
         )
+        self.cot_text_supervision = bool(
+            cot_cfg.get("text_supervision", True) if cot_cfg is not None else False
+        )
         self.cot_resolver = None
         if self.is_inference:
             self.cot_resolver = build_cot_resolver(self.config, is_inference=True)
@@ -270,7 +545,185 @@ class Qwen_PI_v3(baseframework):
                 f"Layer number mismatch: got {len(vl_embs_list)} VL layers, "
                 f"but project_layers has {len(self.project_layers)} layers."
             )
-        return [proj(vl_h) for proj, vl_h in zip(self.project_layers, vl_embs_list)]
+        # Diagnostic-only causal intervention.  A probe fitted in PI's native
+        # raw (typically 2048-D) or projected (typically 1024-D) state space
+        # stores one centered basis per directly cross-attended layer.  Keeping
+        # this behind an environment variable makes an ordinary checkpoint
+        # bit-for-bit unchanged while allowing the batched rollout stack to
+        # remove the same fitted subspace at either side of PI's projectors.
+        basis_path = os.environ.get("STARVLA_PI_COT_SUBSPACE_PATH", "").strip()
+        payload = None
+        rank = 0
+        if basis_path:
+            rank = int(os.environ.get("STARVLA_PI_COT_SUBSPACE_RANK", "0"))
+            if rank <= 0:
+                raise ValueError(
+                    "STARVLA_PI_COT_SUBSPACE_RANK must be positive when "
+                    "STARVLA_PI_COT_SUBSPACE_PATH is set"
+                )
+            cache_key = (basis_path, rank)
+            if getattr(self, "_cot_subspace_cache_key", None) != cache_key:
+                payload = torch.load(basis_path, map_location="cpu", weights_only=True)
+                if int(payload["num_layers"]) != len(vl_embs_list):
+                    raise ValueError(
+                        f"CoT subspace has {payload['num_layers']} layers, model has {len(vl_embs_list)}"
+                    )
+                self._cot_subspace_payload = payload
+                self._cot_subspace_cache_key = cache_key
+                logger.info(
+                    "PI diagnostic: removing rank-%d %s-space CoT subspace from %s",
+                    rank,
+                    payload.get("space", "projected"),
+                    basis_path,
+                )
+            payload = self._cot_subspace_payload
+
+        def remove_subspace(states: List[torch.Tensor]) -> List[torch.Tensor]:
+            intervened = list(states)
+            for layer_text, entry in payload["layers"].items():
+                layer = int(layer_text)
+                hidden = intervened[layer]
+                mean = entry["mean"].to(device=hidden.device, dtype=hidden.dtype)
+                basis = entry["basis"][:, :rank].to(device=hidden.device, dtype=hidden.dtype)
+                if basis.shape[1] < rank:
+                    raise ValueError(
+                        f"layer {layer} CoT basis has rank {basis.shape[1]}, requested {rank}"
+                    )
+                centered = hidden - mean.view(1, 1, -1)
+                intervened[layer] = hidden - torch.matmul(
+                    torch.matmul(centered, basis), basis.transpose(0, 1)
+                )
+            return intervened
+
+        space = payload.get("space", "projected") if payload is not None else None
+        if space == "raw":
+            vl_embs_list = remove_subspace(vl_embs_list)
+        elif space not in {None, "projected"}:
+            raise ValueError(f"unsupported PI CoT subspace space: {space!r}")
+
+        projected = [proj(vl_h) for proj, vl_h in zip(self.project_layers, vl_embs_list)]
+        if space == "projected":
+            projected = remove_subspace(projected)
+
+        # Optional post-hoc rank-r update fitted through PI's complete action
+        # sampler.  The sidecar implements exactly
+        #   Linear(LayerNorm(h)) + B(A(LayerNorm(h))) / rank
+        # on the selected layerwise projectors.  It is deliberately opt-in so
+        # ordinary checkpoints and training are unchanged.
+        projection_lora_path = os.environ.get(
+            "STARVLA_PI_PROJECTION_LORA_PATH", ""
+        ).strip()
+        if projection_lora_path:
+            sample = projected[0]
+            cache_key = (
+                projection_lora_path,
+                str(sample.device),
+                str(sample.dtype),
+            )
+            if getattr(self, "_projection_lora_cache_key", None) != cache_key:
+                payload = torch.load(
+                    projection_lora_path, map_location="cpu", weights_only=True
+                )
+                if payload.get("format") != "starvla_pi_unrolled_endpoint_adapter_v1":
+                    raise ValueError(
+                        "STARVLA_PI_PROJECTION_LORA_PATH is not an unrolled PI adapter"
+                    )
+                rank = int(payload["rank"])
+                state = payload["state_dict"]
+                updates = {}
+                for layer in payload["cross_layers"]:
+                    prefix = f"updates.projection_{int(layer)}"
+                    updates[int(layer)] = (
+                        state[f"{prefix}.down.weight"].to(
+                            device=sample.device, dtype=sample.dtype
+                        ),
+                        state[f"{prefix}.up.weight"].to(
+                            device=sample.device, dtype=sample.dtype
+                        ),
+                    )
+                self._projection_lora_updates = updates
+                self._projection_lora_rank = rank
+                self._projection_lora_cache_key = cache_key
+                logger.info(
+                    "PI projection LoRA: loading rank-%d sampler-aware adapter from %s",
+                    rank,
+                    projection_lora_path,
+                )
+            adapted = list(projected)
+            for layer, (down, up) in self._projection_lora_updates.items():
+                projector = self.project_layers[layer]
+                projector_input = (
+                    projector[0](vl_embs_list[layer])
+                    if isinstance(projector, nn.Sequential)
+                    else vl_embs_list[layer]
+                )
+                adapted[layer] = adapted[layer] + F.linear(
+                    F.linear(projector_input, down), up
+                ) / self._projection_lora_rank
+            projected = adapted
+
+        # Optional post-hoc alignment gate. Unlike the binary CoT diagnostic
+        # above, this payload stores a learned suppression coefficient for
+        # every basis vector. Coefficients can be zero, making the intervention
+        # exactly identity at initialization. The sidecar is deliberately not
+        # part of ordinary checkpoints and is activated only for explicit
+        # alignment evaluations.
+        alignment_path = os.environ.get("STARVLA_PI_ALIGNMENT_PATH", "").strip()
+        if alignment_path:
+            if getattr(self, "_alignment_gate_cache_key", None) != alignment_path:
+                alignment = torch.load(
+                    alignment_path, map_location="cpu", weights_only=True
+                )
+                if alignment.get("space") != "projected":
+                    raise ValueError("PI alignment gate currently requires projected space")
+                if int(alignment["num_layers"]) != len(projected):
+                    raise ValueError(
+                        f"alignment gate has {alignment['num_layers']} layers, "
+                        f"model has {len(projected)}"
+                    )
+                self._alignment_gate_payload = alignment
+                self._alignment_gate_cache_key = alignment_path
+                logger.info("PI alignment: loading gated subspace from %s", alignment_path)
+            alignment = self._alignment_gate_payload
+            aligned = list(projected)
+            for layer_text, entry in alignment["layers"].items():
+                layer = int(layer_text)
+                hidden = aligned[layer]
+                means = entry["means"].to(device=hidden.device, dtype=hidden.dtype)
+                basis = entry["basis"].to(device=hidden.device, dtype=hidden.dtype)
+                alpha = entry["alpha"].to(device=hidden.device, dtype=hidden.dtype)
+                if means.ndim != 2 or basis.ndim != 2 or alpha.ndim != 1:
+                    raise ValueError(f"invalid alignment tensors at layer {layer}")
+                if means.shape != basis.transpose(0, 1).shape:
+                    raise ValueError(f"alignment mean/basis mismatch at layer {layer}")
+                if basis.shape[1] != alpha.shape[0] or basis.shape[0] != hidden.shape[-1]:
+                    raise ValueError(f"alignment basis/alpha mismatch at layer {layer}")
+                centered = hidden.unsqueeze(-2) - means.view(1, 1, *means.shape)
+                coefficient = (centered * basis.transpose(0, 1)).sum(dim=-1)
+                if bool(alignment.get("conditional", False)):
+                    condition_weight = entry["condition_weight"].to(
+                        device=hidden.device, dtype=hidden.dtype
+                    )
+                    condition_bias = entry["condition_bias"].to(
+                        device=hidden.device, dtype=hidden.dtype
+                    )
+                    if condition_weight.shape != alpha.shape or condition_bias.shape != alpha.shape:
+                        raise ValueError(f"alignment condition/alpha mismatch at layer {layer}")
+                    evidence = coefficient.abs() / (1.0 + coefficient.abs())
+                    alpha = alpha.view(1, 1, -1) * torch.sigmoid(
+                        evidence * condition_weight.view(1, 1, -1)
+                        + condition_bias.view(1, 1, -1)
+                    )
+                correction = (
+                    coefficient.mul(alpha).unsqueeze(-1)
+                    * basis.transpose(0, 1).view(1, 1, *means.shape)
+                ).sum(dim=-2)
+                aligned[layer] = hidden - correction
+            projected = aligned
+        if os.environ.get("STARVLA_MLM_NUMERIC_PATH", ""):
+            from starVLA.model.modules.mlm_numeric_intervention import maybe_erase_numeric_slots
+            projected = maybe_erase_numeric_slots(self, projected)
+        return projected
 
     def _encode_vl_hidden_states(
         self,
@@ -278,9 +731,10 @@ class Qwen_PI_v3(baseframework):
         instructions: List[str],
         cot_conversations: List[list | None] | None = None,
         cot_modes: List[str] | None = None,
-    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
-        """Return projected layer states, optional CoT CE, and encoder attention bias."""
+    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Return projected states, CoT CE, mask bias, anchor loss, and shared z."""
         has_cot = bool(cot_conversations) and any(c is not None for c in cot_conversations)
+        self._shared_z_from_decoder = None
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
             images=batch_images,
             instructions=instructions,
@@ -294,8 +748,8 @@ class Qwen_PI_v3(baseframework):
                 output_hidden_states=True,
                 return_dict=True,
             )
-            vl_embs_list = list(qwenvl_outputs.hidden_states[-self.num_action_dit_layers:])
-            vl_embs_list = self._project_vl_hidden_for_action(vl_embs_list)
+            raw_vl_embs_list = list(qwenvl_outputs.hidden_states[-self.num_action_dit_layers:])
+            vl_embs_list = self._project_vl_hidden_for_action(raw_vl_embs_list)
         last_hidden = vl_embs_list[-1]
         valid = getattr(self.qwen_vl_interface, "_last_encoder_attention_mask", None)
         if valid is None:
@@ -312,13 +766,292 @@ class Qwen_PI_v3(baseframework):
                 "PI encoder mask/hidden-state mismatch: "
                 f"{tuple(valid.shape)} vs {tuple(last_hidden.shape[:2])}"
             )
-        attention_bias = self._dit_attention_bias(valid, last_hidden.dtype)
+        action_valid = self._action_encoder_valid_mask(valid)
+        attention_bias = self._dit_attention_bias(action_valid, last_hidden.dtype)
         cot_loss = (
             qwenvl_outputs.loss
             if has_cot and qwenvl_outputs.loss is not None
             else None
         )
-        return vl_embs_list, cot_loss, attention_bias
+        anchor_loss = self._representation_anchor_forward(
+            qwen_inputs, raw_vl_embs_list, valid
+        )
+        shared_z = None
+        if self.shared_z_enabled:
+            shared_z = self._shared_z_from_decoder
+            if shared_z is None:
+                shared_z = self.shared_z_pooler(raw_vl_embs_list[-1], valid)
+        return vl_embs_list, cot_loss, attention_bias, anchor_loss, shared_z
+
+    def _encode_future_shared_z(
+        self,
+        future_images: List,
+        instructions: List[str],
+    ) -> torch.Tensor:
+        """Encode target frames without exposing pixels or gradients to the policy path."""
+        if not self.shared_z_enabled or self.shared_z_pooler is None:
+            raise RuntimeError("future shared-z requested while shared_z is disabled")
+        inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=future_images, instructions=instructions,
+        )
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            outputs = self.qwen_vl_interface(
+                **inputs, output_attentions=False, output_hidden_states=True, return_dict=True
+            )
+            hidden = outputs.hidden_states[-1]
+            valid = getattr(self.qwen_vl_interface, "_last_encoder_attention_mask", None)
+            if valid is None:
+                valid = inputs.get("attention_mask")
+            if valid is None:
+                valid = torch.ones(hidden.shape[:2], device=hidden.device, dtype=torch.bool)
+            valid = valid[:, :hidden.shape[1]].to(device=hidden.device, dtype=torch.bool)
+            target_z = self.shared_z_pooler(hidden, valid)
+        return target_z.detach()
+
+    @staticmethod
+    def _gather_shared_z(z: torch.Tensor) -> torch.Tensor:
+        if not dist.is_available() or not dist.is_initialized() or dist.get_world_size() == 1:
+            return z
+        from torch.distributed.nn.functional import all_gather
+        return torch.cat(tuple(all_gather(z)), dim=0)
+
+    def _shared_z_distribution_loss(self, z: torch.Tensor) -> tuple[torch.Tensor, dict]:
+        """Weak-SIGReg-style random-projection moment matching on the global batch."""
+        gathered = self._gather_shared_z(z.float())
+        centered = gathered - gathered.mean(dim=0, keepdim=True)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(271828)
+        directions = torch.randn(
+            64, self.shared_z_dim, generator=generator, dtype=torch.float32
+        ).to(device=z.device)
+        directions = F.normalize(directions, dim=-1)
+        projected = centered @ directions.t()
+        mean = projected.mean(dim=0)
+        variance = projected.var(dim=0, unbiased=False)
+        loss = mean.square().mean() + (variance - 1.0).square().mean()
+        singular = torch.linalg.svdvals(centered.detach())
+        probabilities = singular.square() / singular.square().sum().clamp_min(1.0e-12)
+        effective_rank = torch.exp(
+            -(probabilities * probabilities.clamp_min(1.0e-12).log()).sum()
+        )
+        return loss, {
+            "shared_z/distribution_loss": loss.detach(),
+            "shared_z/std_mean": centered.std(dim=0, unbiased=False).mean().detach(),
+            "shared_z/effective_rank": effective_rank.detach(),
+        }
+
+    def _shared_z_supervision(
+        self,
+        z: torch.Tensor,
+        examples: List[dict],
+        conversations: List[list | None],
+        actions_target: torch.Tensor,
+        future_z: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        parsed = [
+            example.get("cot_structured_targets")
+            or extract_structured_cot_targets(conversation)
+            for example, conversation in zip(examples, conversations)
+        ]
+        if self.shared_z_shuffle_targets and len(parsed) > 1:
+            parsed = parsed[1:] + parsed[:1]
+            actions_target = actions_target.roll(shifts=-1, dims=0)
+            if future_z is not None:
+                future_z = future_z.roll(shifts=-1, dims=0)
+            shuffle_fraction = 1.0
+        else:
+            shuffle_fraction = 0.0
+
+        losses, weights = [], []
+        metrics: dict[str, torch.Tensor] = {}
+        metrics["shared_z/shuffle_fraction"] = torch.tensor(
+            shuffle_fraction, device=z.device
+        )
+        for name, spec in self.shared_z_target_specs.items():
+            dim = int(spec["dim"])
+            weight = float(spec.get("weight", 1.0))
+            prediction = self.shared_z_heads[name](z).float()
+            present = []
+            values = []
+            for target in parsed:
+                value = target.get(name)
+                if name == "ground_relation" and value is None:
+                    point, box = target.get("target_point"), target.get("object_box")
+                    if point is not None and box is not None:
+                        value = [point[0] - 0.5 * (box[0] + box[2]),
+                                 point[1] - 0.5 * (box[1] + box[3])]
+                keep = value is not None and (
+                    isinstance(value, (int, np.integer)) or len(value) == dim
+                )
+                present.append(keep)
+                if keep:
+                    values.append(value)
+            if any(present):
+                select = torch.tensor(present, device=z.device, dtype=torch.bool)
+                if str(spec.get("loss", "smooth_l1")) == "cross_entropy":
+                    target_tensor = torch.tensor(values, device=z.device, dtype=torch.long)
+                    head_loss = F.cross_entropy(prediction[select], target_tensor)
+                else:
+                    target_tensor = torch.tensor(values, device=z.device, dtype=torch.float32)
+                    head_loss = F.smooth_l1_loss(prediction[select], target_tensor)
+            else:
+                head_loss = prediction.sum() * 0.0
+            losses.append(head_loss)
+            # Keep the zero-valued head in the graph on every rank (DeepSpeed
+            # requires matching parameter participation), but do not let a target
+            # absent from the whole local batch dilute the active-loss denominator.
+            weights.append(weight if any(present) else 0.0)
+            metrics[f"shared_z/{name}_loss"] = head_loss.detach()
+            metrics[f"shared_z/{name}_coverage"] = torch.tensor(
+                sum(present) / max(len(present), 1), device=z.device
+            )
+
+        distribution_loss, distribution_metrics = self._shared_z_distribution_loss(z)
+        metrics.update(distribution_metrics)
+        losses.append(distribution_loss)
+        weights.append(self.shared_z_distribution_weight)
+
+        separation_terms = []
+        for left in range(len(examples)):
+            left_point = parsed[left].get("target_point")
+            if left_point is None:
+                continue
+            for right in range(left + 1, len(examples)):
+                if examples[left].get("lang") != examples[right].get("lang"):
+                    continue
+                right_point = parsed[right].get("target_point")
+                if right_point is None:
+                    continue
+                point_delta = torch.tensor(left_point, device=z.device) - torch.tensor(
+                    right_point, device=z.device
+                )
+                if point_delta.float().norm() < 0.05:
+                    continue
+                latent_distance = (z[left].float() - z[right].float()).norm() / (
+                    self.shared_z_dim ** 0.5
+                )
+                separation_terms.append(
+                    F.relu(self.shared_z_separation_margin - latent_distance)
+                )
+        separation_loss = (
+            torch.stack(separation_terms).mean() if separation_terms else z.sum() * 0.0
+        )
+        losses.append(separation_loss)
+        weights.append(self.shared_z_separation_weight if separation_terms else 0.0)
+        metrics["shared_z/separation_loss"] = separation_loss.detach()
+        metrics["shared_z/separation_pairs"] = torch.tensor(
+            len(separation_terms), device=z.device, dtype=torch.float32
+        )
+
+        if self.shared_z_temporal_enabled:
+            action_prefix = actions_target[:, :self.shared_z_future_offset].float().flatten(1)
+            if future_z is not None:
+                predicted_future = self.shared_z_future_predictor(
+                    torch.cat([z.float(), action_prefix], dim=-1)
+                )
+                transition_loss = 1.0 - F.cosine_similarity(
+                    predicted_future, future_z.float(), dim=-1
+                ).mean()
+                decoded_action = self.shared_z_difference_decoder(
+                    future_z.float() - z.float()
+                )
+                difference_loss = F.smooth_l1_loss(decoded_action, action_prefix)
+            else:
+                transition_loss = sum(
+                    parameter.sum() * 0.0
+                    for parameter in self.shared_z_future_predictor.parameters()
+                )
+                difference_loss = sum(
+                    parameter.sum() * 0.0
+                    for parameter in self.shared_z_difference_decoder.parameters()
+                )
+            temporal_loss = 0.5 * (transition_loss + difference_loss)
+            losses.append(temporal_loss)
+            weights.append(self.shared_z_temporal_weight if future_z is not None else 0.0)
+            metrics["shared_z/transition_loss"] = transition_loss.detach()
+            metrics["shared_z/difference_action_loss"] = difference_loss.detach()
+
+        positive_weight = sum(weight for weight in weights if weight > 0.0)
+        if positive_weight <= 0.0:
+            raise ValueError("shared-z loss weights must sum to a positive value")
+        total = sum(weight * loss for weight, loss in zip(weights, losses)) / positive_weight
+        metrics["shared_z/loss"] = total.detach()
+        return total, metrics
+
+    def _shared_z_memory_keep(self, batch: int, device: torch.device) -> torch.Tensor:
+        rate = self.shared_z_memory_dropout_rate
+        if self.training:
+            return torch.rand(batch, device=device) >= rate
+        if rate >= 1.0:
+            return torch.zeros(batch, device=device, dtype=torch.bool)
+        return torch.ones(batch, device=device, dtype=torch.bool)
+
+    def _representation_anchor_forward(
+        self,
+        qwen_inputs: dict,
+        student_states: List[torch.Tensor],
+        valid_tokens: torch.Tensor,
+    ) -> Optional[torch.Tensor]:
+        """Cosine-anchor selected encoder layers to their pretrained initialization."""
+        if not self.representation_anchor_enabled or self.is_inference or not self.training:
+            return None
+        teacher = self._representation_anchor_teacher
+        if teacher is None:
+            raise RuntimeError("representation anchor is enabled but its frozen teacher is missing")
+        device = student_states[-1].device
+        if self._representation_anchor_teacher_device != device:
+            teacher.to(device)
+            object.__setattr__(self, "_representation_anchor_teacher_device", device)
+        teacher.eval()
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            teacher_outputs = teacher(
+                **qwen_inputs,
+                output_attentions=False,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            teacher_states = list(teacher_outputs.hidden_states[-self.num_action_dit_layers:])
+        losses = []
+        for requested_index in self.representation_anchor_layers:
+            index = requested_index % len(student_states)
+            student = student_states[index]
+            reference = teacher_states[index].detach()
+            if student.shape != reference.shape:
+                raise RuntimeError(
+                    f"representation-anchor shape mismatch at layer {requested_index}: "
+                    f"{tuple(student.shape)} vs {tuple(reference.shape)}"
+                )
+            mask = valid_tokens[:, : student.shape[1]]
+            token_loss = 1.0 - F.cosine_similarity(student.float(), reference.float(), dim=-1)
+            losses.append(token_loss.masked_select(mask).mean())
+        if not losses:
+            raise ValueError("framework.representation_anchor.layer_indices must not be empty")
+        return torch.stack(losses).mean()
+
+    def _tied_dynamics_forward(
+        self,
+        clean_actions: torch.Tensor,
+        target_actions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Tie action-head updates to multi-horizon cumulative delta-EEF motion.
+
+        Both tensors remain in the dataset's normalized delta-action coordinates.
+        Comparing cumulative prediction and target cancels the affine offset and
+        avoids introducing an incorrect camera/world-frame transform.
+        """
+        dims = self.tied_dynamics_position_dims
+        predicted_path = clean_actions[..., :dims].float().cumsum(dim=1)
+        target_path = target_actions[..., :dims].float().cumsum(dim=1)
+        indices = torch.tensor(
+            [horizon - 1 for horizon in self.tied_dynamics_horizons],
+            device=clean_actions.device,
+            dtype=torch.long,
+        )
+        return F.smooth_l1_loss(
+            predicted_path.index_select(1, indices),
+            target_path.index_select(1, indices),
+            beta=self.tied_dynamics_beta,
+        )
 
     @staticmethod
     def _dit_attention_bias(valid: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -326,6 +1059,113 @@ class Qwen_PI_v3(baseframework):
         bias = torch.zeros(valid.shape, device=valid.device, dtype=dtype)
         bias.masked_fill_(~valid, -10_000.0)
         return bias[:, None, :]
+
+    def _action_encoder_valid_mask(self, valid: torch.Tensor) -> torch.Tensor:
+        """Optionally restrict PI memory to masked-reasoning slots per training row."""
+        rate = self.encoder_mlm_action_slot_dropout_rate
+        enabled = rate > 0.0 and self.training and not self.is_inference
+        if not enabled:
+            self._last_encoder_mlm_action_slot_only_rate = 0.0
+            return valid
+
+        slots = getattr(self.qwen_vl_interface, "_last_encoder_mlm_slot_mask", None)
+        if slots is None:
+            raise RuntimeError(
+                "encoder MLM action-slot dropout was enabled, but the VLM did not expose "
+                "its masked reasoning-slot positions"
+            )
+        slots = slots[:, : valid.shape[1]].to(device=valid.device, dtype=torch.bool)
+        if slots.shape != valid.shape:
+            raise RuntimeError(
+                "encoder MLM slot mask/PI memory mismatch: "
+                f"{tuple(slots.shape)} vs {tuple(valid.shape)}"
+            )
+        slots = slots & valid
+        if not bool(slots.any(dim=1).all()):
+            raise RuntimeError("every PI row must contain at least one masked reasoning slot")
+
+        slot_only_rows = torch.rand(valid.shape[0], device=valid.device) < rate
+        self._last_encoder_mlm_action_slot_only_rate = float(
+            slot_only_rows.float().mean().detach().cpu()
+        )
+        return torch.where(slot_only_rows[:, None], slots, valid)
+
+    def _repeated_diffusion_steps(self) -> int:
+        """Read the action-side Monte Carlo repeat count from its canonical config."""
+        value = int(
+            self.config.framework.action_model.get("repeated_diffusion_steps", 2)
+        )
+        if value < 1:
+            raise ValueError(
+                "framework.action_model.repeated_diffusion_steps must be at least 1, "
+                f"got {value}"
+            )
+        return value
+
+    def _structured_aux_forward(
+        self,
+        examples: List[dict],
+        conversations: List[list | None],
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor]]:
+        """Apply N's structured targets directly to captured raw encoder layers."""
+        if not self.structured_aux_enabled:
+            return None, {}
+        layer_states = self.qwen_vl_interface._structured_layer_out
+        encoder_valid = self.qwen_vl_interface._last_encoder_attention_mask.bool()
+        parsed = [
+            example.get("cot_structured_targets")
+            or extract_structured_cot_targets(conversation)
+            for example, conversation in zip(examples, conversations)
+        ]
+        losses: list[torch.Tensor] = []
+        loss_weights: list[float] = []
+        metrics: dict[str, torch.Tensor] = {}
+        for name, spec in self.structured_aux_specs.items():
+            layer = int(spec["layer"])
+            dim = int(spec["dim"])
+            weight = float(spec.get("weight", 1.0))
+            if weight < 0.0:
+                raise ValueError(f"structured auxiliary weight for {name} must be nonnegative")
+            if layer not in layer_states:
+                raise RuntimeError(f"structured auxiliary layer {layer} was not captured")
+            hidden = layer_states[layer]
+            valid_tokens = encoder_valid[:, : hidden.shape[1]]
+            if valid_tokens.shape != hidden.shape[:2]:
+                raise RuntimeError(
+                    f"structured auxiliary mask mismatch at layer {layer}: "
+                    f"{tuple(valid_tokens.shape)} vs {tuple(hidden.shape[:2])}"
+                )
+            present = [name in target and len(target[name]) == dim for target in parsed]
+            prediction = self.structured_aux_heads[name](hidden, valid_tokens).float()
+            if any(present):
+                indices = torch.tensor(present, device=hidden.device, dtype=torch.bool)
+                target = torch.tensor(
+                    [target[name] for target, keep in zip(parsed, present) if keep],
+                    device=hidden.device,
+                    dtype=torch.float32,
+                )
+                head_loss = F.smooth_l1_loss(prediction[indices], target)
+                losses.append(head_loss)
+                loss_weights.append(weight)
+                metrics[f"structured_aux/{name}_loss"] = head_loss.detach()
+            else:
+                # Preserve identical DeepSpeed parameter participation on all ranks.
+                losses.append(prediction.sum() * 0.0)
+                loss_weights.append(weight)
+            metrics[f"structured_aux/{name}_weight"] = torch.tensor(
+                weight, device=hidden.device
+            )
+            metrics[f"structured_aux/{name}_coverage"] = torch.tensor(
+                sum(present) / max(len(present), 1), device=hidden.device
+            )
+        if not losses:
+            zero = sum((parameter.sum() * 0.0 for parameter in self.structured_aux_heads.parameters()))
+            return zero, metrics
+        denominator = sum(loss_weights)
+        if denominator <= 0.0:
+            raise ValueError("structured auxiliary target weights must sum to a positive value")
+        weighted = sum(weight * loss for weight, loss in zip(loss_weights, losses)) / denominator
+        return weighted, metrics
 
     @staticmethod
     def _apply_cot_graph_guard(
@@ -341,6 +1181,37 @@ class Qwen_PI_v3(baseframework):
             for example, conversation in zip(examples, conversations)
         )
         return cot_loss * 0.0 if guard_only else cot_loss
+
+    def _add_state_conditioning(
+        self,
+        instructions: List[str],
+        states: List[np.ndarray] | None,
+    ) -> tuple[List[str], float]:
+        """Append discretised state, with per-example training-only dropout.
+
+        Dropped state is omitted rather than replaced by zeros: zero is a valid
+        normalized robot state and should not also mean "state unavailable".
+        """
+        if states is None:
+            return instructions, 0.0
+        if len(instructions) != len(states):
+            raise ValueError(
+                f"instruction/state batch mismatch: {len(instructions)} vs {len(states)}"
+            )
+
+        if self.training and self.state_dropout_rate > 0.0:
+            keep_state = np.random.random(len(states)) >= self.state_dropout_rate
+        else:
+            keep_state = np.ones(len(states), dtype=bool)
+
+        conditioned = []
+        for instruction, state, keep in zip(instructions, states, keep_state):
+            if keep:
+                state_str = self.state2str_transform(np.asarray(state)[0])
+                conditioned.append(f"{instruction} [STATE] {state_str} [ACTION]")
+            else:
+                conditioned.append(instruction)
+        return conditioned, float(np.mean(keep_state)) if len(keep_state) else 0.0
 
     def forward(
         self,
@@ -422,20 +1293,54 @@ class Qwen_PI_v3(baseframework):
                 batch_images, cot_conversations, mode=augmentation
             )
 
-        # Prepend discretised proprioceptive state to each instruction string.
-        instructions = (
-            self.add_discretized_state_to_instruction(instructions, state) if state is not None else instructions
-        )
+        # Append discretised proprioceptive state, optionally dropping the full
+        # state suffix per training example. Raw state never enters PI-v3's DiT.
+        instructions, state_keep_rate = self._add_state_conditioning(instructions, state)
         state = None  # state is now encoded in the instruction tokens
 
+        latent_targets = None
+        latent_teacher_audit = {}
+        if self.decoder_latent_alignment is not None:
+            if self._decoder_latent_teacher is None:
+                raise RuntimeError("Training/evaluation loss requested on inference-only alignment model")
+            latent_targets = self._decoder_latent_teacher.targets(
+                batch_images, instructions, cot_conversations,
+                list(self.decoder_latent_alignment.offsets), next(self.parameters()).device)
+            if self.training and not self._latent_alignment_audited:
+                latent_teacher_audit = self._decoder_latent_teacher.audit(
+                    batch_images, instructions, cot_conversations,
+                    list(self.decoder_latent_alignment.offsets), latent_targets,
+                    next(self.parameters()).device)
+                if self._decoder_latent_teacher.benchmark_batches:
+                    latent_teacher_audit.update(self._decoder_latent_teacher.benchmark(
+                        batch_images, instructions, cot_conversations,
+                        list(self.decoder_latent_alignment.offsets), latent_targets,
+                        next(self.parameters()).device))
+                self._latent_alignment_audited = True
+
         # Step 1: encode through QwenVL
-        vl_embs_list, cot_loss, encoder_attention_bias = self._encode_vl_hidden_states(
+        vl_embs_list, cot_loss, encoder_attention_bias, representation_anchor_loss, shared_z = self._encode_vl_hidden_states(
             batch_images,
             instructions,
-            cot_conversations=cot_conversations if has_cot else None,
+            cot_conversations=(
+                cot_conversations if has_cot and self.cot_text_supervision else None
+            ),
             cot_modes=cot_modes,
         )
         cot_loss = self._apply_cot_graph_guard(cot_loss, examples, cot_conversations)
+        self._last_shared_z = shared_z
+        structured_aux_loss, structured_aux_metrics = self._structured_aux_forward(
+            examples, cot_conversations
+        )
+        if self.projected_numeric_aux is not None:
+            numeric_targets = [ex.get("cot_structured_targets") or extract_structured_cot_targets(c)
+                               for ex, c in zip(examples, cot_conversations)]
+            structured_aux_loss, structured_aux_metrics = self.projected_numeric_aux(
+                vl_embs_list, self.qwen_vl_interface._last_encoder_mlm_slot_mask, numeric_targets)
+        if latent_targets is not None:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                structured_aux_loss, structured_aux_metrics = self.decoder_latent_alignment(
+                    vl_embs_list, self.qwen_vl_interface._last_encoder_mlm_slot_mask, *latent_targets)
         base_hidden = vl_embs_list[-1]
 
         # Step 2: compute flow-matching loss over the action chunk
@@ -446,15 +1351,37 @@ class Qwen_PI_v3(baseframework):
             )  # [B, T_full, action_dim]
             actions_target = actions[:, -self.action_horizon :, :]  # (B, action_horizon, action_dim)
 
-            repeated_diffusion_steps = (
-                self.config.trainer.get("repeated_diffusion_steps", 4) if self.config and self.config.trainer else 4
-            )
-            repeated_diffusion_steps = 2  # No repeat for the large action FM to save memory.
+            future_z = None
+            if self.shared_z_enabled and self.shared_z_temporal_enabled:
+                future_images = [example.get("future_image") for example in examples]
+                if all(image is not None for image in future_images):
+                    future_z = self._encode_future_shared_z(future_images, instructions)
+
+            shared_z_loss = None
+            shared_z_metrics = {}
+            if self.shared_z_enabled:
+                shared_z_loss, shared_z_metrics = self._shared_z_supervision(
+                    shared_z, examples, cot_conversations, actions_target, future_z
+                )
+
+            repeated_diffusion_steps = self._repeated_diffusion_steps()
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
             # Repeat every VLM layer embedding to match the duplicated action batch.
             vl_embs_list_repeated = [h.repeat(repeated_diffusion_steps, 1, 1) for h in vl_embs_list]
             encoder_attention_bias_repeated = encoder_attention_bias.repeat(
                 repeated_diffusion_steps, 1, 1
+            )
+            shared_z_repeated = (
+                shared_z.repeat(repeated_diffusion_steps, 1)
+                if shared_z is not None else None
+            )
+            encoder_memory_keep = (
+                self._shared_z_memory_keep(actions_target.shape[0], base_hidden.device)
+                if self.shared_z_enabled else None
+            )
+            encoder_memory_keep_repeated = (
+                encoder_memory_keep.repeat(repeated_diffusion_steps)
+                if encoder_memory_keep is not None else None
             )
 
             state_repeated = None
@@ -462,20 +1389,80 @@ class Qwen_PI_v3(baseframework):
                 state = torch.tensor(np.array(state), device=base_hidden.device, dtype=base_hidden.dtype)
                 state_repeated = state.repeat(repeated_diffusion_steps, 1, 1)
 
-            action_loss = self.action_model(
+            action_output = self.action_model(
                 vl_embs_list_repeated,
                 actions_target_repeated,
                 state_repeated,
                 encoder_attention_mask=encoder_attention_bias_repeated,
+                return_clean_actions=self.tied_dynamics_enabled,
+                z_conditioning=shared_z_repeated,
+                encoder_memory_keep=encoder_memory_keep_repeated,
             )
+            if self.tied_dynamics_enabled:
+                action_loss, clean_actions = action_output
+                tied_dynamics_loss = self._tied_dynamics_forward(
+                    clean_actions, actions_target_repeated
+                )
+            else:
+                action_loss = action_output
+                tied_dynamics_loss = None
 
         result = {
             "action_loss": action_loss,
             "cot_coverage": cot_coverage,
             "cot_keep_rate": cot_keep_rate,
+            "state_keep_rate": state_keep_rate,
         }
+        result.update(latent_teacher_audit)
         if cot_loss is not None:
             result["cot_loss"] = cot_loss
+            if self.encoder_mlm_enabled:
+                # Keep cot_loss as the trainer's established weighted auxiliary slot while
+                # exposing an unambiguous metric name for analysis and W&B.
+                result["encoder_mlm_loss"] = cot_loss.detach()
+        if self.encoder_mlm_action_slot_dropout_rate > 0.0:
+            result["encoder_mlm_action_slot_only_rate"] = torch.tensor(
+                self._last_encoder_mlm_action_slot_only_rate,
+                device=action_loss.device,
+                dtype=action_loss.dtype,
+            )
+        if representation_anchor_loss is not None:
+            result["representation_anchor_loss"] = representation_anchor_loss
+        if tied_dynamics_loss is not None:
+            result["tied_dynamics_loss"] = tied_dynamics_loss
+        if structured_aux_loss is not None:
+            result["structured_aux_loss"] = structured_aux_loss
+            result.update(structured_aux_metrics)
+            if self.decoder_latent_alignment is not None and self.training:
+                self._latent_alignment_steps += 1
+                if self.latent_alignment_gradient_interval > 0 and (
+                        self._latent_alignment_steps == 1 or
+                        self._latent_alignment_steps % self.latent_alignment_gradient_interval == 0):
+                    scale = float(self.config.trainer.loss_scale.get("structured_aux", 1.0))
+                    alignment_gradients = self.decoder_latent_alignment.gradient_metrics(
+                        action_loss, structured_aux_loss, vl_embs_list, scale)
+                    result.update(alignment_gradients)
+                    if self._latent_alignment_steps == 1 and (
+                            not dist.is_initialized() or dist.get_rank() == 0):
+                        # The trainer writes W&B only at logging_frequency multiples.
+                        # Preserve the initial calibration in stdout as well.
+                        print("DECODER_ALIGNMENT_INITIAL_GRADIENTS",
+                              {k: float(v) for k, v in alignment_gradients.items()}, flush=True)
+            if self.projected_numeric_aux is not None and self.training:
+                self._numeric_aux_steps += 1
+                if self.numeric_aux_grad_interval > 0 and (self._numeric_aux_steps == 1 or
+                        self._numeric_aux_steps % self.numeric_aux_grad_interval == 0):
+                    scale = float(self.config.trainer.loss_scale.get("structured_aux", 1.0))
+                    result.update(self.projected_numeric_aux.gradient_metrics(
+                        action_loss, structured_aux_loss, vl_embs_list, scale))
+        if self.shared_z_enabled:
+            if structured_aux_loss is not None:
+                raise RuntimeError(
+                    "shared_z and legacy structured_aux cannot share the same trainer loss slot"
+                )
+            result["structured_aux_loss"] = shared_z_loss
+            result.update(shared_z_metrics)
+            result["shared_z_memory_keep_rate"] = encoder_memory_keep.float().mean()
         return result
 
     @torch.inference_mode()
@@ -505,14 +1492,20 @@ class Qwen_PI_v3(baseframework):
                     denoised actions in the normalised action space.
         """
 
+        if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1":
+            if len(examples) != 1 or "_paired_policy_seed" not in examples[0]:
+                raise ValueError("Paired rollout requires batch size 1 and an explicit per-request seed")
+            torch.use_deterministic_algorithms(True)
+            seed = int(examples[0]["_paired_policy_seed"])
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+
         batch_images = [to_pil_preserve(example["image"]) for example in examples]  # List[List[PIL.Image]]
         instructions = [example["lang"] for example in examples]  # List[str]
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # List[ndarray] or None
 
-        # Encode proprioceptive state into the instruction string, then discard raw state.
-        instructions = (
-            self.add_discretized_state_to_instruction(instructions, state) if state is not None else instructions
-        )
+        # _add_state_conditioning never applies dropout in eval/inference mode.
+        instructions, _ = self._add_state_conditioning(instructions, state)
         state = None
 
         # Optionally resize images to the resolution used during training.
@@ -521,7 +1514,7 @@ class Qwen_PI_v3(baseframework):
             batch_images = resize_images(batch_images, target_size=train_obs_image_size)
 
         # Step 1: encode through QwenVL
-        vl_embs_list, _, encoder_attention_bias = self._encode_vl_hidden_states(
+        vl_embs_list, _, encoder_attention_bias, _, shared_z = self._encode_vl_hidden_states(
             batch_images, instructions
         )
         base_hidden = vl_embs_list[-1]
@@ -533,10 +1526,16 @@ class Qwen_PI_v3(baseframework):
         )
         # Step 2: run the flow-matching sampler to produce the denoised action chunk.
         with torch.autocast("cuda", dtype=torch.float32):
+            encoder_memory_keep = (
+                self._shared_z_memory_keep(base_hidden.shape[0], base_hidden.device)
+                if self.shared_z_enabled else None
+            )
             pred_actions = self.action_model.predict_action(
                 vl_embs_list,
                 state,
                 encoder_attention_mask=encoder_attention_bias,
+                z_conditioning=shared_z,
+                encoder_memory_keep=encoder_memory_keep,
             )  # (B, action_horizon, action_dim)
 
         normalized_actions = pred_actions.detach().cpu().numpy()

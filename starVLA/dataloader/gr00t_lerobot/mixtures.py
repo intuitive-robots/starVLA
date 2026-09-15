@@ -66,6 +66,12 @@ DATASET_NAMED_MIXTURES = {
     "droid_lerobot_180x320_delta_eef": [
         ("droid_success_180x320", 1.0, "droid_lerobot_delta_eef"),
     ],
+    "droid_lerobot_180x320_joint_pos": [
+        ("droid_success_180x320", 1.0, "droid_lerobot_joint_pos"),
+    ],
+    "droid_lerobot_180x320_relative_joint": [
+        ("droid_success_180x320", 1.0, "droid_lerobot_relative_joint"),
+    ],
     "droid_lerobot_resized": [
         ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
     ],

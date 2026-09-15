@@ -396,10 +396,13 @@ class Qwen_GR00T(baseframework):
             return None, {}
         layer_states = self.qwen_vl_interface._structured_layer_out
         encoder_valid = self.qwen_vl_interface._last_encoder_attention_mask.bool()
-        losses, metrics = [], {}
+        losses, loss_weights, metrics = [], [], {}
         for name, spec in self.structured_aux_specs.items():
             layer = int(spec["layer"])
             dim = int(spec["dim"])
+            weight = float(spec.get("weight", 1.0))
+            if weight < 0.0:
+                raise ValueError(f"structured auxiliary weight for {name} must be nonnegative")
             if layer not in layer_states:
                 raise RuntimeError(f"structured auxiliary layer {layer} was not captured")
             hidden = layer_states[layer]
@@ -425,12 +428,17 @@ class Qwen_GR00T(baseframework):
                 )
                 head_loss = F.smooth_l1_loss(prediction[indices], target)
                 losses.append(head_loss)
+                loss_weights.append(weight)
                 metrics[f"structured_aux/{name}_loss"] = head_loss.detach()
             else:
                 # DeepSpeed requires identical parameter participation on every rank.
                 # A field such as target_box can legitimately be absent from one local
                 # batch while present on another, so retain this head with a zero term.
                 losses.append(prediction.sum() * 0.0)
+                loss_weights.append(weight)
+            metrics[f"structured_aux/{name}_weight"] = torch.tensor(
+                weight, device=hidden.device
+            )
             metrics[f"structured_aux/{name}_coverage"] = torch.tensor(
                 sum(present) / max(len(present), 1), device=hidden.device
             )
@@ -439,7 +447,11 @@ class Qwen_GR00T(baseframework):
             # unmapped batch; ordinary LIBERO batches have near-complete trajectories.
             zero = sum((p.sum() * 0.0 for p in self.structured_aux_heads.parameters()))
             return zero, metrics
-        return torch.stack(losses).mean(), metrics
+        denominator = sum(loss_weights)
+        if denominator <= 0.0:
+            raise ValueError("structured auxiliary target weights must sum to a positive value")
+        weighted = sum(weight * loss for weight, loss in zip(loss_weights, losses)) / denominator
+        return weighted, metrics
 
     @staticmethod
     def _apply_cot_graph_guard(
@@ -675,6 +687,13 @@ class Qwen_GR00T(baseframework):
             if state is not None
             else None
         )
+        flow_seeds = [example.get("flow_seed") for example in examples]
+        if any(seed is not None for seed in flow_seeds):
+            if not all(seed is not None for seed in flow_seeds):
+                raise ValueError("flow_seed must be present for every example in a batch")
+            flow_seeds = [int(seed) for seed in flow_seeds]
+        else:
+            flow_seeds = None
 
         # Step 4: Action Expert Forward
         with torch.autocast("cuda", dtype=torch.float32):
@@ -682,6 +701,7 @@ class Qwen_GR00T(baseframework):
                 dit_context,
                 state,
                 encoder_attention_mask=dit_attention_bias,
+                noise_seeds=flow_seeds,
             )
 
         normalized_actions = pred_actions.detach().cpu().numpy()

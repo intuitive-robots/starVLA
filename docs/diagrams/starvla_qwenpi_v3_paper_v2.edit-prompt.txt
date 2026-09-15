@@ -1,0 +1,16 @@
+Use case: precise-object-edit
+Edit target: the attached local StarVLA paper figure. Preserve the title, overall paper-figure aesthetic, camera examples, token colors, optional state labels, legend, bottom action-variant footer and equation. Correct computation arrows and the block inset, with slightly adjusted module positions as needed to make all arrows technically accurate. Opaque white background. Render all text sharply.
+
+Three critical changes:
+1. The three blue memory projectors MUST end on their matching cross-attention blocks. Current arrows are wrong. Arrange the 3 blue projector boxes in the narrow right side of panel (a), vertically aligned with their destination rows in panel (b). Lowest projector labelled "h₁" with "LN + Linear / 2048 → 1024" has horizontal arrow directly into center of row "1 Cross-attention". Middle projector labelled "h₃" sends horizontal arrow directly into center of row "3 Cross-attention". Upper projector labelled "h₂₇" sends horizontal arrow directly into center of row "27 Cross-attention". Connect sources from Qwen layer outputs using clean elbow arrows before the projectors if needed. No memory arrow may point to a self-attention row or ellipsis or dashed border. Panel (b) bottom-to-top order remains 1 Cross, 2 Self, 3 Cross, 4 Self, ellipsis, 27 Cross, 28 Self, then Velocity MLP. Make a clearly visible upward arrow between every consecutive action block. Adjust heights or spacing to ensure these connections are legible. Relabel top selected VLM subdivision "Layer 27" to match h₂₇; indicate depth 28 in main backbone header as before. It is fine not to depict the final Layer 28 output.
+2. Replace ALL contents of panel (c) below its heading with a simpler unambiguous inset. Bottom-to-top layout, only six main boxes/strips:
+   "Action tokens" orange squares at bottom;
+   amber rectangle "Cross-attention block" with two lines below inside that same rectangle: "u = z + CrossAttn(AdaNorm(z,t), P)" and "z′ = u + FFN(LN(u))";
+   upward arrow;
+   red rectangle "Self-attention block" with two lines inside: "u = z′ + SelfAttn(AdaNorm(z′,t))" and "z″ = u + FFN(LN(u))";
+   upward arrow;
+   "Updated action tokens" orange squares at top.
+A small blue side box "P = Project(h₂ₖ₊₁)" sends ONE arrow into Cross-attention box labelled "K, V". Label the vertical incoming action arrow to cross-attention "Q". Self-attention box has short caption "Q, K, V: action tokens". Timestep t sends dashed arrows to both attention boxes. Do NOT draw any extra standalone Add or FFN blocks and no residual bypass arrows: the equations explain residuals accurately with fewer visual elements. Small bottom text "k = 0, …, 13 · 16 heads × 64". Ensure the formulas are written exactly and contain no overlaps.
+3. Fix timestep arrow in panel (b): t circle → DiT stack, dashed arrow points INTO the stack labelled "AdaNorm(t)", not from stack to t. Clearly show inference integration on the velocity feedback loop: place a small box "x ← x + 0.1 v̂" on the right vertical return arrow from velocity to action input. Output final action strip after 10 steps, label "after 10 Euler steps". The flow-velocity MLP does not directly output clean actions.
+
+Do not alter the otherwise good styling. Do not add blocks, new camera inputs, frozen icons, LoRA or generated text.

@@ -240,6 +240,8 @@ tmp
 */**/*.md
 */*.md
 !examples/**/README.md
+!research_notes/dfr_vla_mask_refit/README.md
+!research_notes/spurious_robustness_cross_domain/README.md
 
 # Whitelist specific docs that should be tracked
 !.github/PULL_REQUEST_TEMPLATE.md
@@ -267,3 +269,7 @@ examples/SimplerEnv/eval_files/auto_eval_scripts/auto_collect_results/summarize_
 examples/SimplerEnv/eval_files/auto_eval_scripts/auto_collect_results/schedule_widowx_eval.sh
 starVLA/model/framework/VLM4A/QwenGR00T_v2.py
 starVLA_working/
+
+# local run artifacts (added during upstream sync)
+wandb/
+monitor.log*

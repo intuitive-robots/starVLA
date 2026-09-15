@@ -30,10 +30,12 @@
 
 import json
 import os
+import re
 from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from starVLA.training.trainer_utils import initialize_overwatch
@@ -43,6 +45,53 @@ from .QWen3 import _QWen3_VL_Interface
 logger = initialize_overwatch(__name__)
 
 ENCDEC_REPO = "/e/project1/m3/blank4/code/encdec-vlm"
+
+
+# Fixed cloze layout used by the encoder-only masked-reasoning arm.  The labels are
+# deliberately human-readable in the input, while *every task-dependent value* is replaced
+# by a mask token.  Fixed capacities make training and rollout byte-for-byte equivalent:
+# inference never needs a ground-truth CoT merely to determine the sequence length.
+DEFAULT_ENCODER_MLM_FIELDS = (
+    ("subtask", 16),
+    ("cam1_target", 24),
+    ("trajectory2d", 48),
+    ("trajectory3d", 40),
+    ("movement", 36),
+    ("reasoning", 40),
+)
+
+_ENCODER_MLM_PATTERNS = {
+    "subtask": re.compile(r"<subtask>(.*?)</subtask>", re.DOTALL),
+    "cam1_target": re.compile(
+        r"<cam1>.*?<target>(.*?)</target>.*?</cam1>", re.DOTALL
+    ),
+    "trajectory2d": re.compile(
+        r"<cam1>.*?<trajectory>(.*?)</trajectory>.*?</cam1>", re.DOTALL
+    ),
+    "trajectory3d": re.compile(
+        r"<cam2>.*?<trajectory3d(?:\s+[^>]*)?>(.*?)</trajectory3d>.*?</cam2>",
+        re.DOTALL,
+    ),
+    "movement": re.compile(r"<movement>(.*?)</movement>", re.DOTALL),
+    "reasoning": re.compile(r"<reasoning>\s*(.*?)\s*</reasoning>", re.DOTALL),
+}
+
+
+def extract_encoder_mlm_fields(text: str) -> dict[str, str]:
+    """Extract only semantic/grounding values; structural XML remains visible input."""
+    values = {}
+    for name, pattern in _ENCODER_MLM_PATTERNS.items():
+        match = pattern.search(text or "")
+        values[name] = match.group(1).strip() if match is not None else ""
+    return values
+
+
+def build_encoder_mlm_template(mask_token: str, fields=DEFAULT_ENCODER_MLM_FIELDS) -> str:
+    """Return the fixed all-masked template used identically for train and rollout."""
+    lines = ["Hidden robot reasoning (predict every masked value from vision and instruction):"]
+    for name, slots in fields:
+        lines.append(f"<{name}>{mask_token * int(slots)}</{name}>")
+    return "\n".join(lines)
 
 
 class _StopAfterEncoder(Exception):
@@ -63,6 +112,8 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         use_merged_attention  T5Gemma-2 merged attention (default true)
         separate_cross_attention  use independent per-layer decoder→encoder attention;
                             decoder embeddings/norm/head are also decoupled
+        layerwise_decoder_cross_attention  pair decoder cross-attention block i with
+                            encoder output i instead of giving every block the final output
         skip_decoder        don't run the decoder at all (default true). The action
                             expert never reads decoder states, and in full_duplicate the
                             decoder is a second 28-layer stack over a 2T merged sequence
@@ -109,6 +160,9 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
             n_overlap_layers=int(qcfg.get("n_overlap_layers", 0)),
             use_merged_attention=bool(qcfg.get("use_merged_attention", True)),
             separate_cross_attention=bool(qcfg.get("separate_cross_attention", False)),
+            layerwise_decoder_cross_attention=bool(
+                qcfg.get("layerwise_decoder_cross_attention", False)
+            ),
             cross_attention_gate_init=float(qcfg.get("cross_attention_gate_init", 0.1)),
             choice_cfg=choice_cfg,
         )
@@ -225,6 +279,51 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         self.skip_decoder = bool(qcfg.get("skip_decoder", True))
         self._skip_now = True
 
+        mlm_cfg = dict(qcfg.get("encoder_mlm", {}) or {})
+        self.encoder_mlm_enabled = bool(mlm_cfg.get("enabled", False))
+        self.encoder_mlm_loss_enabled = bool(mlm_cfg.get("loss_enabled", True))
+        self.encoder_mlm_mask_token = str(
+            mlm_cfg.get("mask_token", "<|fim_middle|>")
+        )
+        slot_overrides = dict(mlm_cfg.get("field_slots", {}) or {})
+        self.encoder_mlm_fields = tuple(
+            (name, int(slot_overrides.get(name, default_slots)))
+            for name, default_slots in DEFAULT_ENCODER_MLM_FIELDS
+        )
+        if self.encoder_mlm_enabled:
+            if not self.skip_decoder:
+                raise ValueError(
+                    "encoder_mlm is an encoder-only objective; set qwenvl.skip_decoder=true"
+                )
+            if any(slots <= 0 for _, slots in self.encoder_mlm_fields):
+                raise ValueError("every encoder_mlm field must allocate at least one slot")
+            mask_id = self.processor.tokenizer.convert_tokens_to_ids(
+                self.encoder_mlm_mask_token
+            )
+            if mask_id is None or mask_id == self.processor.tokenizer.unk_token_id:
+                raise ValueError(
+                    f"encoder_mlm mask token {self.encoder_mlm_mask_token!r} is not a "
+                    "single existing tokenizer token"
+                )
+            encoded_mask = self.processor.tokenizer.encode(
+                self.encoder_mlm_mask_token, add_special_tokens=False
+            )
+            if encoded_mask != [mask_id]:
+                raise ValueError(
+                    f"encoder_mlm mask token must encode to one token, got {encoded_mask}"
+                )
+            self.encoder_mlm_mask_token_id = int(mask_id)
+            logger.info(
+                "encoder-only masked reasoning enabled: %d fixed slots, loss=%s, "
+                "mask_token=%s (%d); causal decoder remains skipped",
+                sum(slots for _, slots in self.encoder_mlm_fields),
+                self.encoder_mlm_loss_enabled,
+                self.encoder_mlm_mask_token,
+                self.encoder_mlm_mask_token_id,
+            )
+        else:
+            self.encoder_mlm_mask_token_id = None
+
         def _maybe_stop(mod, args, kwargs=None):
             if self._skip_now:
                 raise _StopAfterEncoder()
@@ -236,6 +335,108 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         decoder_blocks[0].register_forward_pre_hook(_maybe_stop)
         logger.info(f"decoder gate installed (skip_decoder={self.skip_decoder}); the decoder "
                     f"runs only when labels are passed and skip_decoder is false")
+
+    def build_qwenvl_inputs(
+        self,
+        images,
+        instructions,
+        solutions=None,
+        cot_conversations=None,
+        cot_modes=None,
+        **kwargs,
+    ):
+        """Build a fixed all-masked reasoning suffix for encoder-local cloze training.
+
+        Unlike decoder teacher forcing, the ground-truth assistant text is never part of
+        ``input_ids``.  Training and rollout both see the same named template and the same
+        number of mask slots.  CoT dropout only removes labels; it never reveals answers or
+        changes the encoder input.
+        """
+        if not self.encoder_mlm_enabled:
+            return super().build_qwenvl_inputs(
+                images=images,
+                instructions=instructions,
+                solutions=solutions,
+                cot_conversations=cot_conversations,
+                cot_modes=cot_modes,
+                **kwargs,
+            )
+        if solutions is not None:
+            raise ValueError("encoder_mlm does not support fast-tokenizer action solutions")
+        if len(images) != len(instructions):
+            raise ValueError("images and instructions must have the same batch size")
+        if cot_conversations is not None and len(cot_conversations) != len(instructions):
+            raise ValueError("cot_conversations length must match batch size")
+
+        template = build_encoder_mlm_template(
+            self.encoder_mlm_mask_token, self.encoder_mlm_fields
+        )
+        messages = []
+        for index, (sample_images, instruction) in enumerate(zip(images, instructions)):
+            conversation = (
+                cot_conversations[index] if cot_conversations is not None else None
+            )
+            if conversation is not None:
+                prompt = conversation[0]["value"].replace("{instruction}", instruction)
+            elif "CoT_prompt" in self.config.datasets.vla_data:
+                prompt = str(self.config.datasets.vla_data.get("CoT_prompt", "")).replace(
+                    "{instruction}", instruction
+                )
+            else:
+                prompt = instruction
+            # Intentionally do not append /cot or /no_cot.  For this objective dropout is
+            # label dropout, and the policy input must remain identical in both cases and at
+            # rollout.
+            content = [
+                {"type": "image", "image": image} for image in sample_images
+            ]
+            content.append({"type": "text", "text": f"{prompt}\n{template}"})
+            messages.append([{"role": "user", "content": content}])
+
+        batch_inputs = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            padding=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        if self.encoder_mlm_loss_enabled and cot_conversations is not None:
+            input_ids = batch_inputs["input_ids"]
+            mlm_labels = torch.full_like(input_ids, -100)
+            expected_masks = sum(slots for _, slots in self.encoder_mlm_fields)
+            any_target = False
+            for row, conversation in enumerate(cot_conversations):
+                mask_positions = torch.nonzero(
+                    input_ids[row] == self.encoder_mlm_mask_token_id,
+                    as_tuple=False,
+                ).flatten()
+                if mask_positions.numel() != expected_masks:
+                    raise RuntimeError(
+                        "encoder_mlm template/tokenizer mismatch: expected "
+                        f"{expected_masks} mask tokens, found {mask_positions.numel()}"
+                    )
+                if conversation is None:
+                    continue
+                values = extract_encoder_mlm_fields(conversation[1]["value"])
+                offset = 0
+                for name, slots in self.encoder_mlm_fields:
+                    target_ids = self.processor.tokenizer.encode(
+                        values.get(name, ""), add_special_tokens=False
+                    )[:slots]
+                    if target_ids:
+                        positions = mask_positions[offset : offset + len(target_ids)]
+                        mlm_labels[row, positions] = torch.tensor(
+                            target_ids, dtype=mlm_labels.dtype
+                        )
+                        any_target = True
+                    offset += slots
+            if any_target:
+                # Private metadata is consumed by this adapter before invoking HF.
+                batch_inputs["_encoder_mlm_labels"] = mlm_labels
+
+        return batch_inputs.to(self.model.device)
 
     def _text_model(self):
         m = self.model.model
@@ -347,7 +548,10 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
             raise ValueError("enc-dec interface needs input_ids to size the encoder prefix")
         B, T = input_ids.shape[:2]
 
+        encoder_mlm_labels = kwargs.pop("_encoder_mlm_labels", None)
         labels = kwargs.get("labels")
+        if labels is not None and encoder_mlm_labels is not None:
+            raise RuntimeError("decoder labels and encoder_mlm labels are mutually exclusive")
         cot_prefix_length = kwargs.pop("_cot_encoder_prefix_length", None)
         run_choice_queries = bool(kwargs.pop("_run_choice_queries", False))
         if labels is not None and self.skip_decoder:
@@ -403,6 +607,21 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         # QwenGR00T consumes this alongside hidden_states[-1]. Keeping the exact mask
         # captured by the encoder avoids exposing left padding or decoder-target slots to DiT.
         self._last_encoder_attention_mask = enc_attention_mask
+        if self.encoder_mlm_enabled:
+            slot_mask = input_ids[:, : enc_hidden.shape[1]].eq(
+                self.encoder_mlm_mask_token_id
+            )
+            slot_mask = slot_mask & enc_attention_mask.bool()
+            expected_slots = sum(slots for _, slots in self.encoder_mlm_fields)
+            counts = slot_mask.sum(dim=1)
+            if not bool(counts.eq(expected_slots).all()):
+                raise RuntimeError(
+                    "encoder_mlm slot mask mismatch after encoder: expected "
+                    f"{expected_slots} per row, got {counts.tolist()}"
+                )
+            self._last_encoder_mlm_slot_mask = slot_mask
+        else:
+            self._last_encoder_mlm_slot_mask = None
         if run_choice_queries:
             location = str(
                 self.config.framework.get("choice_policy", {}).get("location", "encoder")
@@ -416,6 +635,20 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
                 )
             self._last_choice_hidden = choice_hidden
         loss = getattr(out, "loss", None) if out is not None else None
+        if encoder_mlm_labels is not None:
+            supervised = encoder_mlm_labels.ne(-100)
+            if not bool(supervised.any()):
+                raise RuntimeError("encoder_mlm batch contains no supervised target tokens")
+            lm_head = getattr(self.model, "lm_head", None)
+            if lm_head is None:
+                raise RuntimeError("encoder_mlm requires the pretrained Qwen LM head")
+            selected_hidden = enc_hidden[supervised]
+            selected_targets = encoder_mlm_labels[supervised]
+            # Gather before the vocabulary projection.  This avoids allocating logits for
+            # image, prompt, padding, and unused mask slots while retaining the exact
+            # pretrained token classifier and its gradient into the encoder states.
+            mlm_logits = lm_head(selected_hidden)
+            loss = F.cross_entropy(mlm_logits.float(), selected_targets)
         # Training intentionally drops the very large vocabulary logits after the
         # decoder CE has been computed.  Clean modality diagnostics need the
         # per-token CE, so allow them to retain logits explicitly without changing

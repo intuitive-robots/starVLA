@@ -33,7 +33,32 @@
       "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_470269/ours_real_robot/**)",
       "WebFetch(domain:www.themoonlight.io)",
       "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_486882/ours_real_robot_ambiguity/**)",
-      "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_486882/**)"
+      "Read(//e/project1/m3/blank4/annotations/reverted_changes/ann_run_486882/**)",
+      "Bash(grep -n \"def episodes\\\\|_episodes_table\\\\|keep_ranges\\\\|is_episode_successful\\\\|to_dict\\\\|to_pydict\" /e/project1/m3/blank4/code/lerobot_marigold/lerobot/src/lerobot/datasets/training_dataset_metadata.py | head -30)",
+      "Read(//e/project1/m3/blank4/code/lerobot_marigold/lerobot/src/lerobot/datasets/**)",
+      "Bash(grep -rn \"^EPISODES_DIR\\\\s*=\\\\|EPISODES_DIR\\\\s*=\" /e/project1/m3/blank4/code/lerobot_marigold/lerobot/src/lerobot/ 2>/dev/null | head -5)",
+      "Read(//e/project1/m3/blank4/code/lerobot_marigold/lerobot/src/lerobot/**)",
+      "Bash(ls /e/home/jusers/blank4/jupiter/blank4/code/marigold_data/scripts/smoke_tests/)",
+      "Read(//e/project1/m3/blank4/code/marigold_data/scripts/smoke_tests/**)",
+      "Bash(cat /e/home/jusers/blank4/jupiter/blank4/cache/marigold_sharding/processed_data_config_9e9352e7628abacc4853f0925b54b667c5fc66b434d2de07b713d0192ca3e03f.json)",
+      "Read(//e/project1/m3/blank4/cache/marigold_sharding/**)",
+      "Bash(xargs ls -la)",
+      "Bash(find /e/home/jusers/blank4/jupiter/.claude/ -name \"*.md\" 2>/dev/null | head -20)",
+      "Read(//e/project1/m3/blank4/.claude/**)",
+      "Read(//e/project1/m3/blank4/code/vla-evaluation-harness/**)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && find src docker configs -maxdepth 3 | head -100)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && ls -R configs/model_servers/starvla src/vla_eval/model_servers | head -60)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && cat src/vla_eval/model_servers/starvla.py)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && cat configs/model_servers/starvla/_base.yaml configs/model_servers/starvla/libero_qwen3_oft.yaml configs/model_servers/starvla/README.md)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && sed -n 1,150p src/vla_eval/model_servers/predict.py)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && grep -rn \"script\" src/vla_eval/cli/*.py src/vla_eval/config.py | head -40)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && ls src/vla_eval/cli && grep -rn \"uv run\\\\|subprocess\\\\|script_path\" src/vla_eval/cli/serve.py 2>/dev/null | head -30)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && sed -n 390,465p src/vla_eval/cli/main.py; echo ====; sed -n 885,925p src/vla_eval/cli/main.py)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && cat configs/benchmarks/libero/spatial.yaml; ls configs/benchmarks/libero/; echo ===; sed -n 1,120p CONTRIBUTING.md)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && sed -n 1,80p src/vla_eval/dirs.py | grep -n \"def require_model_available\" -A 40)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && grep -rn \"send_wrist_image\\\\|observation_params\" src/vla_eval/benchmarks/libero/benchmark.py | head -20)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && grep -n \"require_model_available\" -A 35 src/vla_eval/dirs.py | head -60)",
+      "Bash(cd /e/home/jusers/blank4/jupiter/blank4/code/vla-evaluation-harness && grep -n \"def check_model_available\" -A 30 src/vla_eval/dirs.py)"
     ]
   }
 }

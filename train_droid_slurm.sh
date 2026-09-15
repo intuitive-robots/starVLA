@@ -40,6 +40,8 @@ done
 
 # ── Environment modules ───────────────────────────────────────────────────────
 ml load CUDA
+export SLURM_MPI_TYPE=none
+export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 
 # ── Conda ─────────────────────────────────────────────────────────────────────
 source ~/blank4/envs/miniforge3/etc/profile.d/conda.sh
@@ -90,7 +92,7 @@ if [ "${SYSTEMNAME:-}" = juwelsbooster ] \
     MASTER_ADDR="${MASTER_ADDR}i"
 fi
 MASTER_PORT="${MASTER_PORT:-54123}"
-GPUS_PER_NODE="${GPUS_PER_NODE:-gpu}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 TOTAL_GPUS="${TOTAL_GPUS:-$((SLURM_NNODES * $(nvidia-smi -L | wc -l)))}"
 export MASTER_ADDR
 export MASTER_PORT
@@ -107,6 +109,8 @@ echo "Master port:   $MASTER_PORT"
 echo "GPUs / node:   $GPUS_PER_NODE"
 echo "Total GPUs:    $TOTAL_GPUS"
 echo "System name:   ${SYSTEMNAME:-<unset>}"
+echo "Slurm MPI:     $SLURM_MPI_TYPE"
+echo "Visible GPUs:  $CUDA_VISIBLE_DEVICES"
 echo "Config:        $CONFIG_YAML"
 echo "Extra args:    ${EXTRA_ARGS[*]:-<none>}"
 
@@ -129,4 +133,5 @@ fi
 
 echo "Launch command: ${LAUNCH_CMD[*]}"
 
-srun --kill-on-bad-exit=1 --ntasks="$SLURM_NNODES" --ntasks-per-node=1 "${LAUNCH_CMD[@]}"
+srun --kill-on-bad-exit=1 --mpi=none --cpu-bind=none \
+    --ntasks="$SLURM_NNODES" --ntasks-per-node=1 "${LAUNCH_CMD[@]}"

@@ -10,6 +10,7 @@ from PIL import Image
 from starVLA.dataloader.cot_augmentation import augment_cot_sample
 from starVLA.dataloader.marigold_data_datasets import (
     StarVLAMarigoldDataReader,
+    _Q99Normalizer,
     _build_worker_cot_resolver,
     _stats_from_lerobot_meta,
     collate_fn,
@@ -25,6 +26,9 @@ class _IdentityNormalizer:
 
     def state(self, value, _indices):
         return value
+
+    def unnormalize_actions(self, value, _indices):
+        return np.asarray(value, dtype=np.float32)
 
 
 class _Resolver:
@@ -64,6 +68,7 @@ def _reader(
     reader.data_cfg = {"marigold_cot_frame_index_key": "frame_index"}
     reader.train = train
     reader.include_state = include_state
+    reader.action_representation = "joint_position_abs_gripper"
     reader.action_dim = 2
     reader.state_dim = 2
     reader.frame_index = -1
@@ -100,6 +105,83 @@ def _sample():
 
 
 class MarigoldCoTAdapterTest(TestCase):
+    def test_q99_action_inverse_leaves_absolute_gripper_in_zero_one_space(self):
+        normalizer = _Q99Normalizer.__new__(_Q99Normalizer)
+        normalizer.enabled = True
+        normalizer.action_stats = {
+            "q01": [-2.0, 10.0, 0.0],
+            "q99": [2.0, 20.0, 1.0],
+        }
+        normalized = np.asarray([[-1.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+        physical = normalizer.unnormalize_actions(normalized, [0, 1, 2])
+
+        np.testing.assert_allclose(
+            physical,
+            np.asarray([[-2.0, 20.0, 0.0], [0.0, 15.0, 1.0]], dtype=np.float32),
+        )
+
+    def test_open_loop_protocol_uses_final_nonempty_episode_and_chunk_stride(self):
+        sampler = MagicMock()
+        sampler.num_actions = 2
+        sampler.action_frame_stride = 1
+        sampler.num_episodes = 3
+        sampler.filter_episode_indices.return_value = [0, 1, 2]
+        sampler.get_episode_info.side_effect = lambda idx: {"episode": idx}
+        sampler._build_instruction_inventory.side_effect = lambda info: ("inventory", info["episode"])
+        sampler.plan_episode_samples.side_effect = lambda episode_idx, **_: [] if episode_idx == 2 else [10, 12]
+        sampler.episode_uuid.side_effect = lambda info: f"episode-{info['episode']}"
+        sampler._target_frame_offset_to_source_position.side_effect = lambda value: value
+        sampler._round_source_position.side_effect = lambda value: value
+        state = MagicMock()
+        state.sampler = sampler
+        state.mode = "local"
+        reader = StarVLAMarigoldDataReader.__new__(StarVLAMarigoldDataReader)
+        reader.train = False
+        reader._get_open_loop_states = lambda: [("droid", state)]
+
+        episodes = reader.build_open_loop_episodes(action_horizon=2)
+
+        self.assertEqual(len(episodes), 1)
+        self.assertEqual(episodes[0]["episode_idx"], 1)
+        self.assertEqual(episodes[0]["anchors"], [10, 12])
+        self.assertEqual(episodes[0]["anchor_stride_source_frames"], 2)
+
+    def test_open_loop_materialization_preserves_source_frames_and_valid_mask(self):
+        sampler = MagicMock()
+        sampler.num_actions = 2
+        sampler._output_target_source_offsets.return_value = [0, 2]
+        sampler.sample_episode_at.return_value = {
+            "actions": torch.zeros(2, 24),
+            "trajectory_fields": [("eef", 0, 2)],
+            "trajectory_mask": torch.ones(24, dtype=torch.bool),
+            "action_valid_mask": torch.tensor([True, False]),
+            "frame_index": 5,
+        }
+        state = MagicMock()
+        state.sampler = sampler
+        state.cfg = {"root": "/dataset"}
+        reader = StarVLAMarigoldDataReader.__new__(StarVLAMarigoldDataReader)
+        reader.action_dim = 2
+        reader.normalizer = _IdentityNormalizer()
+        reader._convert_sample = lambda _raw: {
+            "action": np.asarray([[0.25, -0.5], [0.5, 0.75]], dtype=np.float32)
+        }
+        episode = {
+            "state": state,
+            "episode_idx": 7,
+            "uuid": "episode-7",
+            "inventory": object(),
+            "anchors": [100],
+        }
+
+        samples = reader.materialize_open_loop_episode(episode, seed=9)
+
+        self.assertEqual(len(samples), 1)
+        np.testing.assert_array_equal(samples[0]["valid_mask"], [True, False])
+        np.testing.assert_array_equal(samples[0]["source_frames"], [5, 7])
+        np.testing.assert_allclose(samples[0]["gt_physical"], samples[0]["gt_normalized"])
+
     def test_delta_eef_stats_use_cartesian_velocity_and_absolute_gripper(self):
         payload = {
             "action.cartesian_velocity": {
@@ -120,10 +202,76 @@ class MarigoldCoTAdapterTest(TestCase):
         self.assertEqual(action_stats["q99"][:7], [0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 1.0])
         self.assertEqual(state_stats["q01"][:7], [0.1, 0.2, 0.3, -3.0, -1.0, -2.0, 0.0])
 
+    def test_relative_joint_stats_keep_gripper_absolute(self):
+        payload = {
+            "action.relative_joint_position": {
+                "q01": [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1],
+                "q99": [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+            },
+            "action.gripper_position": {"q01": [0.0], "q99": [1.0]},
+            "observation.state.joint_position": {
+                "q01": [-2.0, -1.0, -2.0, -3.0, -2.0, 0.0, -3.0],
+                "q99": [2.0, 1.0, 2.0, 0.0, 2.0, 4.0, 3.0],
+            },
+            "observation.state.gripper_position": {"q01": [0.0], "q99": [1.0]},
+        }
+
+        action_stats, state_stats = _stats_from_lerobot_meta(
+            payload, "relative_joint_abs_gripper"
+        )
+
+        self.assertEqual(action_stats["q01"][:7], payload["action.relative_joint_position"]["q01"])
+        self.assertEqual(action_stats["q01"][7], 0.0)
+        self.assertEqual(action_stats["q99"][7], 1.0)
+        self.assertEqual(state_stats["q99"][:7], payload["observation.state.joint_position"]["q99"])
+
+    def test_relative_joint_actions_share_current_state_reference(self):
+        reader = _reader(train=False, cot_source="none")
+        reader.action_dim = 8
+        reader.state_dim = 8
+        reader.action_representation = "relative_joint_abs_gripper"
+        sample = _sample()
+        sample["trajectory_fields"] = [("arm", 0, 7), ("absolute_gripper", 7, 8)]
+        sample["proprio"][0, :7] = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        sample["proprio"][0, 7] = 0.25
+        sample["actions"][:, :7] = sample["proprio"][0, :7] + torch.tensor(
+            [[0.0], [0.1], [0.2]]
+        )
+        sample["actions"][:, 7] = torch.tensor([0.0, 1.0, 1.0])
+
+        result = reader._convert_sample(sample)
+
+        np.testing.assert_allclose(
+            result["action"][:, :7],
+            [[0.0] * 7, [0.1] * 7, [0.2] * 7],
+            atol=1e-3,
+        )
+        np.testing.assert_allclose(result["action"][:, 7], [0.0, 1.0, 1.0])
+        np.testing.assert_allclose(
+            result["state"][0, :7], sample["proprio"][0, :7], atol=1e-3
+        )
+
     def test_include_state_false_omits_marigold_proprio(self):
         reader = _reader(include_state=False)
         result = reader._convert_sample(_sample())
         self.assertNotIn("state", result)
+
+    def test_optional_gripper_inversion_applies_to_action_and_state(self):
+        reader = _reader(train=False, cot_source="none")
+        reader.invert_gripper = True
+        sample = _sample()
+        sample["trajectory_fields"] = [("arm", 0, 1), ("gripper", 22, 23)]
+        sample["actions"][:, 0] = 0.25
+        sample["actions"][:, 22] = 0.8
+        sample["proprio"][:, 0] = 0.5
+        sample["proprio"][:, 22] = 0.1
+
+        result = reader._convert_sample(sample)
+
+        np.testing.assert_allclose(result["action"][:, 0], 0.25)
+        np.testing.assert_allclose(result["action"][:, 1], 0.2)
+        np.testing.assert_allclose(result["state"][:, 0], 0.5)
+        np.testing.assert_allclose(result["state"][:, 1], 0.9)
 
     def test_real_joint_transform_preserves_shape_and_rewrites_coordinates(self):
         torch.manual_seed(3)

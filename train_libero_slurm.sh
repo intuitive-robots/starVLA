@@ -46,6 +46,7 @@ done
 
 # ── Environment modules ───────────────────────────────────────────────────────
 ml load CUDA
+export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 
 # ── Conda ─────────────────────────────────────────────────────────────────────
 source ~/blank4/envs/miniforge3/etc/profile.d/conda.sh

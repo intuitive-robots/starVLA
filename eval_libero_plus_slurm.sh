@@ -45,11 +45,22 @@
 #   --ckpt <path>             path to pytorch_model.pt (required; or set $your_ckpt env var)
 #   --suite <name[,name...]>  one or more comma-separated suites, or all (default: all)
 #   --num_gpus <n>            GPUs PER NODE, default: GPUs visible to the job (nvidia-smi -L)
-#   --workers_per_gpu <n>     sim workers per GPU, default: 1 (or $workers_per_gpu env var)
-#   --servers_per_gpu <n>     policy servers per GPU, default: 1 (or $servers_per_gpu env var).
-#                             Each server is a full model copy on that GPU but gives real
-#                             inference concurrency to workers sharing it -- best throughput
-#                             when workers_per_gpu is a multiple of servers_per_gpu.
+#   --workers_per_gpu <n>     sim workers per GPU, default: 8 (or $workers_per_gpu env var).
+#                             Each worker is one concurrent rollout. 8 per GPU (32 per node)
+#                             already saturates a GH200 booster node: benchmarked on
+#                             libero_10 (512 instances, bench_libero_plus_sharding_slurm.sh
+#                             job 1762532), going to 24/GPU tripled total work from 300 to
+#                             912 worker-minutes for the SAME 14.5 min wall clock -- exactly
+#                             3x the workers running exactly 3x slower (35.2 -> 106.8 s per
+#                             episode), the signature of a fully shared bottleneck. The
+#                             policy servers are not it (mean batch 1.0, 0.21s per call in
+#                             both arms); the limit is on the simulator side. Raising this
+#                             costs memory and buys nothing -- scale across NODES instead
+#                             (sbatch --nodes=N).
+#   --servers_per_gpu <n>     policy servers per GPU, default: 2 (or $servers_per_gpu env var).
+#                             Each server is a full model copy on that GPU (~11 GB VRAM) but
+#                             gives real inference concurrency to workers sharing it -- best
+#                             throughput when workers_per_gpu is a multiple of servers_per_gpu.
 #   --num_trials <n>          trials per task, default: 1 (or $num_trials env var)
 #   --max_tasks_per_suite <n> evaluate ~n task instances per suite instead of the full
 #                             ~2400-2600. NOT a prefix -- each suite's task indices are
@@ -68,11 +79,16 @@
 #                             This is mutually exclusive with --max_tasks_per_suite and is
 #                             preferred for larger matched comparisons with exact denominators.
 #   --gpu_ids <csv>           explicit GPU id list (per node), e.g. "0,1,2,3"
-#   --max_batch_size <n>      batch concurrent requests into one predict_action() call,
-#                             default: 32 (or $max_batch_size env var). 1 = old unbatched
-#                             behavior. See auto_eval_libero_plus.sh for measured speedups.
-#   --max_wait_time <s>       ceiling on how long the dispatcher waits to fill a batch before
-#                             running it under-full, default: 1.0 (or $max_wait_time env var).
+#   --max_batch_size <n>      CEILING on how many concurrent requests are batched into one
+#                             predict_action() call, default: 32 (or $max_batch_size env var).
+#                             1 = old unbatched behavior. Batches fill from requests that
+#                             queue during the previous batch's inference, so this is not a
+#                             target the dispatcher waits for. See auto_eval_libero_plus.sh.
+#   --max_wait_time <s>       how long the dispatcher may BLOCK waiting for a batch to reach
+#                             that ceiling, default: 0 (or $max_wait_time env var). The old
+#                             1.0 default stalled a full second in front of every ~0.19s
+#                             inference, because only workers_per_gpu/servers_per_gpu clients
+#                             can ever have a request in flight -- 4, against a ceiling of 32.
 #   --sim-runtime <mode>      apptainer|auto|conda (default: apptainer). auto uses the SIF when
 #                             Apptainer and the image are available, otherwise the old conda path.
 #   --sif <path>              LIBERO-Plus simulator SIF. The StarVLA model server always remains
@@ -94,14 +110,14 @@ DEFAULT_SUITES=(libero_10 libero_goal libero_object libero_spatial)
 CKPT="${your_ckpt:-}"
 SUITE="${suite:-all}"
 NUM_TRIALS="${num_trials:-1}"
-WORKERS_PER_GPU="${workers_per_gpu:-1}"
-SERVERS_PER_GPU="${servers_per_gpu:-1}"
+WORKERS_PER_GPU="${workers_per_gpu:-8}"
+SERVERS_PER_GPU="${servers_per_gpu:-2}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"
 MAX_TASKS_PER_SUITE="${max_tasks_per_suite:-0}"
 EXACT_TASKS_PER_SUITE="${exact_tasks_per_suite:-0}"
 MAX_BATCH_SIZE="${max_batch_size:-32}"
-MAX_WAIT_TIME="${max_wait_time:-1.0}"
+MAX_WAIT_TIME="${max_wait_time:-0.0}"
 SAVE_VIDEO="${save_video:-False}"
 OBJECT_PERTURB_M="${object_perturb_m:-0.0}"
 OBJECT_PERTURB_ROLES="${object_perturb_roles:-source,target}"
@@ -182,6 +198,12 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
 NUM_NODES="${SLURM_NNODES:-1}"
+if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
+    if [ "${NUM_NODES}" != 1 ] || [ -z "${SLURM_JOB_ID:-}" ] || [ -z "${SLURMD_NODENAME:-}" ]; then
+        echo "[ERROR] STARVLA_EVAL_IN_BATCH requires a single-node Slurm allocation on a compute node."
+        exit 1
+    fi
+fi
 
 if [ "${SUITE}" = "all" ]; then
     SUITES=("${DEFAULT_SUITES[@]}")
@@ -270,8 +292,15 @@ for eval_suite in "${SUITES[@]}"; do
     echo "############################################"
     echo "# Evaluating suite: ${eval_suite} (${NUM_NODES} node(s))"
     echo "############################################"
-    srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
-        bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
+    if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
+        # The sbatch shell already runs on the allocated node. Avoid an extra
+        # ParaStation spawn when its step launcher is unavailable; still use
+        # the same four-GPU pipeline and exact-task partitioning (one partition).
+        SLURM_PROCID=0 bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
+    else
+        srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
+            bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
+    fi
 
     echo "All ${NUM_NODES} partition(s) of ${eval_suite} finished. Aggregating..."
     # Suite-scoped: writes output_dir/<suite>/overall_results.json only, so this

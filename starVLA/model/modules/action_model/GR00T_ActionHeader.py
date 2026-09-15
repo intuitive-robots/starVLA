@@ -5,6 +5,9 @@
 
 
 from dataclasses import dataclass, field
+import math
+import os
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -302,6 +305,77 @@ class FlowmatchingActionHead(nn.Module):
         self.num_timestep_buckets = config.num_timestep_buckets
         self.config = config
 
+        # An optional, inference-only residual readout is loaded lazily after
+        # the base checkpoint has been restored.  Keeping it out of __init__
+        # means old checkpoints retain identical state-dict semantics.
+        self._flow_residual_readout_path = None
+        self._flow_residual_readout = None
+        self._flow_residual_mean = None
+        self._flow_residual_scale = None
+        self._flow_residual_strength = None
+        self._flow_residual_norm_cap_ratio = None
+
+    def _maybe_load_flow_residual_readout(self, device: torch.device) -> None:
+        """Load the successful-pair pi_late adapter requested for inference.
+
+        The readout predicts a normalized-action velocity residual from the
+        final DiT action-token representation.  With the environment variable
+        unset this method is a strict no-op and inference is unchanged.
+        """
+        requested = os.environ.get("STARVLA_FLOW_RESIDUAL_READOUT", "").strip()
+        if not requested:
+            return
+        resolved = str(Path(requested).expanduser().resolve())
+        if self._flow_residual_readout_path == resolved:
+            return
+        if self._flow_residual_readout_path is not None:
+            raise RuntimeError(
+                "Changing STARVLA_FLOW_RESIDUAL_READOUT after inference started is unsupported"
+            )
+        payload = torch.load(resolved, map_location="cpu", weights_only=False)
+        if payload.get("format") != "starvla_successful_pair_linear_readout_v1":
+            raise ValueError(f"unsupported flow residual readout: {payload.get('format')!r}")
+        if payload.get("locus") != "pi_late" or payload.get("arm") != "paired_balanced":
+            raise ValueError(
+                "closed-loop flow correction requires the paired_balanced pi_late readout"
+            )
+        mean = torch.as_tensor(payload["feature_mean"], dtype=torch.float32).reshape(1, 1, -1)
+        scale = torch.as_tensor(payload["feature_scale"], dtype=torch.float32).reshape(1, 1, -1)
+        weight = torch.as_tensor(payload["state_dict"]["weight"], dtype=torch.float32)
+        bias = torch.as_tensor(payload["state_dict"]["bias"], dtype=torch.float32)
+        if weight.shape != (self.action_dim, mean.shape[-1]) or bias.shape != (self.action_dim,):
+            raise ValueError(
+                f"flow residual readout shape mismatch: weight={tuple(weight.shape)}, "
+                f"bias={tuple(bias.shape)}, expected=({self.action_dim}, {mean.shape[-1]})"
+            )
+        adapter = nn.Linear(mean.shape[-1], self.action_dim)
+        adapter.load_state_dict({"weight": weight, "bias": bias})
+        adapter.requires_grad_(False).eval().to(device=device, dtype=torch.float32)
+        self._flow_residual_readout = adapter
+        self._flow_residual_mean = mean.to(device=device)
+        self._flow_residual_scale = scale.to(device=device)
+        self._flow_residual_readout_path = resolved
+        strength = float(os.environ.get("STARVLA_FLOW_RESIDUAL_STRENGTH", "1.0"))
+        if not math.isfinite(strength) or strength < 0.0:
+            raise ValueError(f"invalid STARVLA_FLOW_RESIDUAL_STRENGTH={strength!r}")
+        cap_value = os.environ.get("STARVLA_FLOW_RESIDUAL_NORM_CAP_RATIO", "").strip()
+        norm_cap_ratio = None if not cap_value else float(cap_value)
+        if norm_cap_ratio is not None and (
+            not math.isfinite(norm_cap_ratio) or norm_cap_ratio <= 0.0
+        ):
+            raise ValueError(
+                "STARVLA_FLOW_RESIDUAL_NORM_CAP_RATIO must be finite and positive, "
+                f"got {norm_cap_ratio!r}"
+            )
+        self._flow_residual_strength = strength
+        self._flow_residual_norm_cap_ratio = norm_cap_ratio
+        print(
+            "Loaded paired pi_late flow residual readout "
+            f"from {resolved} (base={payload.get('checkpoint')}, strength={strength}, "
+            f"norm_cap_ratio={norm_cap_ratio})",
+            flush=True,
+        )
+
     def sample_time(self, batch_size, device, dtype):
         sample = self.beta_dist.sample([batch_size]).to(device, dtype=dtype).clamp(max=self.config.noise_s)
         return self.config.noise_s * (1 - sample)
@@ -377,15 +451,37 @@ class FlowmatchingActionHead(nn.Module):
         vl_embs: torch.Tensor,
         state: torch.Tensor = None,
         encoder_attention_mask: torch.Tensor = None,
+        noise_seeds: list[int] | None = None,
     ) -> torch.Tensor:
         # Set initial actions as the sampled noise.
         batch_size = vl_embs.shape[0]
         device = vl_embs.device
-        actions = torch.randn(
-            size=(batch_size, self.action_horizon, self.action_dim),
-            dtype=vl_embs.dtype,
-            device=device,
-        )
+        if noise_seeds is None:
+            actions = torch.randn(
+                size=(batch_size, self.action_horizon, self.action_dim),
+                dtype=vl_embs.dtype,
+                device=device,
+            )
+        else:
+            if len(noise_seeds) != batch_size:
+                raise ValueError(
+                    f"noise_seeds length {len(noise_seeds)} != batch size {batch_size}"
+                )
+            samples = []
+            for seed in noise_seeds:
+                generator = torch.Generator(device=device)
+                generator.manual_seed(int(seed))
+                samples.append(
+                    torch.randn(
+                        size=(1, self.action_horizon, self.action_dim),
+                        dtype=vl_embs.dtype,
+                        device=device,
+                        generator=generator,
+                    )
+                )
+            actions = torch.cat(samples, dim=0)
+
+        self._maybe_load_flow_residual_readout(device)
 
         num_steps = self.num_inference_timesteps
         dt = 1.0 / num_steps
@@ -415,15 +511,45 @@ class FlowmatchingActionHead(nn.Module):
             )
 
             # Run model forward.
-            model_output = self.model(
-                hidden_states=sa_embs,
-                encoder_hidden_states=vl_embs,
-                encoder_attention_mask=encoder_attention_mask,
-                timestep=timesteps_tensor,
-            )
+            if self._flow_residual_readout is None:
+                model_output = self.model(
+                    hidden_states=sa_embs,
+                    encoder_hidden_states=vl_embs,
+                    encoder_attention_mask=encoder_attention_mask,
+                    timestep=timesteps_tensor,
+                )
+                late_hidden = None
+            else:
+                model_output, hidden_states = self.model(
+                    hidden_states=sa_embs,
+                    encoder_hidden_states=vl_embs,
+                    encoder_attention_mask=encoder_attention_mask,
+                    timestep=timesteps_tensor,
+                    return_all_hidden_states=True,
+                )
+                late_hidden = hidden_states[-1][:, -self.action_horizon :]
             pred = self.action_decoder(model_output)
 
             pred_velocity = pred[:, -self.action_horizon :]
+            if late_hidden is not None:
+                standardized = (
+                    late_hidden.float() - self._flow_residual_mean
+                ) / self._flow_residual_scale
+                residual = self._flow_residual_readout(standardized)
+                if self._flow_residual_norm_cap_ratio is not None:
+                    # Trust region per action token: preserve the learned
+                    # direction while bounding its norm relative to the
+                    # frozen policy's current velocity.  The strength is
+                    # applied after clipping, matching alpha * clip(r, rho|v|).
+                    base_norm = pred_velocity.float().norm(dim=-1, keepdim=True)
+                    residual_norm = residual.norm(dim=-1, keepdim=True)
+                    maximum = self._flow_residual_norm_cap_ratio * base_norm
+                    residual = residual * torch.clamp(
+                        maximum / residual_norm.clamp_min(1e-12), max=1.0
+                    )
+                pred_velocity = pred_velocity + self._flow_residual_strength * residual.to(
+                    pred_velocity.dtype
+                )
 
             # Update actions using euler integration.
             actions = actions + dt * pred_velocity

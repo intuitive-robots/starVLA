@@ -1,0 +1,40 @@
+Use case: infographic-diagram
+Asset type: camera-ready robotics paper architecture figure, landscape ~3:2, high resolution, pure opaque white background.
+Input images: The three user-supplied reference figures are STYLE REFERENCES ONLY. Borrow their restrained academic layout, thin strokes, pastel module boxes, actual-looking robot-camera thumbnails, small token squares, dashed module enclosures, concise labels, and upward computation arrows. Do not copy their architectures, frozen icons, LoRA, Q-Former, Guardian, or text content. Generate a new figure for the verified architecture below.
+Primary request: A beautiful, carefully aligned and readable paper figure for our fixed StarVLA QwenPI-v3. Title in modest black text: "StarVLA: QwenPI-v3 with alternating action attention". It should look like the supplied academic figures, not a dense software dashboard or long infographic full of paragraphs. Use generous whitespace, black thin routed arrows, muted blue backbone, pastel amber action head, green state branch, small orange flame marks on trainable neural modules. Text tokenizer has no flame. No gradients or glossy panels. All modules fully within margins.
+
+Layout: two side-by-side, bottom-to-top computation towers comprising the left 70% of the canvas; a larger close-up inset of ONE action-block pair on the right 30%. Small variant footer and training equation footer. Do NOT overwhelm the figure with hyperparameters.
+
+LEFT TOWER — pale blue dashed enclosure "(a) Vision-language backbone"
+At bottom: two small illustrative camera photographs of a Franka manipulating objects on a kitchen table, one third-person and one wrist view, caption "External view + wrist" and small label "224 × 224". These thumbnails are illustrative, not measured dataset samples.
+Above the photos: "Vision encoder + merger" with flame; above that a row of BLUE small square tokens.
+Alongside photos, a gray rounded input box with "Instruction" and example "Place the cup on the tray." plus a small green optional branch "Optional state" → "256-bin discretization". Instruction and optional state flow into "Text tokenizer" then a row of GRAY and GREEN small square tokens.
+These three token colors all feed upward into ONE tall blue block labeled "Qwen3-VL-2B" / "28 causal layers · width 2048", flame marker. Draw horizontal subdivisions to convey layered transformer states, and one explanatory short line "image + language (+ state)".
+From the right edge of this blue transformer at several depths, draw 3 parallel horizontal memory arrows towards the action tower. Clearly label them "h₁", "h₃", "h₂₇" with an ellipsis between 3 and 27. Each passes through a tiny blue rectangular module "LN + Linear" with small width caption "2048 → 1024". End these memory arrows on the corresponding CROSS-attention blocks only. All layer indices are ONE-based. Do not connect these arrows to action encoder, timestep, self-attention, or output. Small caption below these bridges: "Layerwise visual-language memory".
+
+MIDDLE TOWER — pale orange dashed enclosure "(b) Flow-matching action head"
+At bottom a strip of 16 orange square tokens caption "Noisy action chunk xₜ ∈ R¹⁶ˣᴰ".
+An upward arrow to "Action encoder + position embeddings", flame marker.
+An upward arrow into a 28-block stack. Show consecutively bottom-to-top: amber "1  Cross-attention", lighter amber "2  Self-attention", amber "3  Cross-attention", lighter amber "4  Self-attention", vertical ellipsis, amber "27  Cross-attention", lighter amber "28  Self-attention". Draw one continuous vertical stream with arrowheads between consecutive blocks. The action hidden stream must go through every block sequentially. Caption "28 blocks · width 1024" and "14 cross + 14 self".
+A timestep input circle "t" beside the stack connects by a thin dashed arrow to its boundary, label "AdaNorm". It is not a VLM input.
+Above the top block: "Velocity MLP" with flame → small box "v̂ₜ". Above this, output strip of orange action tokens labeled "16-step action chunk". Between velocity and output label "10 Euler steps", with a small integration loop returning from velocity to the noisy chunk input down the outer side of the action enclosure. The VLM conditioning is computed once per chunk. Do not label Euler integration DDIM.
+Short annotations under tower: "Full chunk self-attention" and "No extra query tokens".
+Use a dotted connector from the first action pair to the right inset, no dataflow ambiguity.
+
+RIGHT INSET — dashed light-orange enclosure "(c) One alternating pair"
+This inset should explain attention fully rather than repeat the whole model. Bottom-to-top sequential boxes:
+"Action tokens" → "AdaNorm(t)" → "Cross-attention" → "Add" → "LN → FFN → Add" → "AdaNorm(t)" → "Self-attention" → "Add" → "LN → FFN → Add" → "Updated action tokens".
+Use residual bypass arrows around the attention and FFN portions, neatly along the inset side.
+At cross attention a BLUE side input "Projected h₂ₖ₊₁" connects directly as "K, V"; the normalized action stream enters from below as "Q".
+At self attention the action stream is "Q, K, V"; no blue memory arrow enters it.
+Small caption "k = 0, …, 13 · 16 heads × 64".
+Time conditioning indicated by two thin dashed arrows to the two AdaNorm boxes.
+Ensure cross and self blocks are distinct blocks, not self then cross in each block.
+
+FOOTER with three small labeled variant cells, understated:
+"Absolute joint: D = 8 · state dropout 0.5"
+"Relative joint: D = 8 · state dropout 0.5"
+"Relative EEF: D = 7 · no state"
+Beneath, one short training caption: "Flow matching: xₜ = (1−t)ε + ta; target v = a−ε; loss = MSE(v̂ₜ, v)."
+Small legend: blue squares "visual", gray squares "language", green squares "state", orange squares "action"; flame "trained end to end".
+Keep labels readable and text sparse. Omit optimizer, Slurm, benchmark scores, timestep bucket count, and deployment rate. No frozen modules, no LoRA, no CoT or text-generation branch, no Q-Former/resampler, no extra target queries.
