@@ -229,6 +229,19 @@ DATASET_NAMED_MIXTURES = {
     # Same data, single-camera contract that matches the checked-in eval bridge.
     **{f"{name}_1cam": [(directory, 1.0, _ROBOT_TAG_1CAM)]
        for name, directory in _V3_MIRRORS.items()},
+    # "seen-34" = 18 atomic + 16 composite-seen, the scope StarVLA-PI and
+    # StarVLA-GR00T were trained on in the archived snapshot. It holds out the
+    # 16 composite-unseen tasks, which the target-50 mixtures below do not.
+    # Only expressible on the v3.0 mirrors: the per-task v2.1 tables above lump
+    # composite-seen and composite-unseen into one dict.
+    "robocasa365_v3_seen34": [
+        ("robocasa365_target_atomic", 1.0, _ROBOT_TAG),
+        ("robocasa365_target_composite_seen", 1.0, _ROBOT_TAG),
+    ],
+    "robocasa365_v3_seen34_1cam": [
+        ("robocasa365_target_atomic", 1.0, _ROBOT_TAG_1CAM),
+        ("robocasa365_target_composite_seen", 1.0, _ROBOT_TAG_1CAM),
+    ],
     # All 50 target tasks in v3.0, sampled evenly across the three groups.
     "robocasa365_v3_target_all": [
         (directory, 1.0, _ROBOT_TAG) for directory in _V3_MIRRORS.values()
