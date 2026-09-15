@@ -1283,9 +1283,19 @@ class Qwen_PI_v3(baseframework):
         )
 
         augmentation = str(self.config.datasets.vla_data.get("augmentation", "none")).lower()
+        # Previously also required has_cot, which silently disabled augmentation for
+        # every action-only config even though the YAML asked for it: the ervla_*_
+        # actiononly runs all set augmentation: crop_photometric and never augmented
+        # (train/cot_coverage 0.0). The gate existed because the transform's original
+        # purpose was keeping a sampled crop consistent with coordinate-bearing CoT
+        # targets, but the image half is useful on its own. cot_conversations is
+        # always a correctly-sized list -- entries are None when there is no CoT --
+        # and augment_cot_sample passes a None conversation through untouched, so the
+        # images are augmented and nothing else changes.
+        # cot_from_workers still suppresses it: CoTVideoAugment already augmented
+        # worker-side, and doing it twice would compound crops.
         if (
             self.training
-            and has_cot
             and not cot_from_workers
             and augmentation in {"photometric", "crop_photometric"}
         ):
