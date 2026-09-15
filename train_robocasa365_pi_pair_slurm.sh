@@ -29,8 +29,12 @@ SEED="${1:-42}"
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "$REPO"
 
-CAUSAL_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_causal.yaml
-V5_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_v5.yaml
+# Overridable so a variant sweep (e.g. a different VLM LR) reuses this launcher
+# instead of forking it. RUN_TAG is appended to both run_ids to keep checkpoints
+# and W&B runs distinct.
+CAUSAL_YAML="${CAUSAL_YAML:-./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_causal.yaml}"
+V5_YAML="${V5_YAML:-./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_v5.yaml}"
+RUN_TAG="${RUN_TAG:-}"
 DATA_ROOT=/e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/robocasa365_target_atomic
 
 for f in "$CAUSAL_YAML" "$V5_YAML" train_libero_slurm.sh; do
@@ -92,8 +96,8 @@ launch() {
     pids+=($!)
 }
 
-launch 0 causal "$CAUSAL_YAML" "ervla_robocasa365_pi_causal_s${SEED}"
-launch 1 v5     "$V5_YAML"     "ervla_robocasa365_pi_v5_s${SEED}"
+launch 0 causal "$CAUSAL_YAML" "ervla_robocasa365_pi_causal${RUN_TAG}_s${SEED}"
+launch 1 v5     "$V5_YAML"     "ervla_robocasa365_pi_v5${RUN_TAG}_s${SEED}"
 
 rc=0
 for pid in "${pids[@]}"; do
