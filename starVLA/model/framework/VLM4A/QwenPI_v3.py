@@ -1529,8 +1529,6 @@ class Qwen_PI_v3(baseframework):
             batch_images, instructions
         )
         base_hidden = vl_embs_list[-1]
-        if backbone_attention_mask is not None:
-            backbone_attention_mask = backbone_attention_mask.to(dtype=torch.bool)
 
         state = (
             torch.from_numpy(np.array(state)).to(base_hidden.device, dtype=base_hidden.dtype)

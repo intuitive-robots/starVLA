@@ -90,7 +90,28 @@ datasets:
     per_device_batch_size: 32
     drop_last: true
     load_all_data_for_training: true
-    video_backend: decord
+    # torchcodec, NOT decord. On these H.264 mirrors decord's seek fails and
+    # silently returns a DIFFERENT frame: against a sequential-decode
+    # reference it was wrong on 5/10 reads, and against torchcodec 9/12.
+    # The "Failed to skip frames effectively ... Aborting skip operation"
+    # warnings it prints are that corruption, not a cosmetic notice.
+    # torchcodec matched the reference 12/12 and is also far cheaper to open
+    # (ctor 16 ms vs 143 ms; fresh read 24 ms vs 158 ms).
+    # LIBERO/LIBERO-plus are AV1 (libdav1d) and are NOT affected by this.
+    # torchcodec needs the FFmpeg shim: see
+    # /e/project1/m3/blank4/containers/ffmpeg_shim/README.md
+    video_backend: torchcodec
+    # Reader construction dominates on these 183k-frame v3.0 files, so reuse
+    # files, and with the cache disabled (the loader default of 0) it is paid
+    # on EVERY frame read -- twice per sample at two cameras. Caching readers
+    # collapses that: measured per-stage on 200 samples, mean ms/sample and
+    # ms/frame of video_decode:
+    #     cache  0 -> 370.1 ms/sample, 147.5 ms/frame (79.7%% of loader time)
+    #     cache  8 -> 317.8 ms/sample, 120.9 ms/frame  (thrashes: 39 files)
+    #     cache 40 -> 156.8 ms/sample,  32.6 ms/frame (41.6%%)
+    # 40 covers the whole working set (11 agentview + 17 wrist shards) at
+    # ~0.7 MB per single-threaded reader, so ~28 MB per worker.
+    video_reader_cache_size: 40
     lerobot_version: "v3.0"
     # Measured on a dev node against this dataset (bs=32, prefetch queue
     # drained before timing): 8 workers -> 1.885 s/batch, 16 -> 0.835 s/batch,
