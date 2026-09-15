@@ -22,7 +22,7 @@ set -eo pipefail
 
 # `sbatch` executes a spool COPY of this script, so BASH_SOURCE[0] points under Slurm's
 # spool directory rather than this checkout. Anchor explicitly to the shared repository.
-STARVLA_REPO=/e/project1/m3/blank4/code/starVLA
+STARVLA_REPO=${STARVLA_REPO:-/e/project1/m3/blank4/code/starVLA}
 cd "$STARVLA_REPO"
 
 # ── Parse --config; collect remaining args as CLI overrides ──────────────

@@ -33,7 +33,9 @@ framework:
   action_model:
     action_model_type: MLP
     action_dim: 12
-    state_dim: 16
+    # 16-D raw proprioception becomes 32-D after the DataConfig's
+    # StateActionSinCosTransform; only read when include_state is true.
+    state_dim: 32
     action_horizon: 16
     future_action_window_size: 15
     past_action_window_size: 0
