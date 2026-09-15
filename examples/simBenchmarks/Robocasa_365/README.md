@@ -126,6 +126,68 @@ playground/Datasets/robocasa365/
     └── composite/<Task>/<Date>/lerobot/
 ```
 
+### LeRobot v3.0 mirrors (used on this cluster)
+
+The official Box tarballs above are LeRobot **v2.1**, one directory per task.
+`ember-lab-berkeley` publishes the same demonstrations re-chunked as LeRobot
+**v3.0**, one repository per benchmark group:
+
+| repo | size | episodes |
+| --- | ---: | ---: |
+| `ember-lab-berkeley/robocasa365-target-atomic` | 6.5 GB | 9,126 |
+| `ember-lab-berkeley/robocasa365-target-composite-seen` | 18.1 GB | 8,077 |
+| `ember-lab-berkeley/robocasa365-target-composite-unseen` | 20.3 GB | 8,104 |
+
+```bash
+hf download ember-lab-berkeley/robocasa365-target-atomic --repo-type dataset \
+  --local-dir <datasets>/lerobot_3_0/robocasa365_target_atomic
+```
+
+These mirrors do **not** ship `meta/modality.json`, and the loader cannot
+resolve the state/action sub-keys without it. Copy the official file out of the
+simulator image once per dataset:
+
+```bash
+apptainer exec playground/sims/sif/robocasa365-main-arm64.sif \
+  cat /app/robocasa365/robocasa/models/assets/groot_dataset_assets/PandaOmron_modality.json \
+  > <datasets>/lerobot_3_0/robocasa365_target_atomic/meta/modality.json
+```
+
+Set `lerobot_version: "v3.0"` on the dataset config and use the `robocasa365_v3_*`
+mixtures. `meta/stats.json` in these mirrors is an empty `{}`; StarVLA computes
+its own `meta/stats_gr00t.json` on first use, so the dataset directory must be
+writable.
+
+### Camera contract
+
+`model2robocasa365_interface` sends exactly one view
+(`video.robot0_agentview_left`), while `PandaOmronRoboCasa365DataConfig`
+declares three. A policy trained on the three-camera config therefore sees a
+different number of images at evaluation than during training, and degrades
+silently rather than raising. The `*_1cam` mixtures pair the same data with
+`PandaOmronRoboCasa365SingleCamDataConfig` (one view) and are what the
+checked-in launcher uses. Use the three-camera config only after extending the
+bridge to send all three views.
+
+### Atomic-Seen quickstart on this cluster
+
+```bash
+sbatch train_robocasa365_slurm.sh
+# or point it at another config / add overrides:
+sbatch train_robocasa365_slurm.sh --config <yaml> --trainer.max_train_steps 50000
+```
+
+`starvla_qwenoft_robocasa365_v3_atomic.yaml` trains `QwenOFT` on all 18
+Atomic-Seen tasks (2,231,049 steps indexed from 9,125 trajectories). Two
+deviations from the upstream YAML, both required here:
+
+* `base_vlm` is the local `Qwen3-VL-2B-Instruct`. `QwenOFT` marks action slots
+  with a plain emoji token rather than FAST vocabulary, so no `*-Instruct-Action`
+  checkpoint is needed.
+* `video_backend: decord`. Upstream's `torchvision_av` fails on this image —
+  `torchvision.io.VideoReader` was removed in the torchvision bundled with
+  torch 2.12.
+
 ### Writable metadata
 
 The StarVLA loader creates cache files such as `meta/stats_gr00t.json` and

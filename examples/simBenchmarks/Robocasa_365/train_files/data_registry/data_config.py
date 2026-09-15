@@ -84,8 +84,24 @@ class PandaOmronRoboCasa365DataConfig:
         ])
 
 
+class PandaOmronRoboCasa365SingleCamDataConfig(PandaOmronRoboCasa365DataConfig):
+    """Single-view variant that matches what the evaluation bridge actually sends.
+
+    ``model2robocasa365_interface.PolicyWarper`` reads only
+    ``video.robot0_agentview_left`` from the environment observation. A policy
+    trained on the three-camera config above therefore sees a different number of
+    images at evaluation time than it did during training, which silently
+    degrades the rollout instead of raising. Train against this config whenever
+    the checked-in bridge is used unmodified; use the three-camera config only
+    after extending the bridge to send all three views.
+    """
+
+    video_keys = ["video.robot0_agentview_left"]
+
+
 ROBOT_TYPE_CONFIG_MAP = {
     "panda_omron_robocasa365": PandaOmronRoboCasa365DataConfig(),
+    "panda_omron_robocasa365_1cam": PandaOmronRoboCasa365SingleCamDataConfig(),
 }
 
 ROBOT_TYPE_TO_EMBODIMENT_TAG = {
@@ -105,6 +121,7 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
 #   python -m robocasa.utils.dataset_registry  # has constants
 #   # or run the helper at examples/simBenchmarks/Robocasa_365/train_files/dump_target_human_paths.py
 _ROBOT_TAG = "panda_omron_robocasa365"
+_ROBOT_TAG_1CAM = "panda_omron_robocasa365_1cam"
 
 # Atomic single-skill tasks (target/human split, 18 tasks).
 _TARGET_HUMAN_ATOMIC = {
@@ -172,6 +189,31 @@ def _entries(path_dict):
     return [(f"{p}/lerobot", 1.0, _ROBOT_TAG) for p in path_dict.values()]
 
 
+# ---------------------------------------------------------------------------
+# LeRobot v3.0 mirrors (ember-lab-berkeley on HuggingFace)
+# ---------------------------------------------------------------------------
+# The official robocasa Box tarballs are LeRobot **v2.1**, one directory per
+# task (the _TARGET_HUMAN_* tables above). ember-lab-berkeley publishes the same
+# demonstrations re-chunked as LeRobot **v3.0**, one repo per benchmark group:
+#
+#   ember-lab-berkeley/robocasa365-target-atomic            6.5 GB   9126 eps
+#   ember-lab-berkeley/robocasa365-target-composite-seen   18.1 GB   8077 eps
+#   ember-lab-berkeley/robocasa365-target-composite-unseen 20.3 GB   8104 eps
+#
+# Each repo has data/ meta/ videos/ at its top level, so the mixture entry is the
+# bare directory name and ``data_root_dir`` must point at its PARENT. Set
+# ``lerobot_version: "v3.0"`` on the dataset config when using these.
+#
+# These mirrors do NOT ship ``meta/modality.json``; copy the official
+# ``robocasa/models/assets/groot_dataset_assets/PandaOmron_modality.json`` into
+# each dataset's ``meta/`` or the state/action keys above cannot be resolved.
+_V3_MIRRORS = {
+    "robocasa365_v3_target_atomic":           "robocasa365_target_atomic",
+    "robocasa365_v3_target_composite_seen":   "robocasa365_target_composite_seen",
+    "robocasa365_v3_target_composite_unseen": "robocasa365_target_composite_unseen",
+}
+
+
 DATASET_NAMED_MIXTURES = {
     # ------- minimal walk-through mixture (1 atomic task) -------
     "robocasa365_open_drawer_target_human": [
@@ -182,4 +224,13 @@ DATASET_NAMED_MIXTURES = {
     "robocasa365_composite_target_human_all": _entries(_TARGET_HUMAN_COMPOSITE),
     "robocasa365_target_human_all":           _entries({**_TARGET_HUMAN_ATOMIC,
                                                        **_TARGET_HUMAN_COMPOSITE}),
+    # ------- LeRobot v3.0 mirrors (one merged dataset per benchmark group) -------
+    **{name: [(directory, 1.0, _ROBOT_TAG)] for name, directory in _V3_MIRRORS.items()},
+    # Same data, single-camera contract that matches the checked-in eval bridge.
+    **{f"{name}_1cam": [(directory, 1.0, _ROBOT_TAG_1CAM)]
+       for name, directory in _V3_MIRRORS.items()},
+    # All 50 target tasks in v3.0, sampled evenly across the three groups.
+    "robocasa365_v3_target_all": [
+        (directory, 1.0, _ROBOT_TAG) for directory in _V3_MIRRORS.values()
+    ],
 }
