@@ -70,7 +70,19 @@ set -euo pipefail
 
 AUTO_EVAL_SCRIPT="./examples/LIBERO/eval_files/parallel_eval/auto_eval_libero.sh"
 AGGREGATE_SCRIPT="./examples/LIBERO/eval_files/parallel_eval/aggregate_results.py"
-LIBERO_PYTHON="${LIBERO_PYTHON:-/e/project1/m3/blank4/envs/miniforge3/envs/libero/bin/python}"
+# The libero conda env was replaced by packed images on 2026-09-14, so the old
+# default (.../envs/libero/bin/python) no longer exists and every vanilla-LIBERO
+# eval died at the aggregation step with exit 127 AFTER completing its rollouts.
+# eval_libero_plus_slurm.sh was migrated; this script was missed.
+# aggregate_results.py imports only argparse/json/pathlib/collections, so it
+# needs no LIBERO deps -- any interpreter will do. Kept overridable.
+if [ -n "${LIBERO_PYTHON:-}" ]; then
+    AGGREGATE_PY=("${LIBERO_PYTHON}")
+elif [ -x "/e/home/jusers/blank4/jupiter/blank4/containers/envs/run_in_env.sh" ]; then
+    AGGREGATE_PY=(/e/home/jusers/blank4/jupiter/blank4/containers/envs/run_in_env.sh libero python)
+else
+    AGGREGATE_PY=(python3)
+fi
 
 DEFAULT_SUITES=(libero_spatial libero_object libero_goal libero_10)
 
@@ -216,7 +228,7 @@ for eval_suite in "${SUITES[@]}"; do
         bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
 
     echo "All ${NUM_NODES} partition(s) of ${eval_suite} finished. Aggregating..."
-    "${LIBERO_PYTHON}" "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${eval_suite}"
+    "${AGGREGATE_PY[@]}" "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${eval_suite}"
 done
 
 echo "All suites finished. Aggregated results: ${output_dir}/overall_results.json"
