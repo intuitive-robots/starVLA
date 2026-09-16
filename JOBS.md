@@ -107,6 +107,25 @@ OUTDIR=robocasa365_pnp_30k,SEED=42,VIDEOS=1 /e/scratch/m3/blank4/rc365_smoke/rc3
 | Multiple client processes per GPU (2-3 x n_envs=16) | load was only 63/288 at n_envs=24; our lockstep loop leaves CPU idle | needs `--max_batch_size` raised on the server |
 | Proper `eval_robocasa365_slurm.sh` in-repo | the manifest launcher lives in /e/scratch and duplicates work another agent is doing in-tree | coordinate with the agent rewriting the eval stack |
 
+## Known bug: one policy server, two concurrent clients
+
+The VLM interfaces keep per-request state on the module -- `_last_encoder_attention_mask`
+is set during the forward and read afterwards -- so a second in-flight request overwrites
+it in between. Two clients sharing a server produce, on the server side:
+
+```
+ValueError: Layer number mismatch: got 15 VL layers, but project_layers has 28 layers.
+RuntimeError: The expanded size of the tensor (284) must match the existing size (567) ...
+```
+
+and the client sees `KeyError: 'data'` because the reply carries an error instead. Observed
+2026-09-16 in the paired open-loop harness (job 1842457), which queried both servers from
+both directions at once.
+
+Consequences: run **one client per server** (our eval launchers already do). It also blocks
+the obvious throughput idea of pointing several sim worker processes at a shared server --
+the fix is to thread that state through the call instead of storing it on the module.
+
 ## Operating notes
 
 - **RoboCasa365 rollouts**: `n_envs=24` without videos (~929 rollouts/h/GPU, ~15 GB VRAM).
