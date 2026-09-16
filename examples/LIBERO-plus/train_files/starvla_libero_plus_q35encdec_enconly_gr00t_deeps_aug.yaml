@@ -51,7 +51,13 @@ framework:
     # sets neither use_merged_attention nor use_dec_only_merged, unlike the
     # Qwen3-VL v5 enc-dec which used both plus n_encoder_layers: 14.
     use_merged_attention: false
-    separate_cross_attention: true
+    # false, like every other skip_decoder config in the repo. It installs per-layer
+    # decoder->encoder attention, so with skip_decoder: true nothing ever uses it --
+    # and its init copies layer.self_attn.{q,k,v,o}_proj into the adapters, which
+    # crashes on Qwen3.5: that backbone is hybrid, and its linear_attention layers
+    # carry `linear_attn` (a gated DeltaNet), not `self_attn`.
+    #   AttributeError: 'Qwen3_5DecoderLayer' object has no attribute 'self_attn'
+    separate_cross_attention: false
     cross_attention_gate_init: 0.1
   action_model:
     action_dim: 7          # LIBERO delta eef (6) + gripper (1)
