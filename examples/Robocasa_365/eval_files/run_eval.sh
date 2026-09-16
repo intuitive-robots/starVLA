@@ -40,8 +40,25 @@ run_client() {
         return 1
       }
       mkdir -p "${REPO_ROOT}/results/robocasa365_eval_test/videos"
+      # RoboCasa writes a rewritten copy of every object MJCF next to the asset
+      # itself (robocasa/models/objects/objects.py: MJCFObject.__init__), i.e.
+      # INSIDE the image. --writable-tmpfs cannot serve that: the session
+      # directory is capped by ``sessiondir max size`` in apptainer.conf (16 MiB
+      # here), and a single kitchen reset overruns it with
+      # ``OSError: [Errno 28] No space left on device`` from env.reset().
+      # A per-process directory overlay on real disk has no such cap. It must be
+      # per process: two containers sharing one upper dir corrupt each other.
+      ROBOCASA365_OVERLAY=${ROBOCASA365_OVERLAY:-${TMPDIR:-/tmp}/robocasa365-overlay-${USER:-user}-$$}
+      mkdir -p "${ROBOCASA365_OVERLAY}"
+      trap 'rm -rf -- "${ROBOCASA365_OVERLAY}"' EXIT
+      # A dead EGL context SIGABRTs inside mjr_readPixels and dumps a ~12 GB core
+      # per worker. Seen on degraded render nodes (see mattes1/repos/sir SETUP.md
+      # s16b: same binding_utils.py:175 abort, whole node affected, exit -6).
+      ulimit -c 0
       echo "RoboCasa365 simulator runtime: apptainer (${ROBOCASA365_SIF})"
-      exec apptainer exec --cleanenv --writable-tmpfs --nv \
+      echo "RoboCasa365 scratch overlay : ${ROBOCASA365_OVERLAY}"
+      # No `exec`: the EXIT trap above has to survive to clean the overlay up.
+      apptainer exec --cleanenv --nv --overlay "${ROBOCASA365_OVERLAY}" \
         --bind "${REPO_ROOT}:${REPO_ROOT}" \
         --pwd "${REPO_ROOT}" \
         --env "PYTHONPATH=${REPO_ROOT}" \
