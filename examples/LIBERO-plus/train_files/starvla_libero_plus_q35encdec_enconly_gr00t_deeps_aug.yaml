@@ -42,6 +42,10 @@ framework:
     # text_config hidden_size 2048 / num_hidden_layers 24 -- hence
     # vl_hidden_dim 2048 and num_vl_layers 24 (NOT the 28 the 2B Qwen3-VL uses).
     enc_dec: true
+    # Routes to QWen3_5_EncDec (hybrid encoder: bidirectional DeltaNet scan with
+    # learned per-layer gates, then enc_norm/enc_scale). 'auto' would pick it from
+    # base_vlm too, but say it explicitly since the path name is the only hint.
+    encdec_impl: qwen35
     encdec_ckpt: /e/project1/m3/blank4/code/train_downstream/train/outputs/q35_enc_dec_v5_tb18432/2026-09-15_00-20-14_job1776705/checkpoints/checkpoint-28786
     skip_decoder: true
     attn_implementation: sdpa

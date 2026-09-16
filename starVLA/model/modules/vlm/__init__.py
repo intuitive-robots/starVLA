@@ -6,6 +6,21 @@ def get_vlm_model(config):
     # base_vlm string, because it is built FROM the same base weights as the causal arm —
     # the name cannot distinguish them.
     if config.framework.qwenvl.get("enc_dec", False):
+        # Qwen3.5 needs its own encoder: it is hybrid (linear_attention layers hold a
+        # directional DeltaNet, not self_attn), so its encoder mixes a forward and a
+        # reversed scan through learned per-layer gates and applies enc_norm/enc_scale.
+        # QWen3_EncDec implements none of that and keeps encoder_layers in a different
+        # place, so routing a Qwen3.5 checkpoint through it would silently run a different
+        # encoder than the one trained. Opt out with qwenvl.encdec_impl.
+        impl = str(config.framework.qwenvl.get("encdec_impl", "auto")).lower()
+        is_q35 = impl == "qwen35" or (
+            impl == "auto" and "qwen3.5" in str(vlm_name).lower()
+        )
+        if is_q35:
+            from .QWen3_5_EncDec import _QWen3_5_EncDec_Interface
+
+            return _QWen3_5_EncDec_Interface(config)
+
         from .QWen3_EncDec import _QWen3_EncDec_Interface
 
         return _QWen3_EncDec_Interface(config)
