@@ -94,10 +94,10 @@ class PolicyWarper:
         view = observations["video.robot0_agentview_left"]  # (B, 1, H, W, 3)
         images = [[self._resize_image(img) for img in sample] for sample in view]
 
-        # 3) state — concatenate parts in the same order as in training
-        state_parts = [observations[k] for k in STATE_KEY_ORDER]  # each (B, 1, d)
-        input_state = np.concatenate(state_parts, axis=-1)  # (B, 1, 16)
-        input_state = self._sin_cos_state(input_state)
+        # 3) state — sin/cos PER KEY, then concatenate, exactly as training does.
+        input_state = np.concatenate(
+            [self._sin_cos_state(observations[k]) for k in STATE_KEY_ORDER], axis=-1
+        )  # (B, 1, 32)
 
         examples = []
         for b in range(len(images)):
@@ -140,7 +140,13 @@ class PolicyWarper:
 
     @staticmethod
     def _sin_cos_state(state: np.ndarray) -> np.ndarray:
-        """Match training-time StateActionSinCosTransform on the state."""
+        """Match training-time StateActionSinCosTransform on ONE state key.
+
+        The transform runs per key and emits ``[sin(k), cos(k)]``; the loader
+        concatenates the keys afterwards. Applying it to the already-concatenated
+        16-d vector yields ``[sin(all), cos(all)]`` -- the same 32 numbers in
+        different slots (27 of 32 differ), read silently as proprioception.
+        """
         return np.concatenate([np.sin(state), np.cos(state)], axis=-1)
 
 
