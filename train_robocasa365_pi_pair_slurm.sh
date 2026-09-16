@@ -88,10 +88,16 @@ launch() {
         export STARVLA_CUDA_VISIBLE_DEVICES="${devs}"
         export NUM_PROCESSES=2
         export MASTER_PORT="${port}"
+        # EXTRA_TRAIN_ARGS is forwarded verbatim, e.g.
+        #   --export=ALL,EXTRA_TRAIN_ARGS="--trainer.is_resume true"
+        # Without this the flag is silently dropped and a "resume" restarts from
+        # step 0, overwriting the checkpoints it was meant to continue from.
+        # shellcheck disable=SC2086
         bash train_libero_slurm.sh \
             --config "${yaml}" \
             --run_id "${run_id}" \
-            --seed "${SEED}"
+            --seed "${SEED}" \
+            ${EXTRA_TRAIN_ARGS:-}
     ) > "${log}" 2>&1 &
     pids+=($!)
 }

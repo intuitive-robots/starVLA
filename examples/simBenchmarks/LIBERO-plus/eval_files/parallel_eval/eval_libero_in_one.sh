@@ -222,6 +222,14 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
     done
     echo "Exact-task isolation: ${#exact_task_ids[@]} selected tasks, ${num_gpu_slots} one-process-per-GPU streams."
 
+    # A failed task must not discard the tasks queued behind it. Each stream now
+    # records the failure and carries on; failed ids land in this manifest so a
+    # re-run can target only them. STARVLA_RESUME_EVAL=1 additionally skips tasks
+    # whose result file already exists, which makes that re-run cheap.
+    failed_manifest="${output_dir}/failed_tasks_${task_suite_name}.txt"
+    : > "${failed_manifest}"
+    resume_eval="${STARVLA_RESUME_EVAL:-0}"
+
     isolated_launcher_pids=()
     for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
         gpu_id=${gpu_ids[$gpu_slot]}
@@ -232,6 +240,11 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
                 task_end=$((task_id + 1))
                 server_slot=$((task_offset % servers_per_gpu))
                 worker_port=$((base_port + gpu_slot * servers_per_gpu + server_slot))
+                task_result="${output_dir}/logs/${task_suite_name}/${task_id}_to_${task_end}.json"
+                if [ "${resume_eval}" = "1" ] && [ -s "${task_result}" ]; then
+                    echo "Exact task ${task_id}: already complete, skipping (${task_result})"
+                    continue
+                fi
                 echo "Exact task ${task_offset}/${#exact_task_ids[@]}: gpu=${gpu_id}, task=${task_id}, host=${server_host}, port=${worker_port}"
                 task_rc=1
                 for ((attempt=1; attempt<=worker_max_attempts; attempt++)); do
@@ -262,9 +275,9 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
                     [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
                 done
                 if [ "${task_rc}" -ne 0 ]; then
-                    echo "[ERROR] Exact task ${task_id} exhausted ${worker_max_attempts} attempts."
+                    echo "[ERROR] Exact task ${task_id} exhausted ${worker_max_attempts} attempts; continuing with the rest."
+                    echo "${task_id}" >> "${failed_manifest}"
                     stream_rc=1
-                    break
                 fi
             done
             exit "${stream_rc}"
@@ -277,7 +290,12 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
         wait "${pid}" || isolated_rc=1
     done
     if [ "${isolated_rc}" -ne 0 ]; then
-        echo "[ERROR] One or more exact-task streams failed; refusing to aggregate partial results."
+        n_failed=$(wc -l < "${failed_manifest}" 2>/dev/null || echo 0)
+        echo "[ERROR] ${n_failed} of ${#exact_task_ids[@]} exact tasks failed; NOT aggregating, because a"
+        echo "        success rate over a subset would silently understate the real one."
+        echo "        Completed tasks are on disk and are not lost. Failed task ids:"
+        echo "        ${failed_manifest}"
+        echo "        Re-run the same command with STARVLA_RESUME_EVAL=1 to retry only these."
         exit 1
     fi
     exit 0
