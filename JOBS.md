@@ -19,19 +19,13 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | Job | Name | What | Status | Follow-up |
 |---|---|---|---|---|
 | 1826524 | readout_gaps | other workstream (not this session) | RUNNING | — |
-| 1826547 | tr_rc365_s4_rs | RoboCasa365 PI causal+v5, seed 4, resume from 30k | RUNNING | — |
 | 1826641 | tr_zonly_aug | zonly sharedz, **old** backbone + augmentation, seeds 42/43 | RUNNING | 1826645, 1826646 |
 | 1836350 | tr_rc365_s42_rs | RoboCasa365 PI causal+v5, seed 42, resume from 30k | PENDING | — |
-| 1840351 | tr_q35enc_pair | Qwen3.5 encoder-only GR00T deeps, aug + no-aug, seed 42 | PENDING | 1840352, 1840353 |
 | 1836346 | tr_zonly_v5 | zonly sharedz, **v5** backbone, seeds 42/43 | PENDING | 1836353, 1836354 |
-| 1840069 | rc365_pnp5 | RoboCasa365 pick-and-place, 6 reruns, n_envs=12, videos, faulthandler on | PENDING | — |
 | 1826645 | ep_ervla_zonly_pi_s42 | LIBERO-plus eval, zonly aug s42 @1000 eps | PENDING (dep 1826641) | — |
 | 1826646 | ep_ervla_zonly_pi_s43 | LIBERO-plus eval, zonly aug s43 @1000 eps | PENDING (dep 1826641) | — |
-| 1840352 | ep_libero_plus_q3_s42 | LIBERO-plus eval, q35 enc no-aug @1000 eps | PENDING (dep 1840351) | — |
-| 1840353 | ep_libero_plus_q3_aug_s42 | LIBERO-plus eval, q35 enc aug @1000 eps | PENDING (dep 1840351) | — |
 | 1836353 | ep_zonly_v5_s42 | LIBERO-plus eval, zonly v5 s42 @1000 eps | PENDING (dep 1836346) | — |
 | 1836354 | ep_zonly_v5_s43 | LIBERO-plus eval, zonly v5 s43 @1000 eps | PENDING (dep 1836346) | — |
-| 1840354 | ep_zonly_1000 | LIBERO-plus re-eval of the best zonly ckpt @1000 eps (3rd try) | PENDING | — |
 | 1830054 | enc_dec_2b_v5_final_action_linear | other workstream (not this session) | PENDING | — |
 | 1834470 | probe_smoke_enc_dec_2b_v5_final_action_tracetime | other workstream | PENDING | — |
 | 1836154 | eval_sweep | other workstream | PENDING | — |
@@ -43,6 +37,11 @@ Last refreshed: 2026-09-16 14:20 CEST.
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1826547 | tr_rc365_s4_rs | COMPLETED 7:37:52 — seed 4 reached 50k, both arms |
+| 1840354 | ep_zonly_1000 | COMPLETED — **0.776 mean** at ~1038 eps/suite (object .847, spatial .785, goal .784, long .689). The 0.812 from 64 eps did not hold |
+| 1840069 | rc365_pnp5 | 4/6 units OK. faulthandler CONFIRMED the failure: `Fatal Python error: Aborted` in `binding_utils.py:174 read_pixels` — an EGL abort in a sim worker, NOT VRAM |
+| 1840351 | tr_q35enc_pair | FAILED — 318 encoder keys missing. **Blocked, needs implementation**: see below |
+| 1840352/53 | q35 evals | CANCELLED with their parent |
 | 1826988 / 1826989 | enc_dec_2b_v5_final_action_{dec,head} | COMPLETED, ~1:59 each |
 | 1828647 | rc365_smoke | COMPLETED — RoboCasa eval verified end-to-end on a compute node |
 | 1828808 | rc365_roll30k | COMPLETED — 40 rollouts, videos, first valid success rates |
@@ -102,6 +101,8 @@ OUTDIR=robocasa365_pnp_30k,SEED=42,VIDEOS=1 /e/scratch/m3/blank4/rc365_smoke/rc3
 
 | What | Why | Blocked on |
 |---|---|---|
+| Qwen3.5 encoder in starVLA's QWen3_EncDec | the q35 enc-only arm cannot run without it (below) | implementation decision |
+| PickPlaceSinkToCounter rollouts | failed 3/3 attempts, every time in the renderer | needs the EGL abort handled, or the task skipped |
 | RoboCasa365 resolution A/B (native 256 vs 224), 50 eps/cell | training packs frames at native 256; the bridge resized to 224 | nothing — manifest_res.txt ready |
 | Multiple client processes per GPU (2-3 x n_envs=16) | load was only 63/288 at n_envs=24; our lockstep loop leaves CPU idle | needs `--max_batch_size` raised on the server |
 | Proper `eval_robocasa365_slurm.sh` in-repo | the manifest launcher lives in /e/scratch and duplicates work another agent is doing in-tree | coordinate with the agent rewriting the eval stack |
@@ -117,3 +118,24 @@ OUTDIR=robocasa365_pnp_30k,SEED=42,VIDEOS=1 /e/scratch/m3/blank4/rc365_smoke/rc3
 - `CANCELLED by 0` means the admin/node killed it during CONFIGURING — not our code.
   Just resubmit. `EGL_NOT_INITIALIZED` / `Aborted` in `mjr_readPixels` is a degraded render
   node; resubmit and it lands elsewhere.
+
+## Blocked: Qwen3.5 encoder-only (q35) needs real work, not a config fix
+
+`tr_q35enc_pair` cannot be made to run by tweaking YAML. The Qwen3.5 enc-dec checkpoint
+(`train_downstream/.../q35_enc_dec_v5_tb18432`) stores its encoder as **318 top-level
+`encoder_layers.*` tensors**, while starVLA's loader expects them nested at
+`model.language_model.encoder_layers.*` (which is where the Qwen3-VL checkpoint puts its
+308). A prefix remap would load the weights — and would still be wrong, because that
+checkpoint also carries `bidir_gates`, `enc_norm.weight` and `enc_scale`, which
+`train_downstream/train/models/qwen35_enc_dec.py` uses in the encoder forward:
+
+* a **bidirectional scan** per DeltaNet layer, `mixed = fwd + bidir_gates[i] * bwd`
+* an output `enc_norm` (RMSNorm) followed by `* enc_scale`
+
+starVLA's `QWen3_EncDec` implements none of that — its encoder path was written for
+Qwen3-VL, where "bidirectional" is only an attention-mask change and full-attention layers
+have `self_attn`. Qwen3.5 is hybrid (`linear_attn` gated DeltaNet on most layers). Loading
+the weights without the matching forward would silently run a *different* encoder than the
+one that was trained.
+
+Decision needed: port the Qwen3.5 encoder forward into starVLA, or drop the q35 arm.
