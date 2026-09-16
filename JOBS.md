@@ -51,6 +51,10 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1836355 | ep_zonly_1000 | FAILED — EGL_NOT_INITIALIZED on jpbo-045-09 (2nd degraded node) -> 1840354 |
 | 1839196 | rc365_pnp4 | NO-OP — rc=127: a comment inside the backslash-continued apptainer command broke it |
 | 1838352 | rc365_pnp3 | FAILED 6/6 — every unit lost a sim worker (silent EOFError). Not memory: MaxRSS 270GB of 858GB, no OOM kill. Faulthandler was off, so a SIGABRT worker died mutely |
+| 1842871 | rc365_eval_s4 | RoboCasa365 benchmark eval, seed 4 @50k, 17 atomic tasks x causal/v5, 48 eps | PENDING | — |
+| 1842872 | rc365_eval_s42 | same for seed 42 @50k | PENDING (dep 1836350) | — |
+| 1842656 | tr_q35enc_pair | Qwen3.5 encoder-only pair, 4th attempt (ported encoder + FFmpeg shim) | PENDING | 1842657, 1842658 |
+| 1842595 | rc365_openloop | paired open loop, both directions | COMPLETED — policies agree closely on identical states (cosine 0.964) |
 | 1834289 | rc365_pnp2 | NO-OP — servers died at once: the launcher started the LIVE tree's policy server (relative path) against the worktree's client, so `--seed` was unrecognized. Fixed to an absolute worktree path -> 1838352 |
 | 1830609 | rc365_pnp | PARTIAL — 4/10 units; 4 lost a worker to VRAM, 2 hit the new seed contract |
 | 1826546, 1826640, 1826712, 1826711 | training jobs | **CANCELLED by 0** (admin/node failure during CONFIGURING, no logs) -> resubmitted as 1836350, 1836345, 1836346, 1836294 |
