@@ -109,10 +109,11 @@ class PolicyWarper:
             for b in range(batch_size)
         ]
 
-        # 3) state — concatenate parts in the same order as in training
-        state_parts = [observations[k] for k in STATE_KEY_ORDER]  # each (B, 1, d)
-        input_state = np.concatenate(state_parts, axis=-1)  # (B, 1, 16)
-        input_state = self._sin_cos_state(input_state)
+        # 3) state — sin/cos PER KEY, then concatenate, exactly as training does.
+        # Order and grouping are both part of the contract; see _sin_cos_state.
+        input_state = np.concatenate(
+            [self._sin_cos_state(observations[k]) for k in STATE_KEY_ORDER], axis=-1
+        )  # (B, 1, 32)
 
         examples = []
         for b in range(len(images)):
@@ -165,7 +166,19 @@ class PolicyWarper:
 
     @staticmethod
     def _sin_cos_state(state: np.ndarray) -> np.ndarray:
-        """Match training-time StateActionSinCosTransform on the state."""
+        """Match training-time StateActionSinCosTransform on ONE state key.
+
+        StateActionSinCosTransform (transform/state_action.py:627) runs per key
+        and emits ``[sin(k), cos(k)]``; the loader then concatenates the keys in
+        ``state_keys`` order (datasets.py:2421-2427). So the 32-d vector is
+
+            sin(base_position) cos(base_position) sin(base_rotation) ...
+
+        NOT ``[sin(all 16), cos(all 16)]``. Those hold the same 32 numbers in
+        different slots -- 27 of 32 differ -- and the policy reads a scrambled
+        proprioceptive vector with no error anywhere. Apply this per key, before
+        concatenating, or the grouping is wrong again.
+        """
         return np.concatenate([np.sin(state), np.cos(state)], axis=-1)
 
 
