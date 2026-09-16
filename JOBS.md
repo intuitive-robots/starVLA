@@ -24,7 +24,7 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1836350 | tr_rc365_s42_rs | RoboCasa365 PI causal+v5, seed 42, resume from 30k | PENDING | — |
 | 1836345 | tr_q35enc_pair | Qwen3.5 encoder-only GR00T deeps, aug + no-aug, seed 42 | PENDING | 1836351, 1836352 |
 | 1836346 | tr_zonly_v5 | zonly sharedz, **v5** backbone, seeds 42/43 | PENDING | 1836353, 1836354 |
-| 1834289 | rc365_pnp2 | RoboCasa365 pick-and-place rollouts, 6 reruns, n_envs=12, videos | PENDING | — |
+| 1838352 | rc365_pnp3 | RoboCasa365 pick-and-place, 6 reruns, n_envs=12, videos | PENDING | — |
 | 1826645 | ep_ervla_zonly_pi_s42 | LIBERO-plus eval, zonly aug s42 @1000 eps | PENDING (dep 1826641) | — |
 | 1826646 | ep_ervla_zonly_pi_s43 | LIBERO-plus eval, zonly aug s43 @1000 eps | PENDING (dep 1826641) | — |
 | 1836351 | ep_libero_plus_q3_s42 | LIBERO-plus eval, q35 enc no-aug @1000 eps | PENDING (dep 1836345) | — |
@@ -48,6 +48,7 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1828808 | rc365_roll30k | COMPLETED — 40 rollouts, videos, first valid success rates |
 | 1829028 | rc365_thru | COMPLETED — n_envs sweep 1/4/8/16 |
 | 1829920 | rc365_scale | COMPLETED — production-layout scaling, 24 is the operating point |
+| 1834289 | rc365_pnp2 | NO-OP — servers died at once: the launcher started the LIVE tree's policy server (relative path) against the worktree's client, so `--seed` was unrecognized. Fixed to an absolute worktree path -> 1838352 |
 | 1830609 | rc365_pnp | PARTIAL — 4/10 units; 4 lost a worker to VRAM, 2 hit the new seed contract |
 | 1826546, 1826640, 1826712, 1826711 | training jobs | **CANCELLED by 0** (admin/node failure during CONFIGURING, no logs) -> resubmitted as 1836350, 1836345, 1836346, 1836294 |
 | 1826642 | ep_zonly_1000 | FAILED — `EGL_NOT_INITIALIZED` on jpbo-106-04 (degraded render node) -> resubmitted as 1836355 |

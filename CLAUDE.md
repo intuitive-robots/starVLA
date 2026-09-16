@@ -22,6 +22,11 @@ launchers, and its checkpoints under `playground/Checkpoints/ervla_robocasa365_*
 its launchers from the live tree fails with `Unable to open file`. Fixes that apply to both
 trees must be committed in both until the branch is merged.
 
+A subtler version of the same trap: `sbatch`'s working directory is wherever you
+submitted from, so a **relative** script path inside a job can start the live tree's
+code even when the rest of the job runs `--pwd` in the worktree. The policy server and
+the eval client must come from the same tree — use absolute paths for both.
+
 ## Cluster failure signatures that are NOT our code
 
 | Signature | Meaning | Action |
