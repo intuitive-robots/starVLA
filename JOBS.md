@@ -22,16 +22,16 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1826547 | tr_rc365_s4_rs | RoboCasa365 PI causal+v5, seed 4, resume from 30k | RUNNING | — |
 | 1826641 | tr_zonly_aug | zonly sharedz, **old** backbone + augmentation, seeds 42/43 | RUNNING | 1826645, 1826646 |
 | 1836350 | tr_rc365_s42_rs | RoboCasa365 PI causal+v5, seed 42, resume from 30k | PENDING | — |
-| 1836345 | tr_q35enc_pair | Qwen3.5 encoder-only GR00T deeps, aug + no-aug, seed 42 | PENDING | 1836351, 1836352 |
+| 1840351 | tr_q35enc_pair | Qwen3.5 encoder-only GR00T deeps, aug + no-aug, seed 42 | PENDING | 1840352, 1840353 |
 | 1836346 | tr_zonly_v5 | zonly sharedz, **v5** backbone, seeds 42/43 | PENDING | 1836353, 1836354 |
-| 1838352 | rc365_pnp3 | RoboCasa365 pick-and-place, 6 reruns, n_envs=12, videos | PENDING | — |
+| 1840069 | rc365_pnp5 | RoboCasa365 pick-and-place, 6 reruns, n_envs=12, videos, faulthandler on | PENDING | — |
 | 1826645 | ep_ervla_zonly_pi_s42 | LIBERO-plus eval, zonly aug s42 @1000 eps | PENDING (dep 1826641) | — |
 | 1826646 | ep_ervla_zonly_pi_s43 | LIBERO-plus eval, zonly aug s43 @1000 eps | PENDING (dep 1826641) | — |
-| 1836351 | ep_libero_plus_q3_s42 | LIBERO-plus eval, q35 enc no-aug @1000 eps | PENDING (dep 1836345) | — |
-| 1836352 | ep_libero_plus_q3_aug_s42 | LIBERO-plus eval, q35 enc aug @1000 eps | PENDING (dep 1836345) | — |
+| 1840352 | ep_libero_plus_q3_s42 | LIBERO-plus eval, q35 enc no-aug @1000 eps | PENDING (dep 1840351) | — |
+| 1840353 | ep_libero_plus_q3_aug_s42 | LIBERO-plus eval, q35 enc aug @1000 eps | PENDING (dep 1840351) | — |
 | 1836353 | ep_zonly_v5_s42 | LIBERO-plus eval, zonly v5 s42 @1000 eps | PENDING (dep 1836346) | — |
 | 1836354 | ep_zonly_v5_s43 | LIBERO-plus eval, zonly v5 s43 @1000 eps | PENDING (dep 1836346) | — |
-| 1836355 | ep_zonly_1000 | LIBERO-plus re-eval of the best zonly ckpt @1000 eps | PENDING | — |
+| 1840354 | ep_zonly_1000 | LIBERO-plus re-eval of the best zonly ckpt @1000 eps (3rd try) | PENDING | — |
 | 1830054 | enc_dec_2b_v5_final_action_linear | other workstream (not this session) | PENDING | — |
 | 1834470 | probe_smoke_enc_dec_2b_v5_final_action_tracetime | other workstream | PENDING | — |
 | 1836154 | eval_sweep | other workstream | PENDING | — |
@@ -48,6 +48,10 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1828808 | rc365_roll30k | COMPLETED — 40 rollouts, videos, first valid success rates |
 | 1829028 | rc365_thru | COMPLETED — n_envs sweep 1/4/8/16 |
 | 1829920 | rc365_scale | COMPLETED — production-layout scaling, 24 is the operating point |
+| 1836345 | tr_q35enc_pair | FAILED — separate_cross_attention: true crashes on Qwen3.5 (hybrid layers have linear_attn, not self_attn) and is inert under skip_decoder. Fixed in 224d783 -> 1840351 |
+| 1836355 | ep_zonly_1000 | FAILED — EGL_NOT_INITIALIZED on jpbo-045-09 (2nd degraded node) -> 1840354 |
+| 1839196 | rc365_pnp4 | NO-OP — rc=127: a comment inside the backslash-continued apptainer command broke it |
+| 1838352 | rc365_pnp3 | FAILED 6/6 — every unit lost a sim worker (silent EOFError). Not memory: MaxRSS 270GB of 858GB, no OOM kill. Faulthandler was off, so a SIGABRT worker died mutely |
 | 1834289 | rc365_pnp2 | NO-OP — servers died at once: the launcher started the LIVE tree's policy server (relative path) against the worktree's client, so `--seed` was unrecognized. Fixed to an absolute worktree path -> 1838352 |
 | 1830609 | rc365_pnp | PARTIAL — 4/10 units; 4 lost a worker to VRAM, 2 hit the new seed contract |
 | 1826546, 1826640, 1826712, 1826711 | training jobs | **CANCELLED by 0** (admin/node failure during CONFIGURING, no logs) -> resubmitted as 1836350, 1836345, 1836346, 1836294 |
