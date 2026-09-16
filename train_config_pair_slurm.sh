@@ -41,6 +41,24 @@ for f in "$YAML_A" "$YAML_B" train_libero_slurm.sh; do
     [ -f "$f" ] || { echo "[ERROR] missing $f"; exit 1; }
 done
 
+
+# ── FFmpeg shim, only when a config asks for torchcodec ───────────────────────
+# starVLA.sif ships torchcodec but no system FFmpeg, so `video_backend: torchcodec`
+# dies with "ImportError: torchcodec is not available." unless the shim is on the
+# library path. The robocasa launcher has always exported this; a config routed
+# through THIS launcher (the gr00t_deeps recipes carry torchcodec) did not, which
+# is what killed job 1841895.
+# See /e/project1/m3/blank4/containers/ffmpeg_shim/README.md
+if grep -qE "^\s*video_backend:\s*torchcodec" "${YAML_A}" "${YAML_B}" 2>/dev/null; then
+  FFMPEG_SHIM="${FFMPEG_SHIM:-/e/project1/m3/blank4/containers/ffmpeg_shim}"
+  CUDA_LIB64="${CUDA_LIB64:-/e/software/default/stages/2026/software/CUDA/13/lib64}"
+  SIF_SITE=/opt/conda/envs/starVLA/lib/python3.12/site-packages
+  # -L not -e: symlinks point into the container image, so they look dangling from the host.
+  [ -L "${FFMPEG_SHIM}/libavcodec.so.60" ] || { echo "[ERROR] FFmpeg shim missing: ${FFMPEG_SHIM}"; exit 1; }
+  export APPTAINERENV_LD_LIBRARY_PATH="${FFMPEG_SHIM}:${CUDA_LIB64}:${SIF_SITE}/torch/lib:/opt/conda/envs/starVLA/lib"
+  echo "torchcodec requested -> FFmpeg shim exported (${FFMPEG_SHIM})"
+fi
+
 echo "=========================================="
 echo " config pair -- seed ${SEED}"
 echo " Job ${SLURM_JOB_ID:-local} on $(hostname)"
