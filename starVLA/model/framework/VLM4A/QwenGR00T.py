@@ -533,7 +533,12 @@ class Qwen_GR00T(baseframework):
         # coexist, so a sampled crop can be applied once and propagated to every <box>,
         # <point>, and <trajectory>. eval()/rollout is intentionally unchanged.
         augmentation = str(self.config.datasets.vla_data.get("augmentation", "none")).lower()
-        if (self.training and has_cot and not cot_from_workers
+        # has_cot dropped for the same reason as in QwenPI_v3: it silently disabled
+        # augmentation on every action-only config that asked for it. cot_conversations
+        # is a correctly-sized list with None entries when there is no CoT, and
+        # augment_cot_sample passes a None conversation through untouched, so only the
+        # images change. cot_from_workers still suppresses double-augmentation.
+        if (self.training and not cot_from_workers
                 and augmentation in {"photometric", "crop_photometric"}):
             batch_images, cot_conversations = augment_cot_batch(
                 batch_images, cot_conversations, mode=augmentation)

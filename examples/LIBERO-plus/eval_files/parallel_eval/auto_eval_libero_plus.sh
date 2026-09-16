@@ -28,6 +28,8 @@ export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${TMPDIR:-/tmp}/starvla_numba_cache}"
 
 LIBERO_PLUS_CONDA_ENV="${LIBERO_PLUS_CONDA_ENV:-libero-plus}"
 POLICY_SERVER_CONDA_ENV="${POLICY_SERVER_CONDA_ENV:-starVLA}"
+# Packed image replaces `conda run -n starVLA` (envs removed 2026-09-14).
+POLICY_SERVER_PYTHON="${POLICY_SERVER_PYTHON:-${REPO_ROOT}/scripts/env/starvla_python}"
 LIBERO_PLUS_SIF="${LIBERO_PLUS_SIF:-${REPO_ROOT}/playground/sims/sif/libero-plus-v0.5.0-arm64.sif}"
 LIBERO_PLUS_RUNTIME="${LIBERO_PLUS_RUNTIME:-auto}"
 your_ckpt="${your_ckpt:-path_to_checkpoint}"
@@ -349,7 +351,7 @@ for ((g=0; g<num_gpus; g++)); do
         log_file="${server_log_dir}/partition${partition_idx}_gpu_${gpu_id}_port_${port}.log"
         server_logs+=("${log_file}")
         echo "Launching policy server on gpu=${gpu_id}, port=${port}, log=${log_file}"
-        setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} conda run --no-capture-output -n \"${POLICY_SERVER_CONDA_ENV}\" python deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\" --max_batch_size \"${max_batch_size}\" --max_wait_time \"${max_wait_time}\"" > "${log_file}" 2>&1 &
+        setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} ${POLICY_SERVER_PYTHON} deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\" --max_batch_size \"${max_batch_size}\" --max_wait_time \"${max_wait_time}\"" > "${log_file}" 2>&1 &
         server_pids+=($!)
     done
 done
