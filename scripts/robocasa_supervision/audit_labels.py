@@ -10,7 +10,7 @@ for row in rows:
     eid=int(row['episode_index']);root=a.labels/f'episode_{eid:06d}'
     if not (root/'COMPLETE.json').exists():missing.append(eid);continue
     try:
-        m=json.loads((root/'COMPLETE.json').read_text());d=np.load(root/'targets.npz');n=int(row['length']);assert m['n_frames']==n
+        m=json.loads((root/'COMPLETE.json').read_text());bundle=np.load(root/'targets.npz');d={k:bundle[k] for k in bundle.files};bundle.close();n=int(row['length']);assert m['n_frames']==n
         seen=np.zeros(n,int)
         for sub in m['subtasks']:
             start,end,j=sub['start'],sub['end'],sub['entity_index'];assert 0<=start<end<=n

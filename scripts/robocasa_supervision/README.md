@@ -15,14 +15,14 @@ It never steps a policy or treats missing results as zero labels.
 2. `preflight.py` audits task/entity selection over every episode without loading
    renderer assets. It writes `entity_preflight.json`; unknown tasks/entities fail explicitly.
 3. `run_slurm.sh pilot 4 <output>` generates one episode per task, one worker/GPU.
-   Use inside an allocation via `srun --jobid=<id> ...`, or submit with `sbatch`.
+   Use inside an allocation via `srun --jobid=<id> --cpus-per-task=288 --cpu-bind=none ...`, or submit with `sbatch`.
    `EPISODE_IDS=0,502,...` narrows the pilot. Full mode processes all episodes.
    `SHARD_GROUP`, `SHARD_GROUPS` distribute disjoint episode shards across nodes;
    each node still runs workers on all4 GPUs.
 4. Inspect RGB overlays and compare replay RGB against the source videos. Inspect
    full-subtask boundaries for multi-part tasks. Do not promote failed pilots.
 5. `export.py --labels <labels> --manifest <manifest> --output <mappings>` writes
-   separate object/gripper five-point CoT mappings and native shared-z targets.
+   separate object/gripper five-point CoT mappings (both full-subtask and remaining-path variants), a subtask manifest, and native shared-z targets.
    Missing episodes raise by default. Unreviewed multi-entity boundaries are excluded
    by default and counted; `--include-unreviewed-boundaries` is an explicit override,
    not a recommended training default. Dense full paths remain available regardless.
