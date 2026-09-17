@@ -1,5 +1,4 @@
-# PROPOSED TRACE-LOOP ARM. Requires the QwenGR00T_TraceLoop framework path;
-# do not submit until the 20-update smoke validates the implementation.
+# TRACE-LOOP ARM. Full training remains gated on the 20-update trainer-eval smoke.
 # Two GPUs/run, per-device batch32, global action batch64. Seed/run_id are launcher-overridden.
 # Match upstream StarVLA/NVIDIA GR00T: full final-layer VLM token sequence,
 # alternating cross-only and action-self-only DiT blocks, no local query compressor.
@@ -141,7 +140,7 @@ trainer:
   loss_scale:
     vla: 1.0
     vlm: 0.1
-    trace_loop:
+    structured_aux:
       start: 0.0
       end: 0.05
       start_step: 0
