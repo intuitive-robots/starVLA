@@ -64,8 +64,53 @@ Run geometry checks in the RoboCasa container:
 Out-of-frame coordinates remain unclipped in dense paths. A CoT mapping is emitted
 only when its remaining image path is in view. The native z file carries explicit
 validity masks; using LIBERO's tag-presence visibility parser directly would lose
-that distinction. Loader integration and augmentation alignment remain a separate
-training gate; no new training is launched by these scripts.
+that distinction.
+
+## Training loader
+
+The worker-side loader reads the finalized per-episode bundles directly. It does not
+scan the multi-gigabyte JSONL exports, and it never infers validity from a text tag.
+Use the canonical merged label root:
+
+```yaml
+datasets:
+  vla_data:
+    action_horizon: 16
+    shared_z_future_offset: 8
+    augmentation: crop_photometric
+    robocasa_joint_augmentation: true
+    native_supervision:
+      labels_root: /e/scratch/m3/blank4/rc365_supervision/labels_v1
+      episode_cache_size: 8
+      include_unreviewed_boundaries: false
+      trace_subject: object
+      trace_span: remaining
+```
+
+`labels_v1` contains all 9,126 completed episodes, including the 189 repaired
+episodes. The retry directory is provenance, not a second required training root.
+When several roots are configured with `labels_roots`, the first completed bundle
+wins.
+
+The loader masks every native head independently, removes a temporal future image
+when `t+8` crosses a subtask boundary, and applies the exact sampled crop and in-plane
+rotation to image coordinates, boxes, relations, 2D traces, and camera-frame 3D x/y
+axes. A target cropped out of view remains out of range and invalid; it is never
+clipped to the image edge and presented as supervision. A partially cropped object
+box is conservatively masked because the dense label package cannot recover the
+post-crop visible segmentation box.
+
+`robocasa_joint_augmentation` is an explicit opt-in. Historical RoboCasa YAML files
+contained `augmentation: crop_photometric`, but their data config ignored it. Keeping
+the new switch off preserves those checkpoints' actual recipe. All arms in a new
+matched comparison must set the switch consistently.
+
+The `trace_subject` and `trace_span` choices affect only the optional 2D trace head.
+The six shared-z targets (`target_point`, `object_box`, `ground_relation`,
+`ground_visibility`, `trajectory3d`, and `phase`) are always loaded from the same
+native record. If the optional 2D trace is consumed, use remaining object motion for
+the causal-matched first test; full-subtask gripper motion is a separate named
+ablation. The ordinary shared-z target list ignores the extra 2D trace field.
 
 ## Multi-entity episodes
 

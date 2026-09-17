@@ -72,8 +72,32 @@ class PandaOmronRoboCasa365DataConfig:
             "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
         }
 
-    def transform(self):
-        return ComposedModalityTransform(transforms=[
+    def transform(self, data_cfg=None):
+        import warnings
+
+        from starVLA.dataloader.cot_augmentation import CoTVideoAugment
+
+        data_cfg = data_cfg or {}
+        mode = str(data_cfg.get("augmentation", "none")).lower()
+        if mode not in {"none", "photometric", "crop_photometric"}:
+            raise ValueError(f"Unsupported RoboCasa augmentation: {mode}")
+        # Versioned opt-in: historical configs carried an ignored augmentation flag.
+        # Do not silently change a resumed control's inputs. New matched arms must
+        # all set this flag, including the control without native auxiliary labels.
+        transforms = []
+        enabled = bool(data_cfg.get("robocasa_joint_augmentation", False))
+        if data_cfg.get("native_supervision") and mode != "none" and not enabled:
+            raise ValueError("Native augmentation requires robocasa_joint_augmentation: true")
+        if mode != "none" and not enabled:
+            warnings.warn(
+                "RoboCasa augmentation is configured but remains disabled for historical "
+                "checkpoint compatibility; set robocasa_joint_augmentation: true in every "
+                "matched new arm to enable it.",
+                stacklevel=2,
+            )
+        if enabled and mode != "none":
+            transforms.append(CoTVideoAugment(apply_to=self.video_keys, mode=mode))
+        return ComposedModalityTransform(transforms=transforms + [
             StateActionToTensor(apply_to=self.state_keys),
             StateActionSinCosTransform(apply_to=self.state_keys),
             StateActionToTensor(apply_to=self.action_keys),

@@ -884,6 +884,17 @@ class LeRobotSingleDataset(Dataset):
             self._cot_resolver = NullCoTResolver()
         else:
             raise ValueError(f"unsupported dataloader cot.source={cot_source!r}")
+        self._native_supervision = None
+        native_cfg = (self.data_cfg or {}).get("native_supervision")
+        if native_cfg:
+            if cot_source not in {"none", None}:
+                raise ValueError("Native supervision and CoT mapping cannot be mixed")
+            from starVLA.dataloader.robocasa_supervision import RoboCasaSupervision
+            self._native_supervision = RoboCasaSupervision(
+                native_cfg, Path(dataset_path).name, modality_configs["video"].modality_keys,
+                horizon=len(modality_configs["action"].delta_indices),
+                future_offset=int((self.data_cfg or {}).get("shared_z_future_offset", 0)),
+            )
         if not Path(dataset_path).exists():
             raise FileNotFoundError(f"Dataset path {dataset_path} does not exist")
         # indict letobot version
@@ -2074,6 +2085,10 @@ class LeRobotSingleDataset(Dataset):
         if self._cot_source == "mapping":
             mode = "cot" if available else "no_cot"
 
+        if self._native_supervision is not None:
+            data["_native_supervision"] = self._native_supervision.resolve(
+                int(trajectory_id), int(base_index)
+            )
         data["_cot_conversation"] = conversation
         data["_cot_available"] = available
         data["_cot_mode"] = mode
@@ -2404,6 +2419,9 @@ class LeRobotSingleDataset(Dataset):
         sample["cot_structured_targets"] = extract_structured_cot_targets(
             sample["cot_conversation"]
         )
+        if "_native_supervision" in data:
+            from starVLA.dataloader.robocasa_supervision import pack_native_supervision
+            pack_native_supervision(sample, data["_native_supervision"], selected_video_keys)
         # Private collator controls are removed by collate_fn before the model sees them.
         # The collator guard is always active for mapping-backed training, even when
         # stochastic dropout is disabled. A zero effective rate retains every mapped

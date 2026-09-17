@@ -153,6 +153,7 @@ def augment_cot_sample(
     crop_scale: float = 0.95,
     crop: tuple[int, int, int, int] | None = None,
     angle_degrees: float | None = None,
+    geometry_out: dict | None = None,
 ) -> tuple[list[Image.Image], list[dict] | None]:
     """Jointly augment one sample's camera images and CoT assistant target.
 
@@ -185,6 +186,10 @@ def augment_cot_sample(
 
         if angle_degrees is None:
             angle_degrees = float(torch.empty(()).uniform_(-5.0, 5.0).item())
+        if geometry_out is not None:
+            geometry_out.update(left=left, top=top, crop_width=crop_width,
+                                crop_height=crop_height, image_width=width,
+                                image_height=height, angle_degrees=angle_degrees)
         out_images = [
             TF.rotate(
                 TF.resize(
@@ -256,12 +261,19 @@ class CoTVideoAugment(ModalityTransform):
             counts[key] = value.shape[0]
             frames.extend(Image.fromarray(frame) for frame in value)
 
+        geometry = {}
         aug_frames, conversation = augment_cot_sample(
             frames,
             data.get("_cot_conversation"),
             mode=self.mode,
             crop_scale=self.crop_scale,
+            geometry_out=geometry,
         )
+        if geometry and "_native_supervision" in data:
+            from starVLA.dataloader.robocasa_supervision import augment_native_targets
+            data["_native_supervision"] = augment_native_targets(
+                data["_native_supervision"], **geometry
+            )
         offset = 0
         for key in keys:
             n = counts[key]
