@@ -218,25 +218,39 @@ class QwenPIv4TransformerBlock(nn.Module):
         """Prefix the VLM padding mask with an all-valid action-token mask."""
         if encoder_attention_mask is None:
             return None
-        if encoder_attention_mask.ndim != 2:
+        if encoder_attention_mask.ndim not in (2, 3):
             raise ValueError(
-                "QwenPI_v4 fused attention expects a 2D VLM padding mask "
-                "with shape (batch, vlm_tokens)."
+                "QwenPI_v4 fused attention expects a [B,L] keep mask or "
+                "a [B,1,L] additive attention bias"
             )
         if encoder_attention_mask.shape[0] != batch_size:
             raise ValueError(
                 "QwenPI_v4 fused attention mask batch size does not match "
                 f"hidden_states: {encoder_attention_mask.shape[0]} vs {batch_size}."
             )
-        action_attention_mask = torch.ones(
-            batch_size,
-            action_length,
-            dtype=encoder_attention_mask.dtype,
-            device=device,
-        )
+        if encoder_attention_mask.ndim == 2:
+            action_attention_mask = torch.ones(
+                batch_size,
+                action_length,
+                dtype=encoder_attention_mask.dtype,
+                device=device,
+            )
+        else:
+            if encoder_attention_mask.shape[1] != 1:
+                raise ValueError(
+                    "QwenPI_v4 additive attention bias must have shape [B,1,L]"
+                )
+            action_attention_mask = torch.zeros(
+                batch_size,
+                1,
+                action_length,
+                dtype=encoder_attention_mask.dtype,
+                device=device,
+            )
+        concatenation_dim = 1 if encoder_attention_mask.ndim == 2 else 2
         return torch.cat(
             [action_attention_mask, encoder_attention_mask.to(device=device)],
-            dim=1,
+            dim=concatenation_dim,
         )
 
 
@@ -321,6 +335,9 @@ class QwenPIv4DiT(ModelMixin, ConfigMixin):
         return_all_hidden_states: bool = False,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         return_pre_output: bool = False,
+        force_layerwise_all_cross: bool = False,
+        extra_conditioning: Optional[torch.Tensor] = None,
+        cross_attention_row_mask: Optional[torch.Tensor] = None,
     ):
         """Run every block with fused action/VLM attention.
 
@@ -331,6 +348,10 @@ class QwenPIv4DiT(ModelMixin, ConfigMixin):
         """
         if timestep is None:
             raise ValueError("QwenPI_v4 requires a timestep tensor.")
+        if force_layerwise_all_cross:
+            raise ValueError("QwenPI_v4 has a fixed fused-dual attention topology")
+        if extra_conditioning is not None or cross_attention_row_mask is not None:
+            raise ValueError("QwenPI_v4 shared-z conditioning is not implemented")
 
         temb = self.timestep_encoder(timestep)
         hidden_states = hidden_states.contiguous()
