@@ -1,6 +1,6 @@
 # What the encoder evidence says, and how to make it matter in rollouts
 
-This is an interpretation of raw probe JSONL, rollout JSON, and the four training YAMLs—not a claim that a probe is a policy metric. It distinguishes observations, inferences, and tests.
+This is an interpretation of raw probe JSONL, rollout JSON, and a **targeted configuration audit**—not a claim that a probe is a policy metric. It distinguishes observations, inferences, and tests. The repository contains 135 LIBERO training-YAML paths; this document does not treat them as 135 controlled experiments.
 
 ## Bottom line
 
@@ -20,7 +20,7 @@ The LIBERO-plus perturbation result reinforces this: zonly-v5’s gain is concen
 
 ## Critical caveat: shared-z is currently a package, not an isolated variable
 
-The two relevant YAMLs are `examples/LIBERO/train_files/ervla_v5_pi_actiononly_pifix.yaml` and `ervla_zonly_pi_sharedz_ground_temporal_v5.yaml`.
+The two YAMLs compared side-by-side here are `examples/LIBERO/train_files/ervla_v5_pi_actiononly_pifix.yaml` and `ervla_zonly_pi_sharedz_ground_temporal_v5.yaml`, because they underlie the key full-protocol v5 PI ↔ zonly-v5 comparison. The remaining YAMLs include older-backbone, decoder, CoT, GR00T, and real-robot variants; many change several dimensions simultaneously or lack a matched full-protocol result, so they cannot identify a shared-z main effect.
 
 | setting | v5 PI | zonly-v5 | why it matters |
 |---|---:|---:|---|
