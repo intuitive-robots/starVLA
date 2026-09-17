@@ -11,7 +11,18 @@
     "memory_keep_mean": 0.0,
     "checkpoint_bytes": 9468856175,
     "source_log": "slurm_logs/train_seed_pair_1861585_s42.log",
-    "passed": true
+    "passed": true,
+    "encoder_flow_grad_norm_first": 0.00262451171875,
+    "encoder_aux_grad_norm_first": 0.01409912109375,
+    "target_coverage_mean": {
+      "target_point": 0.9609375,
+      "object_box": 0.8890625,
+      "ground_relation": 0.8890625,
+      "ground_visibility": 0.9984375,
+      "trajectory3d": 0.9984375,
+      "phase": 0.9984375
+    },
+    "steady_step_seconds_median": 1.9799229179989197
   },
   {
     "job": "1861585",
@@ -25,7 +36,18 @@
     "memory_keep_mean": 0.0,
     "checkpoint_bytes": 9468856175,
     "source_log": "slurm_logs/train_seed_pair_1861585_s43.log",
-    "passed": true
+    "passed": true,
+    "encoder_flow_grad_norm_first": 0.001373291015625,
+    "encoder_aux_grad_norm_first": 0.01336669921875,
+    "target_coverage_mean": {
+      "target_point": 0.9609375,
+      "object_box": 0.8890625,
+      "ground_relation": 0.8890625,
+      "ground_visibility": 0.9984375,
+      "trajectory3d": 0.9984375,
+      "phase": 0.9984375
+    },
+    "steady_step_seconds_median": 1.9130018089963414
   },
   {
     "job": "1861586",
@@ -39,7 +61,18 @@
     "memory_keep_mean": 0.8234375,
     "checkpoint_bytes": 9468856175,
     "source_log": "slurm_logs/train_seed_pair_1861586_s42.log",
-    "passed": true
+    "passed": true,
+    "encoder_flow_grad_norm_first": 0.0233154296875,
+    "encoder_aux_grad_norm_first": 0.01055908203125,
+    "target_coverage_mean": {
+      "target_point": 0.9609375,
+      "object_box": 0.8890625,
+      "ground_relation": 0.8890625,
+      "ground_visibility": 0.9984375,
+      "trajectory3d": 0.9984375,
+      "phase": 0.9984375
+    },
+    "steady_step_seconds_median": 1.84903699500137
   },
   {
     "job": "1861586",
@@ -53,6 +86,17 @@
     "memory_keep_mean": 0.871875,
     "checkpoint_bytes": 9468856175,
     "source_log": "slurm_logs/train_seed_pair_1861586_s43.log",
-    "passed": true
+    "passed": true,
+    "encoder_flow_grad_norm_first": 0.012939453125,
+    "encoder_aux_grad_norm_first": 0.01611328125,
+    "target_coverage_mean": {
+      "target_point": 0.9609375,
+      "object_box": 0.8890625,
+      "ground_relation": 0.8890625,
+      "ground_visibility": 0.9984375,
+      "trajectory3d": 0.9984375,
+      "phase": 0.9984375
+    },
+    "steady_step_seconds_median": 1.8972840610003914
   }
 ]

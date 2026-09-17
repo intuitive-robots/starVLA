@@ -22,10 +22,10 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 |---|---|---|---|
 | 1861663 | ep_gz_015_43 | Exact4k LIBERO-plus; afterok:1861661, seed43 | SUBMITTED |
 | 1861662 | ep_gz_015_42 | Exact4k LIBERO-plus; afterok:1861661, seed42 | SUBMITTED |
-| 1861661 | tr_gz_015_b64 | LIBERO GR00T+z dropout015, seeds42/43,20k updates,batch64; smoke1861586 passed | SUBMITTED |
+| 1861661 | tr_gz_015_b64 | LIBERO GR00T+z dropout015, seeds42/43,20k updates,batch64; smoke1861586 passed | RUNNING — startup |
 | 1861660 | ep_gz_100_43 | Exact4k LIBERO-plus; afterok:1861658, seed43 | SUBMITTED |
 | 1861659 | ep_gz_100_42 | Exact4k LIBERO-plus; afterok:1861658, seed42 | SUBMITTED |
-| 1861658 | tr_gz_100_b64 | LIBERO GR00T+z dropout100, seeds42/43,20k updates,batch64; smoke1861585 passed | SUBMITTED |
+| 1861658 | tr_gz_100_b64 | LIBERO GR00T+z dropout100, seeds42/43,20k updates,batch64; smoke1861585 passed | RUNNING — startup |
 | 1861586 | sm_gz_memdrop015_b64 | GR00T+z memdrop015_b64, seeds42/43;20 updates, trainer eval10/20, batch64/run | **PASSED** —20 updates,eval10/20,finite losses,complete checkpoints |
 | 1861585 | sm_gz_memdrop100_b64 | GR00T+z memdrop100_b64, seeds42/43;20 updates, trainer eval10/20, batch64/run | **PASSED** —20 updates,eval10/20,finite losses,complete checkpoints |
 | 1858694 | tr_v5_piv4 | Full QwenPI_v4 LIBERO seeds42/43 at20k after passed smoke | RUNNING |

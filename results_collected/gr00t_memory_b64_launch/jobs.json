@@ -60,5 +60,7 @@
       "seed": 43,
       "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s43/checkpoints/steps_20000_pytorch_model.pt"
     }
-  ]
+  ],
+  "startup_checked_at": "2026-09-17T20:34:19.375377+02:00",
+  "startup_status": "Both full seed-pair jobs RUNNING; four child logs confirm two GPUs/run and intended config. First updates pending."
 }

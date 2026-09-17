@@ -36,3 +36,5 @@ September17 execution update: batch64 GR00T+z smokes 1861585, 1861586 submitted 
 
 
 September17 launch update: both batch64 GR00T+z smokes1861585/86 passed (four runs,20 updates,eval10/20,complete step20 checkpoints). Full dropout1 seed pair1861658 and dropout0.15 pair1861661 submitted at20k steps,32/device,2GPUs/run. Exact4k evaluations 1861659, 1861660, 1861662, 1861663 are chained with afterok to their full pair. Pin evaluation to8workers/GPU,2servers/GPU co-located on all4GPUs, batch ceiling4 and zero wait; do not inherit newly changed throughput defaults. Steady smoke steps~1.8–2.1s suggest10–12h training plus startup/eval/checkpoint overhead;12h wall limit, so check progress before timeout and resume if necessary rather than treating a missing eval as zero.
+
+Runtime audit from raw logs: original batch32 job1851382 took5h55m04s, median1.043–1.048s/update. Batch64 smokes measured1.851–1.960s/update after the first two updates, implying10.3–10.9h for20k updates before validation/checkpoint overhead. The extra duration is consistent with doubled batch; no measurable retained-memory penalty in this short screen. Both full pairs1861658/61 reached RUNNING.
