@@ -20,6 +20,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864074 / 1864075 | ep_tl1a_42 / 43 | Exact4k LIBERO-plus after matched alternating one-pass trace-head pair1864073 | PENDING (Dependency) |
+| 1864073 | tr_tl1_alt | Matched one-pass trace-head GR00T control, no readout/no z, alternating attention, seeds42/43,20k,batch64 | SUBMITTED — smoke1863878 passed |
 | 1864038 / 1864039 | sm_tl2_s42 / s43 | Tied two-pass predicted-trace GR00T, one seed per 4-GPU node,16/device, effective batch64;20 updates + eval10/20 | RUNNING |
 | 1863879 | sm_tl_2p | **FAILED smoke** — two simultaneous2-GPU runs at32/device exceeded95GB/GPU before update1; no result promoted |
 | 1863878 | sm_tl_1p | **PASSED** — matched one-pass control, seeds42/43,20 updates,eval10/20,finite losses,complete checkpoints |
@@ -131,6 +133,15 @@ pass2 hidden sequence.
 ```bash
 sbatch --parsable -t 02:00:00 --job-name=sm_tl2_s42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_4gpu_smoke_s42 --seed 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 sbatch --parsable -t 02:00:00 --job-name=sm_tl2_s43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_4gpu_smoke_s43 --seed 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+```
+
+The one-pass smoke1863878 passed for both seeds, so its matched full control and exact4k
+evaluations were released without waiting for the two-pass smoke:
+
+```bash
+sbatch --parsable --time=12:00:00 --job-name=tr_tl1_alt train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_1pass_noz_all.yaml ervla_v5_gr00t_traceloop_1pass_noz_all 42 43  # 1864073
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864073 --job-name=ep_tl1a_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_1pass_noz_all_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864074
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864073 --job-name=ep_tl1a_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_1pass_noz_all_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864075
 ```
 
 ```bash
