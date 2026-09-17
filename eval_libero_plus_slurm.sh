@@ -273,6 +273,7 @@ fi
 # Policy servers on GPU0 by default: it keeps the model copies off the other rendering
 # devices and measured fastest. Sims still run on every GPU. Set POLICY_SERVER_GPU="" to
 # co-locate each server with its own GPU again.
+SUITE_ATTEMPTS="${suite_attempts:-3}"
 export POLICY_SERVER_GPU="${POLICY_SERVER_GPU-0}"
 export STARVLA_RESUME_EVAL="${RESUME_EVAL:-0}"
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
@@ -326,15 +327,39 @@ for eval_suite in "${SUITES[@]}"; do
     echo "############################################"
     echo "# Evaluating suite: ${eval_suite} (${NUM_NODES} node(s))"
     echo "############################################"
-    if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
-        # The sbatch shell already runs on the allocated node. Avoid an extra
-        # ParaStation spawn when its step launcher is unavailable; still use
-        # the same four-GPU pipeline and exact-task partitioning (one partition).
-        SLURM_PROCID=0 bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
-    else
-        srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
-            bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
-    fi
+    # Retry the suite rather than losing it. A degraded render GPU kills the whole
+    # partition with an EGL abort or EGL_NOT_INITIALIZED -- seven such casualties on seven
+    # different nodes in one day here, each costing 1-2h of rollouts and returning nothing.
+    # Every attempt after the first runs with STARVLA_RESUME_EVAL=1, so shards that already
+    # wrote their JSON are skipped and only the missing ones are re-rolled: the partitioning
+    # is untouched, so a recovered suite evaluates exactly the episodes an uninterrupted run
+    # would have. SUITE_ATTEMPTS=1 disables it.
+    suite_attempt=0
+    while : ; do
+        suite_attempt=$((suite_attempt + 1))
+        suite_rc=0
+        if [ "${suite_attempt}" -gt 1 ]; then
+            export STARVLA_RESUME_EVAL=1
+            echo "[retry ${suite_attempt}/${SUITE_ATTEMPTS}] ${eval_suite}: resuming, completed shards are kept"
+        fi
+        if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
+            # The sbatch shell already runs on the allocated node. Avoid an extra
+            # ParaStation spawn when its step launcher is unavailable; still use
+            # the same four-GPU pipeline and exact-task partitioning (one partition).
+            SLURM_PROCID=0 bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}" || suite_rc=$?
+        else
+            srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
+                bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}" || suite_rc=$?
+        fi
+        [ "${suite_rc}" -eq 0 ] && break
+        if [ "${suite_attempt}" -ge "${SUITE_ATTEMPTS}" ]; then
+            echo "[ERROR] ${eval_suite}: failed ${suite_attempt} attempt(s) on $(hostname) -- giving up"
+            echo "${eval_suite} failed after ${suite_attempt} attempts on $(hostname)" \
+                >> "${output_dir}/failed_suites.txt"
+            break
+        fi
+        echo "[WARN] ${eval_suite}: attempt ${suite_attempt} failed (rc=${suite_rc}) on $(hostname); retrying"
+    done
 
     echo "All ${NUM_NODES} partition(s) of ${eval_suite} finished. Aggregating..."
     # Suite-scoped: writes output_dir/<suite>/overall_results.json only, so this
