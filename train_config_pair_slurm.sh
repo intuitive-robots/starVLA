@@ -4,7 +4,7 @@
 # config) and train_v5_head_pair_slurm.sh (the hardcoded PI/GR00T pair).
 #
 #   sbatch --export=ALL,YAML_A=<cfg_a>,RUN_A=<prefix_a>,YAML_B=<cfg_b>,RUN_B=<prefix_b> \
-#          train_config_pair_slurm.sh <seed>
+#          train_config_pair_slurm.sh <seed> [trainer overrides...]
 #SBATCH --job-name=tr_cfg_pair
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -32,6 +32,8 @@
 set -euo pipefail
 
 SEED="${1:-42}"
+shift || true
+EXTRA_TRAIN_ARGS=("$@")
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "$REPO"
 
@@ -82,6 +84,7 @@ echo " config pair -- seed ${SEED}"
 echo " Job ${SLURM_JOB_ID:-local} on $(hostname)"
 echo " slot 0  GPUs 0,1  A  ${RUN_A}_s${SEED}"
 echo " slot 1  GPUs 2,3  B  ${RUN_B}_s${SEED}"
+echo " overrides ${EXTRA_TRAIN_ARGS[*]:-<none>}"
 echo "=========================================="
 
 pids=()
@@ -107,7 +110,8 @@ launch() {
         bash train_libero_slurm.sh \
             --config "${yaml}" \
             --run_id "${run_id}" \
-            --seed "${SEED}"
+            --seed "${SEED}" \
+            "${EXTRA_TRAIN_ARGS[@]+"${EXTRA_TRAIN_ARGS[@]}"}"
     ) > "${log}" 2>&1 &
     pids+=($!)
 }
