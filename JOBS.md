@@ -356,3 +356,19 @@ The original four batch-array tasks were already using their full CPU allocation
 ### RoboCasa supervision completed
 
 Array1862967_[0-3] finished in15m11s–16m53s, returning FAILED because189 explicit per-episode exceptions were retained. All189 were repaired in allocation1863079; final retry step1863079.3 completed successfully, and the allocation was released. The merged dataset has9,126/9,126 episodes,9,591 subtasks,2,231,347 frames, no unresolved failures.465 multi-part episodes retain inferred-boundary flags. Full native and both whole/remaining object/gripper CoT exports are under `/e/scratch/m3/blank4/rc365_supervision/mappings_v1/`. Final raw-count reports are in `results_collected/robocasa_supervision/{generation_audit,export_audit}.json`. No training jobs launched.
+
+### RoboCasa GR00T no-z versus z-only smoke 1863647
+
+Submitted from `/e/project1/m3/blank4/code/starVLA-upstream-merge`. One4-GPU node, two independent2-GPU runs,32 samples/device (global64/run),20 optimizer updates, trainer evaluation at steps10/20 and a step20 checkpoint. This is not a simulator rollout.
+
+```bash
+sbatch --parsable --time=02:00:00 --job-name=sm_rc_gz0 --export=ALL,STARVLA_REPO=/e/project1/m3/blank4/code/starVLA-upstream-merge,YAML_A=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_v5_noz.yaml,RUN_A=ervla_rc365_gr00t_v5_noz_smoke,YAML_B=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_sharedz_v5_zonly.yaml,RUN_B=ervla_rc365_gr00t_sharedz_v5_zonly_smoke /e/project1/m3/blank4/code/starVLA/train_config_pair_slurm.sh 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+```
+
+### RoboCasa GR00T z-only versus retained-memory smoke 1863648
+
+Submitted from `/e/project1/m3/blank4/code/starVLA-upstream-merge` with the same gate. The duplicated z-only arm provides a cross-node consistency check; the retained-memory arm keeps GR00T readout memory on85% of action examples.
+
+```bash
+sbatch --parsable --time=02:00:00 --job-name=sm_rc_gzm --export=ALL,STARVLA_REPO=/e/project1/m3/blank4/code/starVLA-upstream-merge,YAML_A=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_sharedz_v5_zonly.yaml,RUN_A=ervla_rc365_gr00t_sharedz_v5_zonly_smoke_b,YAML_B=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_sharedz_v5_mem015.yaml,RUN_B=ervla_rc365_gr00t_sharedz_v5_mem015_smoke /e/project1/m3/blank4/code/starVLA/train_config_pair_slurm.sh 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+```
