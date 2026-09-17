@@ -53,7 +53,9 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1861586 | sm_gz_memdrop015_b64 | GR00T+z memdrop015_b64, seeds42/43;20 updates, trainer eval10/20, batch64/run | **PASSED** —20 updates,eval10/20,finite losses,complete checkpoints |
 | 1861585 | sm_gz_memdrop100_b64 | GR00T+z memdrop100_b64, seeds42/43;20 updates, trainer eval10/20, batch64/run | **PASSED** —20 updates,eval10/20,finite losses,complete checkpoints |
 | 1858694 | tr_v5_piv4 | Full QwenPI_v4 LIBERO seeds42/43 at20k after passed smoke | RUNNING |
-| 1858835 / 1858836 | ep_piv4_s42 / s43 | Exact4k LIBERO-plus evals after successful full QwenPI_v4 training1858694 | PENDING (Dependency) |
+| 1858835 / 1858836 | ep_piv4_s42 / s43 | Exact4k LIBERO-plus evals after successful full QwenPI_v4 training1858694 | **RUNNING** since Sep18 00:07, ~3,000 eps/h, on `libero_object`. s42: `libero_10` 0.657, `libero_goal` 0.759, object 750/1,000. s43: `libero_10` 0.688, `libero_goal` 0.717, object 611/1,000. ETA ~01:45. |
+| 1863830 | tr_q35enc_resume | Resume of the 12h-timed-out Qwen3.5 encoder-only pair (`deeps` + `deeps_aug`, seed42) to 30k; arm a resumed from 25,908, arm b from 20,916 | **RUNNING** since Sep17 22:33 |
+| 1863831 / 1863832 | ep_q35_s42 / ep_q35_aug_s42 | Exact4k LIBERO-plus evals of the two q35 encoder-only arms at 30k, gated on1863830 | PENDING (Dependency) |
 | 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | RUNNING |
 | 1858851 | tr_rcpiv4_rs | Automatic RoboCasa continuation from latest checkpoint after first12h segment1858730 | PENDING (Dependency) |
 | 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa17-task ×48-episode evals at step50k after continuation1858851 | PENDING (Dependency) |
@@ -320,6 +322,27 @@ sbatch -J rc365_pnp2 -t 02:00:00 \
   -o /e/scratch/m3/blank4/rc365_smoke/rc365_pnp2_%j.out -e /e/scratch/m3/blank4/rc365_smoke/rc365_pnp2_%j.out \
   --export=ALL,MANIFEST=/e/scratch/m3/blank4/rc365_smoke/manifest_pnp_rerun.txt,\
 OUTDIR=robocasa365_pnp_30k,SEED=42,VIDEOS=1 /e/scratch/m3/blank4/rc365_smoke/rc365_units.sbatch
+```
+
+### Qwen3.5 encoder-only resume and evals 1863830-1863832
+
+Run from `/e/project1/m3/blank4/code/starVLA`. The resume picks each arm's latest
+checkpoint itself; `--trainer.is_resume true` is what distinguishes it from a fresh run.
+
+```bash
+sbatch --parsable --job-name=tr_q35enc_resume \
+  --export=ALL,YAML_A=examples/LIBERO-plus/train_files/starvla_libero_plus_q35encdec_enconly_gr00t_deeps.yaml,RUN_A=libero_plus_q35enc_deeps,YAML_B=examples/LIBERO-plus/train_files/starvla_libero_plus_q35encdec_enconly_gr00t_deeps_aug.yaml,RUN_B=libero_plus_q35enc_deeps_aug \
+  train_config_pair_slurm.sh 42 --trainer.is_resume true   # 1863830
+
+sbatch --parsable --dependency=afterok:1863830 --job-name=ep_q35_s42 \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/libero_plus_q35enc_deeps_s42/checkpoints/steps_30000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000   # 1863831
+
+sbatch --parsable --dependency=afterok:1863830 --job-name=ep_q35_aug_s42 \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/libero_plus_q35enc_deeps_aug_s42/checkpoints/steps_30000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000   # 1863832
 ```
 
 ## Planned / not yet launched
