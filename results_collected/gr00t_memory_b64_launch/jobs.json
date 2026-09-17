@@ -1,0 +1,20 @@
+{
+  "time": "2026-09-17T20:21:38.158506+02:00",
+  "commit": "5f545e4a29660857087f00eb10a717d1dd694f23",
+  "smokes": [
+    {
+      "job": "1861585",
+      "prefix": "ervla_gr00t_sharedz_v5_memdrop100_b64",
+      "config": "examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop100_b64.yaml",
+      "command": "sbatch --parsable -t 02:00:00 --job-name=sm_gz_100 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_memdrop100_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1",
+      "config_sha256": "07e1b5bbc1a6cc92155976f8d64af986149d20f679ce500ee901a473aedad9e4"
+    },
+    {
+      "job": "1861586",
+      "prefix": "ervla_gr00t_sharedz_v5_memdrop015_b64",
+      "config": "examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop015_b64.yaml",
+      "command": "sbatch --parsable -t 02:00:00 --job-name=sm_gz_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_memdrop015_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1",
+      "config_sha256": "b293c6d89e38bfcb0b6f39bbbcb751814fcaa169d8a956c7c1217557e592b540"
+    }
+  ]
+}
