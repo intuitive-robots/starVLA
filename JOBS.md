@@ -26,8 +26,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 | 1864672 / 1864673 | ep_tl0a_42 / 43 | Exact4k LIBERO-plus after matched two-pass null-trace seeds1864670/71 | PENDING (Dependency) |
 | 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
-| 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | SUBMITTED; replaces zero-episode1864634 |
-| 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | SUBMITTED; replaces zero-episode1864635 |
+| 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | RUNNING; servers/workers ready, replaces zero-episode1864634 |
+| 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | RUNNING; servers/workers ready, replaces zero-episode1864635 |
 | 1864634 / 1864635 | ep_cot_wrong / prompt | **CANCELLED before rollout** — detached worktree lacked generated policy-server Python wrapper; replaced with absolute-wrapper jobs1864756/57 |
 | 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
 | 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
