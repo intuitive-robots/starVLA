@@ -41,6 +41,7 @@ logger = initialize_overwatch(__name__)
 IGNORE_INDEX = -100
 
 from starVLA.model.framework.base_framework import baseframework
+from starVLA.model.modules.shared_z import SharedZMixin
 from starVLA.model.framework.share_tools import merge_framework_config
 from starVLA.model.modules.action_model.GR00T_ActionHeader import FlowmatchingActionHead, get_action_model
 from starVLA.model.modules.vlm import get_vlm_model
@@ -241,7 +242,7 @@ class StructuredEncoderRegressionHead(nn.Module):
 
 
 @FRAMEWORK_REGISTRY.register("QwenGR00T")
-class Qwen_GR00T(baseframework):
+class Qwen_GR00T(SharedZMixin, baseframework):
     """
     Multimodal vision-language-action model (GR00T variant).
 
@@ -273,7 +274,21 @@ class Qwen_GR00T(baseframework):
             self.qwen_vl_interface.model.config.hidden_size
         )
 
+        # Shared-z must be configured before the head is built: _configure_shared_z writes
+        # extra_conditioning_dim into diffusion_model_cfg, which sizes the DiT's AdaLN.
+        shared_z_cfg = self._configure_shared_z(
+            self.config, self.config.framework.action_model.diffusion_model_cfg
+        )
+        if self.shared_z_decoder_memory:
+            raise ValueError(
+                "shared_z.decoder_memory is a QwenPI_v3/enc-dec feature; the GR00T arm reads "
+                "the encoder through its readout projector instead."
+            )
+
         self.action_model: FlowmatchingActionHead = get_action_model(config=self.config)
+        self._build_shared_z_modules(
+            shared_z_cfg, int(self.qwen_vl_interface.model.config.hidden_size)
+        )
 
         # `action_horizon` is the single source of truth for chunk length.
         # Legacy aliases (`future_action_window_size`, `past_action_window_size`)
@@ -376,6 +391,25 @@ class Qwen_GR00T(baseframework):
         if valid.shape != last_hidden.shape[:2]:
             raise RuntimeError(
                 "DiT encoder mask/hidden-state mismatch: "
+                f"{tuple(valid.shape)} vs {tuple(last_hidden.shape[:2])}"
+            )
+        return valid
+
+    def _encoder_valid_mask(self, qwen_inputs: dict, last_hidden: torch.Tensor) -> torch.Tensor:
+        """Valid-token mask over ``last_hidden`` itself.
+
+        Not the same as ``_dit_valid_mask``: with a readout projector that one describes the
+        query tokens the DiT attends to, while the shared-z pooler reads the encoder states.
+        """
+        valid = getattr(self.qwen_vl_interface, "_last_encoder_attention_mask", None)
+        if valid is None:
+            valid = qwen_inputs.get("attention_mask")
+        if valid is None:
+            valid = torch.ones(last_hidden.shape[:2], device=last_hidden.device, dtype=torch.bool)
+        valid = valid[:, : last_hidden.shape[1]].to(device=last_hidden.device, dtype=torch.bool)
+        if valid.shape != last_hidden.shape[:2]:
+            raise RuntimeError(
+                "shared-z encoder mask/hidden-state mismatch: "
                 f"{tuple(valid.shape)} vs {tuple(last_hidden.shape[:2])}"
             )
         return valid
@@ -572,6 +606,15 @@ class Qwen_GR00T(baseframework):
         dit_valid_mask = self._dit_valid_mask(qwen_inputs, last_hidden)
         dit_attention_bias = self._dit_attention_bias(dit_valid_mask, dit_context.dtype)
 
+        # Shared-z bottleneck: pool the encoder into one vector the DiT gets as
+        # extra_conditioning. With memory_dropout_rate 1 the readout context is masked out
+        # for every row, so the head sees ONLY z -- the GR00T counterpart of the zonly arms.
+        shared_z = None
+        if self.shared_z_enabled:
+            shared_z = self.shared_z_pooler(
+                last_hidden, self._encoder_valid_mask(qwen_inputs, last_hidden)
+            )
+
         # Step 4: Action Expert Forward and Loss
         with torch.autocast("cuda", dtype=torch.float32):
             actions = torch.tensor(
@@ -596,6 +639,19 @@ class Qwen_GR00T(baseframework):
                     choice_hidden, actions_target, time_mask=time_mask_tensor
                 )
 
+            future_z = None
+            if self.shared_z_enabled and self.shared_z_temporal_enabled:
+                future_images = [example.get("future_image") for example in examples]
+                if all(image is not None for image in future_images):
+                    future_z = self._encode_future_shared_z(future_images, instructions)
+
+            shared_z_loss = None
+            shared_z_metrics = {}
+            if self.shared_z_enabled:
+                shared_z_loss, shared_z_metrics = self._shared_z_supervision(
+                    shared_z, examples, cot_conversations, actions_target, future_z
+                )
+
             repeated_diffusion_steps = (
                 self.config.framework.action_model.get("repeated_diffusion_steps", 4)
                 if self.config and hasattr(self.config, "framework")
@@ -610,11 +666,25 @@ class Qwen_GR00T(baseframework):
                 state = torch.tensor(np.array(state), device=dit_context.device, dtype=dit_context.dtype)
                 state_repeated = state.repeat(repeated_diffusion_steps, 1, 1)
 
+            shared_z_repeated = (
+                shared_z.repeat(repeated_diffusion_steps, 1) if shared_z is not None else None
+            )
+            encoder_memory_keep = (
+                self._shared_z_memory_keep(actions_target.shape[0], dit_context.device)
+                if self.shared_z_enabled else None
+            )
+            encoder_memory_keep_repeated = (
+                encoder_memory_keep.repeat(repeated_diffusion_steps)
+                if encoder_memory_keep is not None else None
+            )
+
             action_loss = self.action_model(
                 dit_context_repeated,
                 actions_target_repeated,
                 state_repeated,
                 encoder_attention_mask=dit_attention_bias_repeated,
+                z_conditioning=shared_z_repeated,
+                encoder_memory_keep=encoder_memory_keep_repeated,
             )  # (B, chunk_len, action_dim)
 
         result = {
@@ -622,6 +692,16 @@ class Qwen_GR00T(baseframework):
             "cot_coverage": cot_coverage,
             "cot_keep_rate": cot_keep_rate,
         }
+        if self.shared_z_enabled:
+            # Same trainer slot PI uses, and the same mutual-exclusion guard: both would be
+            # scaled by trainer.loss_scale.structured_aux.
+            if structured_aux_loss is not None:
+                raise RuntimeError(
+                    "shared_z and legacy structured_aux cannot share the same trainer loss slot"
+                )
+            result["structured_aux_loss"] = shared_z_loss
+            result.update(shared_z_metrics)
+            result["shared_z_memory_keep_rate"] = encoder_memory_keep.float().mean()
         if cot_loss is not None:
             result["cot_loss"] = cot_loss
         if structured_aux_loss is not None:
@@ -682,6 +762,18 @@ class Qwen_GR00T(baseframework):
         dit_valid_mask = self._dit_valid_mask(qwen_inputs, last_hidden)
         dit_attention_bias = self._dit_attention_bias(dit_valid_mask, dit_context.dtype)
 
+        shared_z = None
+        encoder_memory_keep = None
+        if self.shared_z_enabled:
+            shared_z = self.shared_z_pooler(
+                last_hidden, self._encoder_valid_mask(qwen_inputs, last_hidden)
+            )
+            # _shared_z_memory_keep is deterministic outside training: all-False when the
+            # rate is 1 (z only), all-True otherwise. Matching PI, eval never samples.
+            encoder_memory_keep = self._shared_z_memory_keep(
+                last_hidden.shape[0], last_hidden.device
+            )
+
         state = (
             torch.from_numpy(np.array(state)).to(dit_context.device, dtype=dit_context.dtype)
             if state is not None
@@ -702,6 +794,8 @@ class Qwen_GR00T(baseframework):
                 state,
                 encoder_attention_mask=dit_attention_bias,
                 noise_seeds=flow_seeds,
+                z_conditioning=shared_z,
+                encoder_memory_keep=encoder_memory_keep,
             )
 
         normalized_actions = pred_actions.detach().cpu().numpy()
