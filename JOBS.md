@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 16:13 CEST.
+Last refreshed: 2026-09-17 16:20 CEST.
 
 ## Running / queued
 
@@ -20,8 +20,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1857317 | sm_v5_piv4 | QwenPI_v4 seeds42/43; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING |
-| 1857332 | sm_rc365_piv4 | RoboCasa QwenPI_v4 seeds4/42; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING |
+| 1857343 | sm_v5_piv4 | QwenPI_v4 seeds42/43; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING (2h backfill request) |
+| 1857345 | sm_rc365_piv4 | RoboCasa QwenPI_v4 seeds4/42; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING (2h backfill request) |
 | 1851382 | tr_zonly_gr00t | zonly + GR00T head, seeds 42/43 — the two biggest effects combined | CONFIGURING  |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps (dep 1851382) | PENDING  |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps (dep 1851382) | PENDING  |
@@ -39,6 +39,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1857317 / 1857332 | sm_v5_piv4 / sm_rc365_piv4 | **CANCELLED while pending** — resubmitted as two-hour backfill jobs1857343/1857345; no work ran |
 | 1857258 | tr_v5_piv4 | **CANCELLED before start** — replaced by mandatory20-update/in-training-eval smoke gate |
 | 1857259 / 1857260 | ep_piv4_s42 / s43 | **CANCELLED before start** with parent full run; these were simulator evals and are not part of the training smoke |
 | 1850810 | rc365_nostate | **No-state ablation.** causal collapses to 0.00 on all three tasks; v5 keeps 0.83 / 0.48 / 0.46. The enc-dec arm is the one that does NOT need proprioception |
@@ -62,12 +63,12 @@ everything else from `/e/project1/m3/blank4/code/starVLA`.
 # --- RoboCasa365 training (worktree!) -------------------------------------------------
 cd /e/project1/m3/blank4/code/starVLA-upstream-merge
 # QwenPI_v4 smoke; inspect train/eval losses and steps_20 before full training.
-sbatch --parsable --job-name=sm_rc365_piv4 train_robocasa365_seed_pair_slurm.sh \
+sbatch --parsable -t 02:00:00 --job-name=sm_rc365_piv4 train_robocasa365_seed_pair_slurm.sh \
   examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4.yaml \
   ervla_robocasa365_piv4_smoke 4 42 \
   --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
   --trainer.eval_interval 10 --trainer.save_interval 20 \
-  --trainer.logging_frequency 1  # 1857332
+  --trainer.logging_frequency 1  # 1857345
 
 sbatch --parsable --job-name=tr_rc365_s42_rs --export=ALL,\
 CAUSAL_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_causal.yaml,\
@@ -82,12 +83,12 @@ sbatch --parsable --job-name=tr_zonly_v5 train_seed_pair_slurm.sh \
 
 # QwenPI_v4 smoke: exact full-run distribution/batch shape, validation at steps 10 and 20.
 # Inspect finite training/eval losses and steps_20 checkpoint before submitting full.
-sbatch --parsable --job-name=sm_v5_piv4 train_seed_pair_slurm.sh \
+sbatch --parsable -t 02:00:00 --job-name=sm_v5_piv4 train_seed_pair_slurm.sh \
   examples/LIBERO/train_files/ervla_v5_piv4_actiononly.yaml \
   ervla_v5_piv4_actiononly_smoke 42 43 \
   --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
   --trainer.eval_interval 10 --trainer.save_interval 20 \
-  --trainer.logging_frequency 1  # 1857317
+  --trainer.logging_frequency 1  # 1857343
 
 # Only after that smoke has completed and its logs/checkpoint have been inspected:
 sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
