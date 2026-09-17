@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 15:52 CEST.
+Last refreshed: 2026-09-17 16:01 CEST.
 
 ## Running / queued
 
@@ -20,6 +20,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1857317 | sm_v5_piv4 | QwenPI_v4 seeds42/43; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING |
 | 1851382 | tr_zonly_gr00t | zonly + GR00T head, seeds 42/43 — the two biggest effects combined | CONFIGURING  |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps (dep 1851382) | PENDING  |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps (dep 1851382) | PENDING  |
@@ -77,7 +78,7 @@ sbatch --parsable --job-name=sm_v5_piv4 train_seed_pair_slurm.sh \
   ervla_v5_piv4_actiononly_smoke 42 43 \
   --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
   --trainer.eval_interval 10 --trainer.save_interval 20 \
-  --trainer.logging_frequency 1
+  --trainer.logging_frequency 1  # 1857317
 
 # Only after that smoke has completed and its logs/checkpoint have been inspected:
 sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
