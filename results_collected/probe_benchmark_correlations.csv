@@ -1,0 +1,12 @@
+readout,libero_n_arms,libero_pearson,libero_spearman,robocasa_n_arms,robocasa_pearson,robocasa_spearman
+enc,0,,,0,,
+mean,3,-0.09158509538526341,-0.5,2,0.9999999999999998,1.0
+per-view,0,,,0,,
+grid,0,,,0,,
+attn,0,,,0,,
+patch mean,3,0.1765578551407599,-0.5,2,1.0,1.0
+patch best,3,0.219015762066006,-0.5,2,1.0,1.0
+patch top16,3,-0.1146976573520216,-0.5,2,1.0,1.0
+state tok,0,,,0,,
+instruction,0,,,0,,
+first patch,0,,,0,,

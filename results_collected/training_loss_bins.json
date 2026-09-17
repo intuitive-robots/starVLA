@@ -1,0 +1,234 @@
+[
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 20000,
+  "n": 50,
+  "loss": 0.03779430132359266,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 25000,
+  "n": 50,
+  "loss": 0.0349031126126647,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 30000,
+  "n": 35,
+  "loss": 0.033943143274102895,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 20000,
+  "n": 50,
+  "loss": 0.036710871234536174,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 25000,
+  "n": 50,
+  "loss": 0.03359339650720358,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 30000,
+  "n": 50,
+  "loss": 0.03175888162106275,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 35000,
+  "n": 6,
+  "loss": 0.02778668173899253,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815995_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 20000,
+  "n": 50,
+  "loss": 0.04050455015152693,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 25000,
+  "n": 50,
+  "loss": 0.03412280485033989,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 30000,
+  "n": 1,
+  "loss": 0.024974893778562546,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 20000,
+  "n": 50,
+  "loss": 0.03971452206373215,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 25000,
+  "n": 50,
+  "loss": 0.03352598011493683,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 30000,
+  "n": 49,
+  "loss": 0.03090970271400043,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1815996_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 30000,
+  "n": 49,
+  "loss": 0.030368272671285942,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 35000,
+  "n": 50,
+  "loss": 0.026283721812069415,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 40000,
+  "n": 50,
+  "loss": 0.024707409255206585,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "causal",
+  "bin": 45000,
+  "n": 50,
+  "loss": 0.021804273761808872,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_causal.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 30000,
+  "n": 49,
+  "loss": 0.030290948379100586,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 35000,
+  "n": 50,
+  "loss": 0.025917149856686594,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 40000,
+  "n": 50,
+  "loss": 0.024407226480543612,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_v5.log"
+ },
+ {
+  "seed": 4,
+  "arm": "v5",
+  "bin": 45000,
+  "n": 50,
+  "loss": 0.02122500818222761,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1826547_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 30000,
+  "n": 49,
+  "loss": 0.02941652109884486,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 35000,
+  "n": 50,
+  "loss": 0.0274387801066041,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 40000,
+  "n": 50,
+  "loss": 0.024293333627283573,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "causal",
+  "bin": 45000,
+  "n": 50,
+  "loss": 0.021688187923282386,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_causal.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 30000,
+  "n": 49,
+  "loss": 0.028361127350707442,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 35000,
+  "n": 50,
+  "loss": 0.02635709922760725,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 40000,
+  "n": 50,
+  "loss": 0.023508847914636134,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_v5.log"
+ },
+ {
+  "seed": 42,
+  "arm": "v5",
+  "bin": 45000,
+  "n": 50,
+  "loss": 0.021235252805054186,
+  "source": "/e/project1/m3/blank4/code/starVLA-upstream-merge/slurm_logs/train_rc365_pair_1836350_v5.log"
+ }
+]
