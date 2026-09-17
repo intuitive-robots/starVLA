@@ -75,6 +75,7 @@
 #                             for direct comparability with the completed G/D/D-rand results.
 #                             0 (default) = full suite. E.g. 500 across the 4 default
 #                             suites = ~2000 total instead of ~10000.
+#   --resume                  skip shards already on disk (retry a partially failed suite)
 #   --exact_tasks_per_suite <n> evaluate exactly n evenly spaced task indices per suite.
 #                             This is mutually exclusive with --max_tasks_per_suite and is
 #                             preferred for larger matched comparisons with exact denominators.
@@ -135,6 +136,7 @@ while [[ $# -gt 0 ]]; do
         --num_trials) NUM_TRIALS="$2"; shift 2 ;;
         --max_tasks_per_suite) MAX_TASKS_PER_SUITE="$2"; shift 2 ;;
         --exact_tasks_per_suite) EXACT_TASKS_PER_SUITE="$2"; shift 2 ;;
+        --resume) RESUME_EVAL=1; shift ;;
         --max_batch_size) MAX_BATCH_SIZE="$2"; shift 2 ;;
         --max_wait_time) MAX_WAIT_TIME="$2"; shift 2 ;;
         --sim-runtime) SIM_RUNTIME="$2"; shift 2 ;;
@@ -241,6 +243,14 @@ echo "=========================================="
 # Exported so every srun'd node task (a separate process on a separate node)
 # can read them without fragile nested-quoting string interpolation.
 export your_ckpt output_dir
+# --resume: skip shards whose result JSON is already on disk. Each shard writes its own
+# JSON as it finishes, so a run killed by one bad node (EGL aborts cost us five suites
+# today) keeps everything the healthy shards produced -- the spatial suite still had
+# 32 of 64 shards when its job died. The partitioning is untouched, so a resumed run
+# rolls out exactly the same episodes as an uninterrupted one.
+# NOT the default: re-evaluating the same checkpoint after a code change must not
+# silently reuse shards produced by the old code.
+export STARVLA_RESUME_EVAL="${RESUME_EVAL:-0}"
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
 export SUITE_SERVERS_PER_GPU="${SERVERS_PER_GPU}"
 export SUITE_NUM_TRIALS="${NUM_TRIALS}"
