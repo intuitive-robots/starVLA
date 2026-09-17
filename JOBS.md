@@ -33,6 +33,14 @@ Last refreshed: 2026-09-16 14:20 CEST.
 | 1836286 | patchmap | other workstream | PENDING | — |
 | 1836294 | sim_qstate | other workstream (resubmit of 1826711) | PENDING | — |
 
+| 1850350 | ep_..._ours_v3_cotw01 | CoT-trace re-eval @1000 eps/suite (was 1153 eps, 0.826) | PENDING | — |
+| 1850351 | ep_..._det_v3_cotw01 | CoT-trace re-eval @1000 eps/suite (was 0.822) | PENDING | — |
+| 1850352 | ep_..._det_cotw1_readout | CoT-trace re-eval @1000 eps/suite (was 0.790) | PENDING | — |
+| 1850353 | ep_..._ours_full_cotw1 | CoT-trace re-eval @1000 eps/suite (was 0.787) | PENDING | — |
+| 1850294 | ep_zonly_v5_s42 | rerun after CUDA abort on jpbo-058-08 | PENDING | — |
+| 1850179 | rc365_eval_s42b | rerun of the 15 robocasa units lost to EGL aborts | PENDING | — |
+| 1850178 | fla_probe | why fla binds to torch.cpu on compute nodes (blocks q35) | PENDING | — |
+
 ## Finished
 
 | Job | Name | Outcome |
