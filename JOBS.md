@@ -20,6 +20,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
 | 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
 | 1864092 / 1864093 | tr_tl2a_42 / 43 | Tied two-pass predicted-trace GR00T, one seed per4-GPU node,16/device, global64,20k | SUBMITTED — smokes1864038/39 passed |
 | 1864074 / 1864075 | ep_tl1a_42 / 43 | Exact4k LIBERO-plus after matched alternating one-pass trace-head pair1864073 | PENDING (Dependency) |
@@ -156,6 +157,15 @@ sbatch --parsable --time=12:00:00 --job-name=tr_tl2a_42 train_libero_slurm.sh --
 sbatch --parsable --time=12:00:00 --job-name=tr_tl2a_43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s43 --seed 43  # 1864093
 sbatch --parsable --time=05:00:00 --dependency=afterok:1864092 --job-name=ep_tl2a_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864094
 sbatch --parsable --time=05:00:00 --dependency=afterok:1864093 --job-name=ep_tl2a_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864095
+```
+
+The same-compute null-trace control is claim-critical: it replaces predicted coordinates
+with constant0.5 coordinates while retaining the second tied encoder pass, trace head/loss,
+slots and action path. Its full run is gated on these smokes:
+
+```bash
+sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s42 --seed 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864418
+sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s43 --seed 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864419
 ```
 
 ```bash
