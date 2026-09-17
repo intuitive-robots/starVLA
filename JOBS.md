@@ -304,3 +304,28 @@ Working directory: `/e/project1/m3/blank4/code/starVLA`.
 ```bash
 sbatch --parsable --time=05:00:00 --dependency=afterok:1861661 --job-name=ep_gz_015_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0
 ```
+
+### RoboCasa supervision pilot 1862755
+
+Submitted from `/e/project1/m3/blank4/code/starVLA-upstream-merge`:
+```bash
+sbatch --parsable scripts/robocasa_supervision/run_slurm.sh pilot 4 /e/scratch/m3/blank4/rc365_supervision/pilot_labels_v1
+```
+One4-GPU node, four independent annotation workers,2h limit. One full source episode per18 task families, saved-state replay, per-frame masks and object/gripper trajectories, plus overlay inspection. This is dataset generation; no policy training/evaluation was submitted. Full generation waits for the pilot audit.
+
+### RoboCasa annotation interactive allocation1862781
+
+Pilot1862755 failed before writing labels: saved XML omits external cameras. Fixed by restoring exact per-episode `cam_configs`. Allocation command (worktree):
+```bash
+salloc --no-shell --nodes=1 --ntasks=1 --cpus-per-task=288 --gres=gpu:4 --partition=booster -A m3 --time=02:00:00 --job-name=ix_rc_labels
+srun --jobid=1862781 --nodes=1 --ntasks=1 bash scripts/robocasa_supervision/run_slurm.sh pilot 4 /e/scratch/m3/blank4/rc365_supervision/pilot_labels_v2
+```
+Use this allocation for iterative label validation; no new training jobs.
+
+### RoboCasa full supervision array1862967_[0-3]
+
+Pilot passed:18 task families/4,282 frames,54 RGB camera comparisons (mean MAE3.807/255, max5.746), then final shared-z conventions checked on4 episodes/1,182 frames with no audit errors. Full command from worktree:
+```bash
+sbatch --parsable --array=0-3 --time=04:00:00 --job-name=rc_labels_full --export=ALL,SHARD_GROUPS=4,SUPERVISION_CODE_DIR=/e/scratch/m3/blank4/rc365_supervision/code/fd7d801 scripts/robocasa_supervision/run_slurm.sh full 16 /e/scratch/m3/blank4/rc365_supervision/labels_v1
+```
+Four4-GPU nodes,16 annotation workers/node (four/GPU),64 disjoint episode shards. Scripts pinned at worktree commitfd7d801. Output `labels_v1/episode_*/{targets.npz,COMPLETE.json}`; failures remain explicit JSONL records. No training submitted. Final export/audit waits for completeness; multi-entity inferred boundaries remain marked for review. Interactive1862781 retained temporarily for diagnostics.
