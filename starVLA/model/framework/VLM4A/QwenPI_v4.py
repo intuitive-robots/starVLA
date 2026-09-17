@@ -9,10 +9,7 @@ action/state and VLM tokens as keys/values, followed by an FFN.
 from dataclasses import dataclass, field
 from typing import Optional
 
-import torch.nn as nn
-
-from starVLA.model.framework.base_framework import baseframework
-from starVLA.model.framework.share_tools import merge_framework_config, populate_layerwise_dit_cfg
+from starVLA.model.framework.share_tools import merge_framework_config
 from starVLA.model.framework.VLM4A.QwenPI_v3 import (
     QwenPI_v3DefaultConfig,
     Qwen_PI_v3,
@@ -21,7 +18,6 @@ from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader_v4 import (
     LayerwiseFlowmatchingActionHeadV4,
     get_action_model_v4,
 )
-from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.model.tools import FRAMEWORK_REGISTRY
 
 
@@ -62,45 +58,14 @@ class Qwen_PI_v4(Qwen_PI_v3):
     """Qwen VLM + independent fused self/cross-attention DiT action head."""
 
     def __init__(self, config: Optional[dict] = None, **kwargs) -> None:
-        # QwenPI_v3's methods are reused for the VLM-side data flow, but its
-        # constructor is intentionally not called because it would build the
-        # legacy action head before we can install the v4 head.
-        baseframework.__init__(self)
-        self.config = merge_framework_config(QwenPI_v4DefaultConfig, config)
-        self.qwen_vl_interface = get_vlm_model(config=self.config)
+        # Keep every VLM/data/auxiliary/inference field in lockstep with v3.
+        # QwenPI_v3 calls the polymorphic _build_action_model hook below, so no
+        # legacy head is constructed transiently.
+        merged = merge_framework_config(QwenPI_v4DefaultConfig, config)
+        shared_z = dict(merged.framework.get("shared_z", {}) or {})
+        if bool(shared_z.get("enabled", False)):
+            raise ValueError("QwenPI_v4 shared-z conditioning is not implemented")
+        super().__init__(config=merged, **kwargs)
 
-        vlm_hf_cfg = self.qwen_vl_interface.model.config
-        text_cfg = getattr(vlm_hf_cfg, "text_config", vlm_hf_cfg)
-        num_vl_layers = int(text_cfg.num_hidden_layers)
-        llm_hidden_size = int(vlm_hf_cfg.hidden_size)
-        self.config.framework.qwenvl.vl_hidden_dim = llm_hidden_size
-        self.config.framework.qwenvl.num_vl_layers = num_vl_layers
-
-        diffusion_model_cfg = self.config.framework.action_model.diffusion_model_cfg
-        action_dit_hidden_dim = diffusion_model_cfg.get("action_dit_hidden_dim", None)
-        if action_dit_hidden_dim is None:
-            action_dit_hidden_dim = llm_hidden_size
-        self.action_dit_hidden_dim = int(action_dit_hidden_dim)
-        populate_layerwise_dit_cfg(
-            self.config,
-            dit_hidden_dim=self.action_dit_hidden_dim,
-            num_dit_layers=num_vl_layers,
-        )
-
-        self.action_model: LayerwiseFlowmatchingActionHeadV4 = get_action_model_v4(config=self.config)
-        self.num_action_dit_layers = len(self.action_model.model.transformer_blocks)
-
-        self.project_layers = nn.ModuleList(
-            [
-                (
-                    nn.Identity()
-                    if llm_hidden_size == self.action_dit_hidden_dim
-                    else nn.Sequential(
-                        nn.LayerNorm(llm_hidden_size),
-                        nn.Linear(llm_hidden_size, self.action_dit_hidden_dim),
-                    )
-                )
-                for _ in range(self.num_action_dit_layers)
-            ]
-        )
-        self.action_horizon = int(self.config.framework.action_model.action_horizon)
+    def _build_action_model(self) -> LayerwiseFlowmatchingActionHeadV4:
+        return get_action_model_v4(config=self.config)
