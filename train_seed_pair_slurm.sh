@@ -18,7 +18,7 @@
 # slots two ARMS of one seed instead; use that one when comparing two configs
 # and this one when replicating a single config across seeds.
 #
-# Usage:  sbatch train_seed_pair_slurm.sh <config.yaml> <run_id_prefix> <seedA> <seedB>
+# Usage:  sbatch train_seed_pair_slurm.sh <config.yaml> <run_id_prefix> <seedA> <seedB> [trainer overrides...]
 #   e.g.  sbatch train_seed_pair_slurm.sh \
 #             examples/LIBERO/train_files/ervla_v5aux_pi_actiononly_pifix.yaml \
 #             ervla_v5aux_pi_actiononly_pifix 42 43
@@ -30,6 +30,8 @@ YAML="${1:?usage: train_seed_pair_slurm.sh <config.yaml> <run_id_prefix> <seedA>
 PREFIX="${2:?missing run_id prefix}"
 SEED_A="${3:?missing seed A}"
 SEED_B="${4:?missing seed B}"
+shift 4
+EXTRA_TRAIN_ARGS=("$@")
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "$REPO"
 
@@ -42,6 +44,7 @@ echo " seed pair -- $(basename "$YAML")"
 echo " Job ${SLURM_JOB_ID:-local} on $(hostname)"
 echo " slot 0  GPUs 0,1  ${PREFIX}_s${SEED_A}"
 echo " slot 1  GPUs 2,3  ${PREFIX}_s${SEED_B}"
+echo " overrides ${EXTRA_TRAIN_ARGS[*]:-<none>}"
 echo "=========================================="
 
 pids=()
@@ -66,7 +69,8 @@ launch() {
         bash train_libero_slurm.sh \
             --config "${YAML}" \
             --run_id "${run_id}" \
-            --seed "${seed}"
+            --seed "${seed}" \
+            "${EXTRA_TRAIN_ARGS[@]+"${EXTRA_TRAIN_ARGS[@]}"}"
     ) > "${log}" 2>&1 &
     pids+=($!)
 }

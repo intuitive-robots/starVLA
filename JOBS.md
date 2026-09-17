@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 15:36 CEST.
+Last refreshed: 2026-09-17 15:52 CEST.
 
 ## Running / queued
 
@@ -20,9 +20,6 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1857258 | tr_v5_piv4 | QwenPI_v4 fused dual-attention, matched v5 action-only seeds 42/43 | PENDING (Priority) |
-| 1857259 | ep_piv4_s42 | Exact 4k LIBERO-plus eval for QwenPI_v4 seed 42 (afterok:1857258) | PENDING (Dependency) |
-| 1857260 | ep_piv4_s43 | Exact 4k LIBERO-plus eval for QwenPI_v4 seed 43 (afterok:1857258) | PENDING (Dependency) |
 | 1851382 | tr_zonly_gr00t | zonly + GR00T head, seeds 42/43 — the two biggest effects combined | CONFIGURING  |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps (dep 1851382) | PENDING  |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps (dep 1851382) | PENDING  |
@@ -40,6 +37,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1857258 | tr_v5_piv4 | **CANCELLED before start** — replaced by mandatory20-update/in-training-eval smoke gate |
+| 1857259 / 1857260 | ep_piv4_s42 / s43 | **CANCELLED before start** with parent full run; these were simulator evals and are not part of the training smoke |
 | 1850810 | rc365_nostate | **No-state ablation.** causal collapses to 0.00 on all three tasks; v5 keeps 0.83 / 0.48 / 0.46. The enc-dec arm is the one that does NOT need proprioception |
 | 1850179 | rc365_eval_s42b | 15/34 units — EGL aborts again; seed-42 robocasa benchmark still incomplete |
 | 1850996 | tr_q35enc_pair | FAILED — preflight printed OK then training still died: fla binds per PROCESS, not per node, so a separate-process probe cannot catch it |
@@ -71,20 +70,30 @@ sbatch --parsable --job-name=tr_zonly_v5 train_seed_pair_slurm.sh \
   examples/LIBERO/train_files/ervla_zonly_pi_sharedz_ground_temporal_v5.yaml \
   ervla_zonly_pi_sharedz_ground_temporal_v5 42 43
 
-# QwenPI_v4: dense per-layer VLM conditioning with action-token interaction.
+# QwenPI_v4 smoke: exact full-run distribution/batch shape, validation at steps 10 and 20.
+# Inspect finite training/eval losses and steps_20 checkpoint before submitting full.
+sbatch --parsable --job-name=sm_v5_piv4 train_seed_pair_slurm.sh \
+  examples/LIBERO/train_files/ervla_v5_piv4_actiononly.yaml \
+  ervla_v5_piv4_actiononly_smoke 42 43 \
+  --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
+  --trainer.eval_interval 10 --trainer.save_interval 20 \
+  --trainer.logging_frequency 1
+
+# Only after that smoke has completed and its logs/checkpoint have been inspected:
 sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
   examples/LIBERO/train_files/ervla_v5_piv4_actiononly.yaml \
-  ervla_v5_piv4_actiononly 42 43  # 1857258
+  ervla_v5_piv4_actiononly 42 43
 
-sbatch --parsable --dependency=afterok:1857258 --job-name=ep_piv4_s42 \
+# Only after full training succeeds:
+sbatch --parsable --job-name=ep_piv4_s42 \
   eval_libero_plus_slurm.sh \
   --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s42/checkpoints/steps_20000_pytorch_model.pt \
-  --exact_tasks_per_suite 1000  # 1857259
+  --exact_tasks_per_suite 1000
 
-sbatch --parsable --dependency=afterok:1857258 --job-name=ep_piv4_s43 \
+sbatch --parsable --job-name=ep_piv4_s43 \
   eval_libero_plus_slurm.sh \
   --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s43/checkpoints/steps_20000_pytorch_model.pt \
-  --exact_tasks_per_suite 1000  # 1857260
+  --exact_tasks_per_suite 1000
 
 sbatch --parsable --job-name=tr_q35enc_pair --export=ALL,\
 YAML_A=examples/LIBERO-plus/train_files/starvla_libero_plus_q35encdec_enconly_gr00t_deeps.yaml,\
