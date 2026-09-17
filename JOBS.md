@@ -61,6 +61,13 @@ worktree** `/e/project1/m3/blank4/code/starVLA-upstream-merge` (branch `merge_up
 everything else from `/e/project1/m3/blank4/code/starVLA`.
 
 ```bash
+# --- Interactive smoke allocation ----------------------------------------------------
+# Inside this shell: run LIBERO seeds42/43 concurrently on GPUs0-1/2-3; if both
+# pass, reuse the allocation for the RoboCasa seeds4/42 smoke. No full training.
+salloc --nodes=1 --ntasks=1 --cpus-per-task=288 --gres=gpu:4 \
+  --partition=booster -A m3 --time=02:00:00 --job-name=ix_piv4_smoke \
+  srun --pty bash -l  # 1857753
+
 # --- RoboCasa365 training (worktree!) -------------------------------------------------
 cd /e/project1/m3/blank4/code/starVLA-upstream-merge
 # QwenPI_v4 smoke; inspect train/eval losses and steps_20 before full training.
