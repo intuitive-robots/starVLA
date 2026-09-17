@@ -1,0 +1,21 @@
+{
+  "frames": 2231347,
+  "object_rows": 1735454,
+  "gripper_rows": 1578386,
+  "z_rows": 2231347,
+  "object_full_rows": 1657059,
+  "gripper_full_rows": 1416557,
+  "unreviewed_frames": 0,
+  "inferred_boundary_frames": 210283,
+  "missing_episodes": [],
+  "z_valid_counts": {
+    "target_point": 1827429,
+    "object_box": 1956721,
+    "ground_relation": 1669795,
+    "ground_visibility": 2158561,
+    "trajectory3d": 2221756,
+    "phase": 2231347,
+    "future_frame": 2154619
+  },
+  "training_adapter_status": "Native structured target file requires explicit validity-mask loader integration; do not use LIBERO tag-presence visibility inference."
+}

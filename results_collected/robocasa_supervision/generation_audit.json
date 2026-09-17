@@ -1,0 +1,377 @@
+{
+  "counts": {
+    "subtasks": 9591,
+    "subtasks_needing_review": 930,
+    "episodes": 9126,
+    "frames": 2231347
+  },
+  "missing_episodes": [],
+  "errors": [],
+  "tasks": {
+    "CloseBlenderLid": {
+      "episodes": 502,
+      "frames": 183099,
+      "subtasks": 502,
+      "object_trace_valid": [
+        174586,
+        181099,
+        93789
+      ],
+      "gripper_trace_valid": [
+        156999,
+        173456,
+        183099
+      ],
+      "target_point_valid": [
+        183099,
+        182953,
+        84147
+      ]
+    },
+    "CloseFridge": {
+      "episodes": 513,
+      "frames": 155443,
+      "subtasks": 683,
+      "object_trace_valid": [
+        146851,
+        152298,
+        10784
+      ],
+      "gripper_trace_valid": [
+        83426,
+        129747,
+        155443
+      ],
+      "target_point_valid": [
+        155443,
+        155443,
+        81438
+      ]
+    },
+    "CloseToasterOvenDoor": {
+      "episodes": 505,
+      "frames": 86401,
+      "subtasks": 505,
+      "object_trace_valid": [
+        86401,
+        86401,
+        20281
+      ],
+      "gripper_trace_valid": [
+        85522,
+        84777,
+        86401
+      ],
+      "target_point_valid": [
+        86401,
+        86401,
+        51638
+      ]
+    },
+    "CoffeeSetupMug": {
+      "episodes": 502,
+      "frames": 117168,
+      "subtasks": 502,
+      "object_trace_valid": [
+        117168,
+        117168,
+        36760
+      ],
+      "gripper_trace_valid": [
+        116842,
+        116501,
+        117168
+      ],
+      "target_point_valid": [
+        117168,
+        117168,
+        77687
+      ]
+    },
+    "NavigateKitchen": {
+      "episodes": 500,
+      "frames": 72786,
+      "subtasks": 500,
+      "object_trace_valid": [
+        0,
+        0,
+        0
+      ],
+      "gripper_trace_valid": [
+        72786,
+        72786,
+        72786
+      ],
+      "target_point_valid": [
+        0,
+        0,
+        0
+      ]
+    },
+    "OpenCabinet": {
+      "episodes": 500,
+      "frames": 184024,
+      "subtasks": 795,
+      "object_trace_valid": [
+        56882,
+        65586,
+        12356
+      ],
+      "gripper_trace_valid": [
+        73611,
+        77479,
+        184024
+      ],
+      "target_point_valid": [
+        58835,
+        67524,
+        29466
+      ]
+    },
+    "OpenDrawer": {
+      "episodes": 514,
+      "frames": 137431,
+      "subtasks": 514,
+      "object_trace_valid": [
+        2818,
+        2815,
+        77129
+      ],
+      "gripper_trace_valid": [
+        734,
+        1659,
+        137431
+      ],
+      "target_point_valid": [
+        2818,
+        2815,
+        4130
+      ]
+    },
+    "OpenStandMixerHead": {
+      "episodes": 502,
+      "frames": 58100,
+      "subtasks": 502,
+      "object_trace_valid": [
+        58100,
+        58100,
+        33496
+      ],
+      "gripper_trace_valid": [
+        48155,
+        56074,
+        58100
+      ],
+      "target_point_valid": [
+        58100,
+        58100,
+        36478
+      ]
+    },
+    "PickPlaceCounterToCabinet": {
+      "episodes": 502,
+      "frames": 131904,
+      "subtasks": 502,
+      "object_trace_valid": [
+        130379,
+        130461,
+        72946
+      ],
+      "gripper_trace_valid": [
+        130619,
+        130925,
+        131904
+      ],
+      "target_point_valid": [
+        128503,
+        128667,
+        57008
+      ]
+    },
+    "PickPlaceCounterToStove": {
+      "episodes": 501,
+      "frames": 129560,
+      "subtasks": 501,
+      "object_trace_valid": [
+        110686,
+        107546,
+        73085
+      ],
+      "gripper_trace_valid": [
+        102656,
+        100845,
+        129560
+      ],
+      "target_point_valid": [
+        129560,
+        129560,
+        59842
+      ]
+    },
+    "PickPlaceDrawerToCounter": {
+      "episodes": 501,
+      "frames": 155749,
+      "subtasks": 501,
+      "object_trace_valid": [
+        119046,
+        122354,
+        70546
+      ],
+      "gripper_trace_valid": [
+        99158,
+        103695,
+        155749
+      ],
+      "target_point_valid": [
+        155652,
+        155040,
+        56750
+      ]
+    },
+    "PickPlaceSinkToCounter": {
+      "episodes": 501,
+      "frames": 194952,
+      "subtasks": 501,
+      "object_trace_valid": [
+        119734,
+        140460,
+        87712
+      ],
+      "gripper_trace_valid": [
+        94428,
+        104427,
+        194952
+      ],
+      "target_point_valid": [
+        138601,
+        163093,
+        65468
+      ]
+    },
+    "PickPlaceToasterToCounter": {
+      "episodes": 512,
+      "frames": 148353,
+      "subtasks": 512,
+      "object_trace_valid": [
+        147981,
+        147831,
+        57349
+      ],
+      "gripper_trace_valid": [
+        123813,
+        123943,
+        148353
+      ],
+      "target_point_valid": [
+        148353,
+        148353,
+        59518
+      ]
+    },
+    "SlideDishwasherRack": {
+      "episodes": 502,
+      "frames": 83544,
+      "subtasks": 502,
+      "object_trace_valid": [
+        83143,
+        83544,
+        8454
+      ],
+      "gripper_trace_valid": [
+        62544,
+        67771,
+        83544
+      ],
+      "target_point_valid": [
+        83217,
+        83544,
+        52113
+      ]
+    },
+    "TurnOffStove": {
+      "episodes": 500,
+      "frames": 114027,
+      "subtasks": 500,
+      "object_trace_valid": [
+        114027,
+        114027,
+        100648
+      ],
+      "gripper_trace_valid": [
+        108929,
+        106316,
+        114027
+      ],
+      "target_point_valid": [
+        114027,
+        114027,
+        109432
+      ]
+    },
+    "TurnOnElectricKettle": {
+      "episodes": 520,
+      "frames": 84679,
+      "subtasks": 520,
+      "object_trace_valid": [
+        84679,
+        84679,
+        58791
+      ],
+      "gripper_trace_valid": [
+        84588,
+        84679,
+        84679
+      ],
+      "target_point_valid": [
+        84679,
+        84679,
+        73689
+      ]
+    },
+    "TurnOnMicrowave": {
+      "episodes": 543,
+      "frames": 80439,
+      "subtasks": 543,
+      "object_trace_valid": [
+        69285,
+        80439,
+        44306
+      ],
+      "gripper_trace_valid": [
+        19888,
+        80289,
+        80439
+      ],
+      "target_point_valid": [
+        69285,
+        80439,
+        61979
+      ]
+    },
+    "TurnOnSinkFaucet": {
+      "episodes": 506,
+      "frames": 113688,
+      "subtasks": 506,
+      "object_trace_valid": [
+        113688,
+        113688,
+        4954
+      ],
+      "gripper_trace_valid": [
+        113688,
+        113688,
+        113688
+      ],
+      "target_point_valid": [
+        113688,
+        113688,
+        70653
+      ]
+    }
+  },
+  "audit_inputs": [
+    "/e/scratch/m3/blank4/rc365_supervision/MAIN_AUDIT.json",
+    "/e/scratch/m3/blank4/rc365_supervision/retry_labels_v1/AUDIT.json"
+  ],
+  "merge_validation": "disjoint audited episode sets cover exact manifest; frame count matches; all completion sentinels present"
+}

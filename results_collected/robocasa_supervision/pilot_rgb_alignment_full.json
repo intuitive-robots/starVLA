@@ -1,0 +1,1892 @@
+[
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8072306315104165
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 90,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.665654500325521
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 180,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8910929361979165
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 270,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.6946004231770835
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 360,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.9723917643229165
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.907190958658854
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 90,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.6227315266927085
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 180,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.871424357096354
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 270,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.5959879557291665
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 360,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.6911214192708335
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.5392659505208335
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 90,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.040644327799479
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 180,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.294977823893229
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 270,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.330632527669271
+  },
+  {
+    "task": "CloseBlenderLid",
+    "episode_index": 0,
+    "frame": 360,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.7004241943359375
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.985626220703125
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 107,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.5182698567708335
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 214,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.5995076497395835
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 321,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.678716023763021
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 428,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.340296427408854
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.7488911946614585
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 107,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.0374298095703125
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 214,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.355951944986979
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 321,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 2.7145233154296875
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 428,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 2.9762471516927085
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1223653157552085
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 107,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 1.4390614827473958
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 214,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.238316853841146
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 321,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.157404581705729
+  },
+  {
+    "task": "CloseFridge",
+    "episode_index": 502,
+    "frame": 428,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 1.5296071370442708
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.170501708984375
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 29,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.098866780598958
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 58,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8947347005208335
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 87,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.161458333333333
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 116,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8408304850260415
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.939702351888021
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 29,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.68463134765625
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 58,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.65789794921875
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 87,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.7293497721354165
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 116,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.508661905924479
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.804041544596354
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 29,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 4.436808268229167
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 58,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.330530802408854
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 87,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.321222941080729
+  },
+  {
+    "task": "CloseToasterOvenDoor",
+    "episode_index": 1015,
+    "frame": 116,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.1013590494791665
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.039825439453125
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 50,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.994720458984375
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 100,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.789850870768229
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 150,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.7821756998697915
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 201,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.209726969401042
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.941919962565104
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 50,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.799992879231771
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 100,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.763921101888021
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 150,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.72412109375
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 201,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.189737955729167
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.671534220377604
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 50,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3280537923177085
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 100,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3956502278645835
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 150,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.863042195638021
+  },
+  {
+    "task": "CoffeeSetupMug",
+    "episode_index": 1520,
+    "frame": 201,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.355158487955729
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.0009511311848955
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 44,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.316975911458333
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 88,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.560557047526042
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 132,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.056345621744792
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 176,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.4136199951171875
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9456024169921875
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 44,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.9903208414713545
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 88,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.557942708333333
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 132,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.065531412760417
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 176,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.645222981770833
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.831207275390625
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 44,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 4.2172190348307295
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 88,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 4.225911458333333
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 132,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.9692230224609375
+  },
+  {
+    "task": "NavigateKitchen",
+    "episode_index": 2022,
+    "frame": 176,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3591715494791665
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.0526072184244795
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 38,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.449900309244792
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 77,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.424418131510417
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 116,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8093770345052085
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 155,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.596959431966146
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.2821909586588545
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 38,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.915654500325521
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 77,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9446919759114585
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 116,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.609161376953125
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 155,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.0293426513671875
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.639531453450521
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 38,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.3879191080729165
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 77,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.5658671061197915
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 116,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.4357147216796875
+  },
+  {
+    "task": "OpenCabinet",
+    "episode_index": 2522,
+    "frame": 155,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.4498748779296875
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.2550506591796875
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 83,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 2.926727294921875
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 166,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 2.842280069986979
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 249,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 2.880589803059896
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 333,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 2.7089080810546875
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.592625935872396
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 83,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.3777872721354165
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 166,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.0734659830729165
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 249,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.0831197102864585
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 333,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 2.86309814453125
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.193547566731771
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 83,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.57135009765625
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 166,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.09539794921875
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 249,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 1.6829732259114583
+  },
+  {
+    "task": "OpenDrawer",
+    "episode_index": 3022,
+    "frame": 333,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 1.6418914794921875
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.0315297444661455
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 21,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.9392801920572915
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 43,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.895146687825521
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 64,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.2040761311848955
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 86,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.6214599609375
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.751775105794271
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 21,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.68829345703125
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 43,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.684900919596354
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 64,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9853006998697915
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 86,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.2721099853515625
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.322138468424479
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 21,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.015040079752604
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 43,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.6957804361979165
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 64,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.2110137939453125
+  },
+  {
+    "task": "OpenStandMixerHead",
+    "episode_index": 3536,
+    "frame": 86,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.5545450846354165
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.1407521565755205
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 61,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.7848663330078125
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 122,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.9717814127604165
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 183,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.2460683186848955
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 245,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.4727223714192705
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.031087239583333
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 61,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.834503173828125
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 122,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.1434326171875
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 183,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.111897786458333
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 245,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.25762939453125
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.6970011393229165
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 61,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3158365885416665
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 122,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1970113118489585
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 183,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.3353474934895835
+  },
+  {
+    "task": "PickPlaceCounterToCabinet",
+    "episode_index": 4038,
+    "frame": 245,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.2232157389322915
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.220306396484375
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 64,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.1117808024088545
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 129,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.1989390055338545
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 194,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.35107421875
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 259,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.803446451822917
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.3145701090494795
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 64,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.4730224609375
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 129,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.4216868082682295
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 194,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.0911814371744795
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 259,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.403706868489583
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3364359537760415
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 64,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.684046427408854
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 129,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.066497802734375
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 194,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.5962015787760415
+  },
+  {
+    "task": "PickPlaceCounterToStove",
+    "episode_index": 4540,
+    "frame": 259,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1518758138020835
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.894622802734375
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 80,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.9001057942708335
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 161,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.7790934244791665
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 241,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.573176066080729
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 322,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.8966064453125
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.90887451171875
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 80,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.011739095052083
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 161,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.114339192708333
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 241,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.908086140950521
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 322,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.0518646240234375
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.8156585693359375
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 80,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.5699666341145835
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 161,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.744562784830729
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 241,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.275324503580729
+  },
+  {
+    "task": "PickPlaceDrawerToCounter",
+    "episode_index": 5041,
+    "frame": 322,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.7841695149739585
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.469090779622396
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 100,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.3319295247395835
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 201,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.420832316080729
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 302,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.516504923502604
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 403,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.64813232421875
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.578638712565104
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 100,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.248570760091146
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 201,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.248906453450521
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 302,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 2.972559611002604
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 403,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.22802734375
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.925450642903646
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 100,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.2623494466145835
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 201,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.7085469563802085
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 302,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.83099365234375
+  },
+  {
+    "task": "PickPlaceSinkToCounter",
+    "episode_index": 5542,
+    "frame": 403,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.046106974283854
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.2623545328776045
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 66,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.196980794270833
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 132,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.254862467447917
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 198,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.1425120035807295
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 265,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.409098307291667
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.761388142903646
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 66,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9919535319010415
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 132,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.051615397135417
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 198,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.8412017822265625
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 265,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.6401265462239585
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.43536376953125
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 66,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.065210978190104
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 132,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.065424601236979
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 198,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.3478546142578125
+  },
+  {
+    "task": "PickPlaceToasterToCounter",
+    "episode_index": 6043,
+    "frame": 265,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 4.213582356770833
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.9014638264973955
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 31,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.6506805419921875
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 62,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.8017578125
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 93,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.8019968668619795
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 125,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 4.8258005777994795
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.7451731363932295
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 31,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.8283335367838545
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 62,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.351369222005208
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 93,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.0640869140625
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 125,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.9229176839192705
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 4.392506917317708
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 31,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 5.626108805338542
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 62,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 5.2117360432942705
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 93,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 5.4501495361328125
+  },
+  {
+    "task": "SlideDishwasherRack",
+    "episode_index": 6555,
+    "frame": 125,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 7.508565266927083
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.4771728515625
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 44,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.1141459147135415
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 88,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.2248942057291665
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 132,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.206451416015625
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 176,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.2473653157552085
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.534454345703125
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 44,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.300165812174479
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 88,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.1759033203125
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 132,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.1800740559895835
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 176,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.241541544596354
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1539204915364585
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 44,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.288416544596354
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 88,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.7686614990234375
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 132,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.4082743326822915
+  },
+  {
+    "task": "TurnOffStove",
+    "episode_index": 7057,
+    "frame": 176,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.7046915690104165
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.759424845377604
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 56,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.4220682779947915
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 112,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.4454854329427085
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 168,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.4646148681640625
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 224,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.62762451171875
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.930694580078125
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 56,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.958953857421875
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 112,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.7837626139322915
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 168,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.7849884033203125
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 224,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9845072428385415
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.2488505045572915
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 56,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.117853800455729
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 112,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.612431844075521
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 168,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.30194091796875
+  },
+  {
+    "task": "TurnOnElectricKettle",
+    "episode_index": 7557,
+    "frame": 224,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.685612996419271
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.642206827799479
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 28,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.41058349609375
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 57,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.2806599934895835
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 85,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.323155721028646
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 114,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 3.315673828125
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.7127278645833335
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 28,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9082794189453125
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 57,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.9583892822265625
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 85,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 3.977177937825521
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 114,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.2152862548828125
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.160858154296875
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 28,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.2361907958984375
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 57,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.435216267903646
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 85,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 1.8924001057942708
+  },
+  {
+    "task": "TurnOnMicrowave",
+    "episode_index": 8077,
+    "frame": 114,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1031087239583335
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 0,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.3904978434244795
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 69,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.4847666422526045
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 138,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.2772267659505205
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 207,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.177998860677083
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 276,
+    "camera": "robot0_agentview_left",
+    "mae_0_255": 5.2610015869140625
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 0,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.161092122395833
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 69,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.201863606770833
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 138,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 5.0740915934244795
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 207,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.9460906982421875
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 276,
+    "camera": "robot0_agentview_right",
+    "mae_0_255": 4.9268798828125
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 0,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.005549112955729
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 69,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.6491851806640625
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 138,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 3.1268107096354165
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 207,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.6636149088541665
+  },
+  {
+    "task": "TurnOnSinkFaucet",
+    "episode_index": 8620,
+    "frame": 276,
+    "camera": "robot0_eye_in_hand",
+    "mae_0_255": 2.543548583984375
+  }
+]

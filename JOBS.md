@@ -329,3 +329,30 @@ Pilot passed:18 task families/4,282 frames,54 RGB camera comparisons (mean MAE3.
 sbatch --parsable --array=0-3 --time=04:00:00 --job-name=rc_labels_full --export=ALL,SHARD_GROUPS=4,SUPERVISION_CODE_DIR=/e/scratch/m3/blank4/rc365_supervision/code/fd7d801 scripts/robocasa_supervision/run_slurm.sh full 16 /e/scratch/m3/blank4/rc365_supervision/labels_v1
 ```
 Four4-GPU nodes,16 annotation workers/node (four/GPU),64 disjoint episode shards. Scripts pinned at worktree commitfd7d801. Output `labels_v1/episode_*/{targets.npz,COMPLETE.json}`; failures remain explicit JSONL records. No training submitted. Final export/audit waits for completeness; multi-entity inferred boundaries remain marked for review. Interactive1862781 retained temporarily for diagnostics.
+
+### RoboCasa correction validation allocation1863079
+
+Interactive1862781 released after successful pilot/export validation. Full generation continues. Whole-data entity audit found151 scenes with another appliance also naming a start-button; corrected selector now matches the microwave fixture. Initial full generation also found38 overlapping door-motion intervals, caused in inspected curves by small bumps/settling outside the main manipulation. Added an explicit central90%-motion fallback that still rejects truly overlapping interactions.
+
+From the RoboCasa worktree:
+```bash
+salloc --no-shell --nodes=1 --ntasks=1 --cpus-per-task=288 --gres=gpu:4 --partition=booster -A m3 --time=02:00:00 --job-name=ix_rc_label_fix
+EPISODE_IDS=744,2529,8082,8083 srun --jobid=1863079 --nodes=1 --ntasks=1 bash scripts/robocasa_supervision/run_slurm.sh review 4 /e/scratch/m3/blank4/rc365_supervision/fix_pilot_v1
+```
+Four affected episodes, four GPUs, overlays and invariant checks. Retry affected labels only after this passes.
+
+Correction pilot1863079 passed all4 affected episodes with zero audit errors. Within the same allocation, retrying189 episodes (151 microwave selectors +38 door-motion cases),16workers/4GPUs:
+```bash
+EPISODE_IDS=$(cat /e/scratch/m3/blank4/rc365_supervision/retry_episode_ids.txt) srun --jobid=1863079 --nodes=1 --ntasks=1 bash scripts/robocasa_supervision/run_slurm.sh full 16 /e/scratch/m3/blank4/rc365_supervision/retry_labels_v1
+```
+Retry outputs remain separate until audited and merged. Source-video alignment expanded to270 frame/camera comparisons across18 tasks: meanMAE3.719/255,max7.509.
+
+Retry step1863079.1 was CPU-bound to one core by the interactive `srun` default (16workers each~5.5%CPU). Stopped only that annotation step and restarted with explicit full-node CPU binding; completed episode sentinels are resumable:
+```bash
+EPISODE_IDS=$(cat /e/scratch/m3/blank4/rc365_supervision/retry_episode_ids.txt) srun --jobid=1863079 --nodes=1 --ntasks=1 --cpus-per-task=288 --cpu-bind=none bash scripts/robocasa_supervision/run_slurm.sh full 16 /e/scratch/m3/blank4/rc365_supervision/retry_labels_v1
+```
+The original four batch-array tasks were already using their full CPU allocations.
+
+### RoboCasa supervision completed
+
+Array1862967_[0-3] finished in15m11s–16m53s, returning FAILED because189 explicit per-episode exceptions were retained. All189 were repaired in allocation1863079; final retry step1863079.3 completed successfully, and the allocation was released. The merged dataset has9,126/9,126 episodes,9,591 subtasks,2,231,347 frames, no unresolved failures.465 multi-part episodes retain inferred-boundary flags. Full native and both whole/remaining object/gripper CoT exports are under `/e/scratch/m3/blank4/rc365_supervision/mappings_v1/`. Final raw-count reports are in `results_collected/robocasa_supervision/{generation_audit,export_audit}.json`. No training jobs launched.

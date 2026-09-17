@@ -1,0 +1,1136 @@
+[
+  {
+    "episode_index": 8236,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008236/COMPLETE.json"
+  },
+  {
+    "episode_index": 8492,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008492/COMPLETE.json"
+  },
+  {
+    "episode_index": 8570,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008570/COMPLETE.json"
+  },
+  {
+    "episode_index": 963,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_000963/COMPLETE.json"
+  },
+  {
+    "episode_index": 8195,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008195/COMPLETE.json"
+  },
+  {
+    "episode_index": 8323,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008323/COMPLETE.json"
+  },
+  {
+    "episode_index": 8387,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008387/COMPLETE.json"
+  },
+  {
+    "episode_index": 8515,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008515/COMPLETE.json"
+  },
+  {
+    "episode_index": 8118,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008118/COMPLETE.json"
+  },
+  {
+    "episode_index": 8502,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008502/COMPLETE.json"
+  },
+  {
+    "episode_index": 2830,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002830/COMPLETE.json"
+  },
+  {
+    "episode_index": 8462,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008462/COMPLETE.json"
+  },
+  {
+    "episode_index": 8150,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008150/COMPLETE.json"
+  },
+  {
+    "episode_index": 8406,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008406/COMPLETE.json"
+  },
+  {
+    "episode_index": 8598,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008598/COMPLETE.json"
+  },
+  {
+    "episode_index": 8254,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008254/COMPLETE.json"
+  },
+  {
+    "episode_index": 8318,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008318/COMPLETE.json"
+  },
+  {
+    "episode_index": 8382,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008382/COMPLETE.json"
+  },
+  {
+    "episode_index": 8510,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008510/COMPLETE.json"
+  },
+  {
+    "episode_index": 8313,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008313/COMPLETE.json"
+  },
+  {
+    "episode_index": 8151,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008151/COMPLETE.json"
+  },
+  {
+    "episode_index": 8471,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008471/COMPLETE.json"
+  },
+  {
+    "episode_index": 8599,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008599/COMPLETE.json"
+  },
+  {
+    "episode_index": 2985,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002985/COMPLETE.json"
+  },
+  {
+    "episode_index": 8105,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008105/COMPLETE.json"
+  },
+  {
+    "episode_index": 8094,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008094/COMPLETE.json"
+  },
+  {
+    "episode_index": 8158,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008158/COMPLETE.json"
+  },
+  {
+    "episode_index": 8606,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008606/COMPLETE.json"
+  },
+  {
+    "episode_index": 8096,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008096/COMPLETE.json"
+  },
+  {
+    "episode_index": 947,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_000947/COMPLETE.json"
+  },
+  {
+    "episode_index": 2803,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002803/COMPLETE.json"
+  },
+  {
+    "episode_index": 8243,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008243/COMPLETE.json"
+  },
+  {
+    "episode_index": 8371,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008371/COMPLETE.json"
+  },
+  {
+    "episode_index": 8137,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008137/COMPLETE.json"
+  },
+  {
+    "episode_index": 8393,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008393/COMPLETE.json"
+  },
+  {
+    "episode_index": 8521,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008521/COMPLETE.json"
+  },
+  {
+    "episode_index": 8585,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008585/COMPLETE.json"
+  },
+  {
+    "episode_index": 8164,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008164/COMPLETE.json"
+  },
+  {
+    "episode_index": 8132,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008132/COMPLETE.json"
+  },
+  {
+    "episode_index": 8260,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008260/COMPLETE.json"
+  },
+  {
+    "episode_index": 8452,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008452/COMPLETE.json"
+  },
+  {
+    "episode_index": 2972,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002972/COMPLETE.json"
+  },
+  {
+    "episode_index": 8604,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008604/COMPLETE.json"
+  },
+  {
+    "episode_index": 2801,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002801/COMPLETE.json"
+  },
+  {
+    "episode_index": 8177,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008177/COMPLETE.json"
+  },
+  {
+    "episode_index": 8241,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008241/COMPLETE.json"
+  },
+  {
+    "episode_index": 8369,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008369/COMPLETE.json"
+  },
+  {
+    "episode_index": 8433,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008433/COMPLETE.json"
+  },
+  {
+    "episode_index": 850,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_000850/COMPLETE.json"
+  },
+  {
+    "episode_index": 2642,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002642/COMPLETE.json"
+  },
+  {
+    "episode_index": 8082,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008082/COMPLETE.json"
+  },
+  {
+    "episode_index": 8466,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008466/COMPLETE.json"
+  },
+  {
+    "episode_index": 8594,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008594/COMPLETE.json"
+  },
+  {
+    "episode_index": 2529,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002529/COMPLETE.json"
+  },
+  {
+    "episode_index": 8161,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008161/COMPLETE.json"
+  },
+  {
+    "episode_index": 8289,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008289/COMPLETE.json"
+  },
+  {
+    "episode_index": 8545,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008545/COMPLETE.json"
+  },
+  {
+    "episode_index": 2602,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002602/COMPLETE.json"
+  },
+  {
+    "episode_index": 8234,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008234/COMPLETE.json"
+  },
+  {
+    "episode_index": 8554,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008554/COMPLETE.json"
+  },
+  {
+    "episode_index": 8101,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008101/COMPLETE.json"
+  },
+  {
+    "episode_index": 8229,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008229/COMPLETE.json"
+  },
+  {
+    "episode_index": 8549,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008549/COMPLETE.json"
+  },
+  {
+    "episode_index": 8127,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008127/COMPLETE.json"
+  },
+  {
+    "episode_index": 8191,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008191/COMPLETE.json"
+  },
+  {
+    "episode_index": 8447,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008447/COMPLETE.json"
+  },
+  {
+    "episode_index": 744,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_000744/COMPLETE.json"
+  },
+  {
+    "episode_index": 2984,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002984/COMPLETE.json"
+  },
+  {
+    "episode_index": 8104,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008104/COMPLETE.json"
+  },
+  {
+    "episode_index": 564,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_000564/COMPLETE.json"
+  },
+  {
+    "episode_index": 2996,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002996/COMPLETE.json"
+  },
+  {
+    "episode_index": 8308,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008308/COMPLETE.json"
+  },
+  {
+    "episode_index": 2561,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002561/COMPLETE.json"
+  },
+  {
+    "episode_index": 2881,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002881/COMPLETE.json"
+  },
+  {
+    "episode_index": 8193,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008193/COMPLETE.json"
+  },
+  {
+    "episode_index": 8257,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008257/COMPLETE.json"
+  },
+  {
+    "episode_index": 8321,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008321/COMPLETE.json"
+  },
+  {
+    "episode_index": 8385,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008385/COMPLETE.json"
+  },
+  {
+    "episode_index": 2759,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002759/COMPLETE.json"
+  },
+  {
+    "episode_index": 8519,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008519/COMPLETE.json"
+  },
+  {
+    "episode_index": 8583,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008583/COMPLETE.json"
+  },
+  {
+    "episode_index": 8125,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008125/COMPLETE.json"
+  },
+  {
+    "episode_index": 8445,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008445/COMPLETE.json"
+  },
+  {
+    "episode_index": 8509,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008509/COMPLETE.json"
+  },
+  {
+    "episode_index": 8276,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008276/COMPLETE.json"
+  },
+  {
+    "episode_index": 8532,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008532/COMPLETE.json"
+  },
+  {
+    "episode_index": 8083,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008083/COMPLETE.json"
+  },
+  {
+    "episode_index": 8223,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008223/COMPLETE.json"
+  },
+  {
+    "episode_index": 8543,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008543/COMPLETE.json"
+  },
+  {
+    "episode_index": 2808,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002808/COMPLETE.json"
+  },
+  {
+    "episode_index": 8120,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008120/COMPLETE.json"
+  },
+  {
+    "episode_index": 8248,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008248/COMPLETE.json"
+  },
+  {
+    "episode_index": 8188,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008188/COMPLETE.json"
+  },
+  {
+    "episode_index": 8508,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008508/COMPLETE.json"
+  },
+  {
+    "episode_index": 2694,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002694/COMPLETE.json"
+  },
+  {
+    "episode_index": 8326,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008326/COMPLETE.json"
+  },
+  {
+    "episode_index": 8518,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008518/COMPLETE.json"
+  },
+  {
+    "episode_index": 2575,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002575/COMPLETE.json"
+  },
+  {
+    "episode_index": 8207,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008207/COMPLETE.json"
+  },
+  {
+    "episode_index": 8463,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008463/COMPLETE.json"
+  },
+  {
+    "episode_index": 8527,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008527/COMPLETE.json"
+  },
+  {
+    "episode_index": 8359,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008359/COMPLETE.json"
+  },
+  {
+    "episode_index": 8355,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008355/COMPLETE.json"
+  },
+  {
+    "episode_index": 8611,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008611/COMPLETE.json"
+  },
+  {
+    "episode_index": 2568,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002568/COMPLETE.json"
+  },
+  {
+    "episode_index": 8328,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008328/COMPLETE.json"
+  },
+  {
+    "episode_index": 8456,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008456/COMPLETE.json"
+  },
+  {
+    "episode_index": 8584,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008584/COMPLETE.json"
+  },
+  {
+    "episode_index": 8102,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008102/COMPLETE.json"
+  },
+  {
+    "episode_index": 8294,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008294/COMPLETE.json"
+  },
+  {
+    "episode_index": 2658,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002658/COMPLETE.json"
+  },
+  {
+    "episode_index": 2978,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002978/COMPLETE.json"
+  },
+  {
+    "episode_index": 8226,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008226/COMPLETE.json"
+  },
+  {
+    "episode_index": 8418,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008418/COMPLETE.json"
+  },
+  {
+    "episode_index": 8610,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008610/COMPLETE.json"
+  },
+  {
+    "episode_index": 8251,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008251/COMPLETE.json"
+  },
+  {
+    "episode_index": 8315,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008315/COMPLETE.json"
+  },
+  {
+    "episode_index": 8443,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008443/COMPLETE.json"
+  },
+  {
+    "episode_index": 2674,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002674/COMPLETE.json"
+  },
+  {
+    "episode_index": 8114,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008114/COMPLETE.json"
+  },
+  {
+    "episode_index": 8178,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008178/COMPLETE.json"
+  },
+  {
+    "episode_index": 8117,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008117/COMPLETE.json"
+  },
+  {
+    "episode_index": 8437,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008437/COMPLETE.json"
+  },
+  {
+    "episode_index": 2907,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002907/COMPLETE.json"
+  },
+  {
+    "episode_index": 8091,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008091/COMPLETE.json"
+  },
+  {
+    "episode_index": 8283,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008283/COMPLETE.json"
+  },
+  {
+    "episode_index": 8347,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008347/COMPLETE.json"
+  },
+  {
+    "episode_index": 8411,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008411/COMPLETE.json"
+  },
+  {
+    "episode_index": 2762,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002762/COMPLETE.json"
+  },
+  {
+    "episode_index": 8138,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008138/COMPLETE.json"
+  },
+  {
+    "episode_index": 8266,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008266/COMPLETE.json"
+  },
+  {
+    "episode_index": 8458,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008458/COMPLETE.json"
+  },
+  {
+    "episode_index": 8247,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008247/COMPLETE.json"
+  },
+  {
+    "episode_index": 2645,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002645/COMPLETE.json"
+  },
+  {
+    "episode_index": 2837,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002837/COMPLETE.json"
+  },
+  {
+    "episode_index": 8149,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008149/COMPLETE.json"
+  },
+  {
+    "episode_index": 8213,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008213/COMPLETE.json"
+  },
+  {
+    "episode_index": 8157,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008157/COMPLETE.json"
+  },
+  {
+    "episode_index": 8413,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008413/COMPLETE.json"
+  },
+  {
+    "episode_index": 2573,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002573/COMPLETE.json"
+  },
+  {
+    "episode_index": 3021,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_003021/COMPLETE.json"
+  },
+  {
+    "episode_index": 8269,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008269/COMPLETE.json"
+  },
+  {
+    "episode_index": 8525,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008525/COMPLETE.json"
+  },
+  {
+    "episode_index": 8589,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008589/COMPLETE.json"
+  },
+  {
+    "episode_index": 8281,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008281/COMPLETE.json"
+  },
+  {
+    "episode_index": 8578,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008578/COMPLETE.json"
+  },
+  {
+    "episode_index": 3008,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_003008/COMPLETE.json"
+  },
+  {
+    "episode_index": 8128,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008128/COMPLETE.json"
+  },
+  {
+    "episode_index": 8448,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008448/COMPLETE.json"
+  },
+  {
+    "episode_index": 8576,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008576/COMPLETE.json"
+  },
+  {
+    "episode_index": 8401,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008401/COMPLETE.json"
+  },
+  {
+    "episode_index": 8465,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008465/COMPLETE.json"
+  },
+  {
+    "episode_index": 8154,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008154/COMPLETE.json"
+  },
+  {
+    "episode_index": 2925,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002925/COMPLETE.json"
+  },
+  {
+    "episode_index": 8109,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008109/COMPLETE.json"
+  },
+  {
+    "episode_index": 8173,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008173/COMPLETE.json"
+  },
+  {
+    "episode_index": 8237,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008237/COMPLETE.json"
+  },
+  {
+    "episode_index": 8301,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008301/COMPLETE.json"
+  },
+  {
+    "episode_index": 8429,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008429/COMPLETE.json"
+  },
+  {
+    "episode_index": 8557,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008557/COMPLETE.json"
+  },
+  {
+    "episode_index": 8152,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008152/COMPLETE.json"
+  },
+  {
+    "episode_index": 8280,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008280/COMPLETE.json"
+  },
+  {
+    "episode_index": 8536,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008536/COMPLETE.json"
+  },
+  {
+    "episode_index": 8303,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008303/COMPLETE.json"
+  },
+  {
+    "episode_index": 8431,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008431/COMPLETE.json"
+  },
+  {
+    "episode_index": 8176,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008176/COMPLETE.json"
+  },
+  {
+    "episode_index": 8304,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008304/COMPLETE.json"
+  },
+  {
+    "episode_index": 8560,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008560/COMPLETE.json"
+  },
+  {
+    "episode_index": 2576,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002576/COMPLETE.json"
+  },
+  {
+    "episode_index": 8144,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008144/COMPLETE.json"
+  },
+  {
+    "episode_index": 8528,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008528/COMPLETE.json"
+  },
+  {
+    "episode_index": 2693,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002693/COMPLETE.json"
+  },
+  {
+    "episode_index": 2949,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002949/COMPLETE.json"
+  },
+  {
+    "episode_index": 8197,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008197/COMPLETE.json"
+  },
+  {
+    "episode_index": 8325,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008325/COMPLETE.json"
+  },
+  {
+    "episode_index": 8389,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008389/COMPLETE.json"
+  },
+  {
+    "episode_index": 8581,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008581/COMPLETE.json"
+  },
+  {
+    "episode_index": 2571,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002571/COMPLETE.json"
+  },
+  {
+    "episode_index": 8267,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008267/COMPLETE.json"
+  },
+  {
+    "episode_index": 8171,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008171/COMPLETE.json"
+  },
+  {
+    "episode_index": 8299,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008299/COMPLETE.json"
+  },
+  {
+    "episode_index": 8427,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008427/COMPLETE.json"
+  },
+  {
+    "episode_index": 8491,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008491/COMPLETE.json"
+  },
+  {
+    "episode_index": 8619,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008619/COMPLETE.json"
+  },
+  {
+    "episode_index": 2862,
+    "original_error": "ValueError: Overlapping multi-entity motion; needs explicit subtask boundaries",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_002862/COMPLETE.json"
+  },
+  {
+    "episode_index": 8110,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008110/COMPLETE.json"
+  },
+  {
+    "episode_index": 8238,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008238/COMPLETE.json"
+  },
+  {
+    "episode_index": 8302,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008302/COMPLETE.json"
+  },
+  {
+    "episode_index": 8494,
+    "original_error": "ValueError: Ambiguous microwave start button",
+    "resolved_code_sha256": "6a3cc990eeff1f0338dbbe6075931efb478d5262e34a39ce3fb2c6728d42072b",
+    "source": "/e/scratch/m3/blank4/rc365_supervision/labels_v1/episode_008494/COMPLETE.json"
+  }
+]
