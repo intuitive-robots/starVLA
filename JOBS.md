@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 16:26 CEST.
+Last refreshed: 2026-09-17 16:30 CEST.
 
 ## Running / queued
 
@@ -20,8 +20,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1857343 | sm_v5_piv4 | QwenPI_v4 seeds42/43; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING (2h backfill request) |
-| 1857345 | sm_rc365_piv4 | RoboCasa QwenPI_v4 seeds4/42; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING (2h backfill request) |
+| 1857753 | ix_piv4_smoke | Interactive2h/4GPU allocation for corrected QwenPI_v4 LIBERO seeds42/43, 2GPUs/run | PENDING (Priority) |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps | PENDING (Priority) |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps | PENDING (Priority) |
 | 1850693 | enc_dec_2b_v5_final_action_tracetime_w001 | other workstream (not this session) | RUNNING 21:52 |
@@ -38,6 +37,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1857343 | sm_v5_piv4 | **FAILED before update1** — v4 bypassed v3 constructor and lacked `cot_dropout_enabled`; fixed in4dde3dd |
+| 1857345 | sm_rc365_piv4 | **FAILED before update1** — same missing constructor state; fixed in worktree commitd2a0690 |
 | 1851382 | tr_zonly_gr00t | **COMPLETED** — seeds42/43 reached20k in5h55m; checkpoints ready and exact4k evals1851383/84 eligible |
 | 1857317 / 1857332 | sm_v5_piv4 / sm_rc365_piv4 | **CANCELLED while pending** — resubmitted as two-hour backfill jobs1857343/1857345; no work ran |
 | 1857258 | tr_v5_piv4 | **CANCELLED before start** — replaced by mandatory20-update/in-training-eval smoke gate |
