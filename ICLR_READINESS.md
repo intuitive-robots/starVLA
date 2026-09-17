@@ -53,3 +53,5 @@ If a clean CoT 4k result is not complete by Sep 19, omit CoT from the main story
 | behavior-calibrated readout objective | confirm an arm improving R2 and 4k rollout; kill if they remain uncorrelated | ~30 GPU-h + ~6 eval GPU-h |
 
 The honest publishable framing today is perturbation robustness and modality reliance with closed-loop evidence centered on LIBERO-plus. It is not universal encoder superiority.
+
+The detailed model/probe interpretation and the shared-z confound audit are in `ENCODER_DIAGNOSIS.md`.
