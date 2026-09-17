@@ -61,6 +61,36 @@
       "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s43/checkpoints/steps_20000_pytorch_model.pt"
     }
   ],
-  "startup_checked_at": "2026-09-17T20:34:19.375377+02:00",
-  "startup_status": "Both full seed-pair jobs RUNNING; four child logs confirm two GPUs/run and intended config. First updates pending."
+  "startup_checked_at": "2026-09-17T20:37:19.606929+02:00",
+  "startup_status": "All four full runs have completed at least20 optimizer updates; no startup error observed.",
+  "full_runtime_samples": [
+    {
+      "job": "1861658",
+      "seed": 42,
+      "step": 41,
+      "recent_model_seconds_median": 1.896,
+      "source_log": "slurm_logs/train_seed_pair_1861658_s42.log"
+    },
+    {
+      "job": "1861658",
+      "seed": 43,
+      "step": 45,
+      "recent_model_seconds_median": 1.6535,
+      "source_log": "slurm_logs/train_seed_pair_1861658_s43.log"
+    },
+    {
+      "job": "1861661",
+      "seed": 42,
+      "step": 41,
+      "recent_model_seconds_median": 1.876,
+      "source_log": "slurm_logs/train_seed_pair_1861661_s42.log"
+    },
+    {
+      "job": "1861661",
+      "seed": 43,
+      "step": 46,
+      "recent_model_seconds_median": 1.658,
+      "source_log": "slurm_logs/train_seed_pair_1861661_s43.log"
+    }
+  ]
 }

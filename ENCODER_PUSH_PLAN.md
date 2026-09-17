@@ -140,3 +140,5 @@ Predeclare the main claim by day 4, select the final recipe by day 5, and freeze
 
 
 September17 execution: batch64 memory arms passed all four20-update/in-training-eval smokes; full seed pairs 1861658, 1861661 and automatic exact4k evals 1861659, 1861660, 1861662, 1861663 submitted. No architecture or loss changes beyond reviewed configs; source launch patch retained in `results_collected/gr00t_memory_b64_launch/launch_worktree.patch`. See JOBS.md and the machine-readable launch record for commands and smoke evidence.
+
+Runtime clarification: the batch64 encoder-only GR00T control measured~1.02s/update; new batch64 shared-z runs initially measure~1.65–1.89s. The shared-z recipe includes future-observation encoding for temporal supervision and auxiliary losses. It is not an identical-compute comparison with action-only; both use eight flow repeats. Smoke diagnostics run every step, so use production timing for runtime/compute tables. Full jobs1861658/61 have both seeds past20 updates.
