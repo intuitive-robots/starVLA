@@ -20,6 +20,9 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | PENDING (Dependency) |
+| 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | PENDING (Dependency) |
+| 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token shared-z, one paired4-GPU node per seed,20k,batch64/arm | SUBMITTED — smokes1864642/43 passed |
 | 1864672 / 1864673 | ep_tl0a_42 / 43 | Exact4k LIBERO-plus after matched two-pass null-trace seeds1864670/71 | PENDING (Dependency) |
 | 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
@@ -197,6 +200,20 @@ sbatch --parsable --time=12:00:00 --job-name=ep_cot_prompt --export=ALL,output_d
 
 sbatch --parsable -t 02:00:00 --job-name=sm_cz42 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64_smoke,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_smoke train_config_pair_slurm.sh 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864642
 sbatch --parsable -t 02:00:00 --job-name=sm_cz43 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64_smoke,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_smoke train_config_pair_slurm.sh 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864643
+```
+
+Both causal paired smokes passed: all four runs reached20 updates and eval10/20 with
+complete4.8GB checkpoints. Shared-z memory keep was0.0, effective ranks10.31/12.29,
+and auxiliary transition/action losses were finite. Full paired training and exact4k
+dependencies were released:
+
+```bash
+sbatch --parsable --time=12:00:00 --job-name=tr_cz42 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64 train_config_pair_slurm.sh 42  # 1864837
+sbatch --parsable --time=12:00:00 --job-name=tr_cz43 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64 train_config_pair_slurm.sh 43  # 1864838
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864837 --job-name=ep_cnoz_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_causal_gr00t_fullmem_noz_b64_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864839
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864837 --job-name=ep_cz4_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864840
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864838 --job-name=ep_cnoz_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_causal_gr00t_fullmem_noz_b64_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864841
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864838 --job-name=ep_cz4_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864842
 ```
 
 Jobs1864634/35 were cancelled before any simulator worker launched because the detached
