@@ -20,9 +20,11 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
+| 1864092 / 1864093 | tr_tl2a_42 / 43 | Tied two-pass predicted-trace GR00T, one seed per4-GPU node,16/device, global64,20k | SUBMITTED — smokes1864038/39 passed |
 | 1864074 / 1864075 | ep_tl1a_42 / 43 | Exact4k LIBERO-plus after matched alternating one-pass trace-head pair1864073 | PENDING (Dependency) |
 | 1864073 | tr_tl1_alt | Matched one-pass trace-head GR00T control, no readout/no z, alternating attention, seeds42/43,20k,batch64 | SUBMITTED — smoke1863878 passed |
-| 1864038 / 1864039 | sm_tl2_s42 / s43 | Tied two-pass predicted-trace GR00T, one seed per 4-GPU node,16/device, effective batch64;20 updates + eval10/20 | RUNNING |
+| 1864038 / 1864039 | sm_tl2_s42 / s43 | **PASSED** — one seed per4-GPU node,16/device, global64;20 updates,eval10/20,finite losses,positive pass delta,complete checkpoints |
 | 1863879 | sm_tl_2p | **FAILED smoke** — two simultaneous2-GPU runs at32/device exceeded95GB/GPU before update1; no result promoted |
 | 1863878 | sm_tl_1p | **PASSED** — matched one-pass control, seeds42/43,20 updates,eval10/20,finite losses,complete checkpoints |
 | 1863856 / 1863857 | ep_gz4f015_42 / 43 | Exact4k LIBERO-plus after fixed z-memory4 dropout0.15 full pair1863853 | PENDING (Dependency) |
@@ -142,6 +144,18 @@ evaluations were released without waiting for the two-pass smoke:
 sbatch --parsable --time=12:00:00 --job-name=tr_tl1_alt train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_1pass_noz_all.yaml ervla_v5_gr00t_traceloop_1pass_noz_all 42 43  # 1864073
 sbatch --parsable --time=05:00:00 --dependency=afterok:1864073 --job-name=ep_tl1a_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_1pass_noz_all_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864074
 sbatch --parsable --time=05:00:00 --dependency=afterok:1864073 --job-name=ep_tl1a_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_1pass_noz_all_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864075
+```
+
+Both four-GPU two-pass smokes passed: eval trace losses0.01683/0.01568,
+prediction standard deviations0.0687/0.0649, trace-target coverage0.9375 and
+pass1-to-pass2 hidden deltas3.142/2.792 for seeds42/43. Full jobs and their
+separate exact4k dependencies were released:
+
+```bash
+sbatch --parsable --time=12:00:00 --job-name=tr_tl2a_42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s42 --seed 42  # 1864092
+sbatch --parsable --time=12:00:00 --job-name=tr_tl2a_43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s43 --seed 43  # 1864093
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864092 --job-name=ep_tl2a_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864094
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864093 --job-name=ep_tl2a_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864095
 ```
 
 ```bash
