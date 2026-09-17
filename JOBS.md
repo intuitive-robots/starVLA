@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 09:56 CEST.
+Last refreshed: 2026-09-17 15:36 CEST.
 
 ## Running / queued
 
@@ -20,6 +20,9 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1857258 | tr_v5_piv4 | QwenPI_v4 fused dual-attention, matched v5 action-only seeds 42/43 | PENDING (Priority) |
+| 1857259 | ep_piv4_s42 | Exact 4k LIBERO-plus eval for QwenPI_v4 seed 42 (afterok:1857258) | PENDING (Dependency) |
+| 1857260 | ep_piv4_s43 | Exact 4k LIBERO-plus eval for QwenPI_v4 seed 43 (afterok:1857258) | PENDING (Dependency) |
 | 1851382 | tr_zonly_gr00t | zonly + GR00T head, seeds 42/43 — the two biggest effects combined | CONFIGURING  |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps (dep 1851382) | PENDING  |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps (dep 1851382) | PENDING  |
@@ -67,6 +70,21 @@ cd /e/project1/m3/blank4/code/starVLA
 sbatch --parsable --job-name=tr_zonly_v5 train_seed_pair_slurm.sh \
   examples/LIBERO/train_files/ervla_zonly_pi_sharedz_ground_temporal_v5.yaml \
   ervla_zonly_pi_sharedz_ground_temporal_v5 42 43
+
+# QwenPI_v4: dense per-layer VLM conditioning with action-token interaction.
+sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
+  examples/LIBERO/train_files/ervla_v5_piv4_actiononly.yaml \
+  ervla_v5_piv4_actiononly 42 43  # 1857258
+
+sbatch --parsable --dependency=afterok:1857258 --job-name=ep_piv4_s42 \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s42/checkpoints/steps_20000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000  # 1857259
+
+sbatch --parsable --dependency=afterok:1857258 --job-name=ep_piv4_s43 \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s43/checkpoints/steps_20000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000  # 1857260
 
 sbatch --parsable --job-name=tr_q35enc_pair --export=ALL,\
 YAML_A=examples/LIBERO-plus/train_files/starvla_libero_plus_q35encdec_enconly_gr00t_deeps.yaml,\
