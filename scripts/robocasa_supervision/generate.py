@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw
 from geometry import CAMERAS, load_model, set_state, select_bodies, representative_point, project, camera_delta_cm
 
 VERSION = 'rc365-subtask-traces-v1'
+CODE_HASH = hashlib.sha256(b''.join((Path(__file__).parent/p).read_bytes() for p in ('geometry.py','generate.py'))).hexdigest()
 
 
 def arc_sample(points, n=5):
@@ -241,7 +242,7 @@ def generate(row, args):
             arrays[key] = arrays[key].astype(np.float32)
     np.savez_compressed(out/'targets.npz',**arrays)
     record = {
-        'version':VERSION,'episode_index':episode,'source_prefix':row['source_prefix'],'source_episode_index':sid,
+        'version':VERSION,'code_sha256':CODE_HASH,'episode_index':episode,'source_prefix':row['source_prefix'],'source_episode_index':sid,
         'task':task,'n_frames':n,'cameras':list(CAMERAS),'coordinate_format':'normalized_xy_unclipped; world_meters; full_cam3d_cm; chunk_cam3d_rounded_cm_div20; axes_right_down_forward',
         'point_definition':[r[2] for r in reps], 'entities':[model.body(b).name for b in bodies],
         'subtasks':subtasks,'full_paths':'Dense arrays in targets.npz, sliced by subtask start:end. No chunk truncation.',

@@ -12,6 +12,7 @@
 set -euo pipefail
 REPO=/e/project1/m3/blank4/code/starVLA-upstream-merge
 IMAGE=/e/project1/m3/blank4/code/starVLA/playground/sims/sif/robocasa365-main-arm64.sif
+CODE=${SUPERVISION_CODE_DIR:-$REPO/scripts/robocasa_supervision}
 ROOT=/e/scratch/m3/blank4/rc365_supervision
 MODE=${1:-pilot}
 WORKERS=${2:-4}
@@ -21,14 +22,14 @@ cd "$REPO"
 pids=()
 for ((rank=0; rank<WORKERS; rank++)); do
     gpu=$((rank % 4))
-    global_rank=$(( ${SHARD_GROUP:-0} * WORKERS + rank ))
+    global_rank=$(( ${SHARD_GROUP:-${SLURM_ARRAY_TASK_ID:-0}} * WORKERS + rank ))
     total_shards=$(( ${SHARD_GROUPS:-1} * WORKERS ))
     extra=()
     if [[ "$MODE" == pilot ]]; then extra+=(--pilot --overlays); fi
     if [[ -n ${EPISODE_IDS:-} ]]; then extra+=(--episode-ids "$EPISODE_IDS"); fi
     (
       export MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=$gpu PYOPENGL_PLATFORM=egl OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-      apptainer exec --nv --bind /e:/e "$IMAGE" python -u scripts/robocasa_supervision/generate.py \
+      apptainer exec --nv --bind /e:/e "$IMAGE" python -u "$CODE/generate.py" \
         --manifest /e/project1/m3/blank4/code/starVLA/results_collected/robocasa_supervision/episode_sources.csv \
         --root "$ROOT" --dataset /e/scratch/m3/datasets/lerobot_3_0/robocasa365_target_atomic \
         --output "$OUT" --shard "$global_rank" --num-shards "$total_shards" "${extra[@]}" \
