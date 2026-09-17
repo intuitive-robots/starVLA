@@ -1,5 +1,6 @@
 tree,benchmark,run,arm,seed,result_dir,tag,checkpoint_step,units,episodes,successes,success_rate,se
 starVLA,decoder-latent-plus-gpuids,ervla_pi_decoder_latent_v_mid8_18,other,42,decoder-latent-plus-gpuids,,,4,4000,3001,0.75025000,0.00684425
+starVLA,libero-plus,libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01,CoT-trace,1234,libero-plus,,,4,4000,3323,0.83075000,0.00592884
 starVLA,libero-plus,libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01,CoT-trace,1234,libero-plus,,,4,4000,3249,0.81225000,0.00617454
 starVLA,libero-plus,ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42,shared-z/zonly,42,libero-plus,,,4,4000,3147,0.78675000,0.00647639
 starVLA,libero-plus,ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43,shared-z/zonly,43,libero-plus,,,4,4000,3131,0.78275000,0.00652021
