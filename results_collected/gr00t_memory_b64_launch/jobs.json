@@ -16,5 +16,49 @@
       "command": "sbatch --parsable -t 02:00:00 --job-name=sm_gz_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_memdrop015_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1",
       "config_sha256": "b293c6d89e38bfcb0b6f39bbbcb751814fcaa169d8a956c7c1217557e592b540"
     }
+  ],
+  "full_jobs": [
+    {
+      "job": "1861658",
+      "command": "sbatch --parsable --time=12:00:00 --job-name=tr_gz_100_b64 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_memdrop100_b64 42 43",
+      "prefix": "ervla_gr00t_sharedz_v5_memdrop100_b64",
+      "smoke_job": "1861585"
+    },
+    {
+      "job": "1861661",
+      "command": "sbatch --parsable --time=12:00:00 --job-name=tr_gz_015_b64 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_memdrop015_b64 42 43",
+      "prefix": "ervla_gr00t_sharedz_v5_memdrop015_b64",
+      "smoke_job": "1861586"
+    }
+  ],
+  "eval_jobs": [
+    {
+      "job": "1861659",
+      "command": "sbatch --parsable --time=05:00:00 --dependency=afterok:1861658 --job-name=ep_gz_100_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0",
+      "parent": "1861658",
+      "seed": 42,
+      "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/checkpoints/steps_20000_pytorch_model.pt"
+    },
+    {
+      "job": "1861660",
+      "command": "sbatch --parsable --time=05:00:00 --dependency=afterok:1861658 --job-name=ep_gz_100_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0",
+      "parent": "1861658",
+      "seed": 43,
+      "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s43/checkpoints/steps_20000_pytorch_model.pt"
+    },
+    {
+      "job": "1861662",
+      "command": "sbatch --parsable --time=05:00:00 --dependency=afterok:1861661 --job-name=ep_gz_015_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0",
+      "parent": "1861661",
+      "seed": 42,
+      "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s42/checkpoints/steps_20000_pytorch_model.pt"
+    },
+    {
+      "job": "1861663",
+      "command": "sbatch --parsable --time=05:00:00 --dependency=afterok:1861661 --job-name=ep_gz_015_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0",
+      "parent": "1861661",
+      "seed": 43,
+      "checkpoint": "playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop015_b64_s43/checkpoints/steps_20000_pytorch_model.pt"
+    }
   ]
 }

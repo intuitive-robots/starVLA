@@ -1,0 +1,58 @@
+[
+  {
+    "job": "1861585",
+    "seed": 42,
+    "first_loss": 1.2062623500823975,
+    "last_loss": 0.4763335585594177,
+    "eval_mse": [
+      0.009480048503194536,
+      0.008166515933615821
+    ],
+    "memory_keep_mean": 0.0,
+    "checkpoint_bytes": 9468856175,
+    "source_log": "slurm_logs/train_seed_pair_1861585_s42.log",
+    "passed": true
+  },
+  {
+    "job": "1861585",
+    "seed": 43,
+    "first_loss": 1.1719744205474854,
+    "last_loss": 0.5165423154830933,
+    "eval_mse": [
+      0.009842668260846819,
+      0.008493219103131975
+    ],
+    "memory_keep_mean": 0.0,
+    "checkpoint_bytes": 9468856175,
+    "source_log": "slurm_logs/train_seed_pair_1861585_s43.log",
+    "passed": true
+  },
+  {
+    "job": "1861586",
+    "seed": 42,
+    "first_loss": 1.2547768354415894,
+    "last_loss": 0.9364060163497925,
+    "eval_mse": [
+      0.017570426421506063,
+      0.016861916652747562
+    ],
+    "memory_keep_mean": 0.8234375,
+    "checkpoint_bytes": 9468856175,
+    "source_log": "slurm_logs/train_seed_pair_1861586_s42.log",
+    "passed": true
+  },
+  {
+    "job": "1861586",
+    "seed": 43,
+    "first_loss": 1.1807172298431396,
+    "last_loss": 1.0162100791931152,
+    "eval_mse": [
+      0.01726590416261128,
+      0.016335255333355496
+    ],
+    "memory_keep_mean": 0.871875,
+    "checkpoint_bytes": 9468856175,
+    "source_log": "slurm_logs/train_seed_pair_1861586_s43.log",
+    "passed": true
+  }
+]
