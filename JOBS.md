@@ -20,6 +20,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864672 / 1864673 | ep_tl0a_42 / 43 | Exact4k LIBERO-plus after matched two-pass null-trace seeds1864670/71 | PENDING (Dependency) |
+| 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
 | 1864634 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | SUBMITTED |
 | 1864635 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | SUBMITTED |
@@ -169,6 +171,16 @@ slots and action path. Its full run is gated on these smokes:
 ```bash
 sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s42 --seed 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864418
 sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s43 --seed 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864419
+```
+
+Both null smokes passed with complete checkpoints and eval pass deltas2.994/3.024;
+full runs and exact4k dependencies were released:
+
+```bash
+sbatch --parsable --time=12:00:00 --job-name=tr_tl0a_42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_s42 --seed 42  # 1864670
+sbatch --parsable --time=12:00:00 --job-name=tr_tl0a_43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_s43 --seed 43  # 1864671
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864670 --job-name=ep_tl0a_42 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_null_all_s42/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864672
+sbatch --parsable --time=05:00:00 --dependency=afterok:1864671 --job-name=ep_tl0a_43 --export=ALL,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_null_all_s43/checkpoints/steps_20000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0  # 1864673
 ```
 
 ### Orthogonal causal attribution controls 1864634–1864643
