@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 22:44 CEST.
+Last refreshed: 2026-09-17 23:10 CEST.
 
 ## Running / queued
 
@@ -20,8 +20,9 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1863879 | sm_tl_2p | Tied two-pass predicted-trace GR00T, no readout/no z, alternating attention, seeds42/43;20 updates + eval10/20 | SUBMITTED |
-| 1863878 | sm_tl_1p | Matched one-pass trace-head GR00T control, no readout/no z, alternating attention, seeds42/43;20 updates + eval10/20 | SUBMITTED |
+| 1864038 / 1864039 | sm_tl2_s42 / s43 | Tied two-pass predicted-trace GR00T, one seed per 4-GPU node,16/device, effective batch64;20 updates + eval10/20 | RUNNING |
+| 1863879 | sm_tl_2p | **FAILED smoke** — two simultaneous2-GPU runs at32/device exceeded95GB/GPU before update1; no result promoted |
+| 1863878 | sm_tl_1p | **PASSED** — matched one-pass control, seeds42/43,20 updates,eval10/20,finite losses,complete checkpoints |
 | 1863856 / 1863857 | ep_gz4f015_42 / 43 | Exact4k LIBERO-plus after fixed z-memory4 dropout0.15 full pair1863853 | PENDING (Dependency) |
 | 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus after fixed z-memory4 dropout1 full pair1863852 | PENDING (Dependency) |
 | 1863853 | tr_gz4f_015 | Fixed GR00T z-memory4 + full encoder memory dropout0.15, seeds42/43,20k,batch64 | RUNNING — smoke1863773 passed |
@@ -119,6 +120,17 @@ per suite,8 workers/GPU,2 servers/GPU,batch4 and zero batching wait.
 ```bash
 sbatch --parsable -t 02:00:00 --job-name=sm_tl_1p train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_1pass_noz_all.yaml ervla_v5_gr00t_traceloop_1pass_noz_all_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 sbatch --parsable -t 02:00:00 --job-name=sm_tl_2p train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml ervla_v5_gr00t_traceloop_2pass_noz_pred_all_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+```
+
+Job1863879 failed before update1 because the two-pass graph exceeded95GB/GPU at
+32 samples/device. Its replacement keeps effective batch64 and gives each seed a full
+4-GPU node at16 samples/device. The smoke now logs `trace_pass_delta`, trace loss,
+coverage and prediction spread so a pass requires evidence that re-encoding changed the
+pass2 hidden sequence.
+
+```bash
+sbatch --parsable -t 02:00:00 --job-name=sm_tl2_s42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_4gpu_smoke_s42 --seed 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+sbatch --parsable -t 02:00:00 --job-name=sm_tl2_s43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_pred_all_4gpu_smoke_s43 --seed 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 ```
 
 ```bash
