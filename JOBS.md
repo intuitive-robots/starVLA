@@ -16,18 +16,18 @@ Last refreshed: 2026-09-17 23:10 CEST.
 
 ## Running / queued
 
-Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
+Refreshed 2026-09-18 00:10 CEST from `squeue`, `sacct`, raw training logs and raw rollout JSONs (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | PENDING (Dependency) |
 | 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | PENDING (Dependency) |
-| 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token shared-z, one paired4-GPU node per seed,20k,batch64/arm | RUNNING — smokes1864642/43 passed |
+| 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token z-only memory, one paired4-GPU node per seed,20k,batch64/arm | RUNNING — Sep18 00:10: no-z steps1,000/900, +z steps600/700, no hard errors; smokes1864642/43 passed |
 | 1864672 / 1864673 | ep_tl0a_42 / 43 | Exact4k LIBERO-plus after matched two-pass null-trace seeds1864670/71 | PENDING (Dependency) |
 | 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
-| 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | RUNNING; servers/workers ready, replaces zero-episode1864634 |
-| 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | RUNNING; servers/workers ready, replaces zero-episode1864635 |
+| 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | RUNNING on `libero_10`; n=0 completed at Sep18 00:10, no failed shards or hard process error; replaces zero-episode1864634 |
+| 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | RUNNING on `libero_goal`; partial `libero_10`=786/1,000 (78.600%), empty failed-shard file; replaces zero-episode1864635 |
 | 1864634 / 1864635 | ep_cot_wrong / prompt | **CANCELLED before rollout** — detached worktree lacked generated policy-server Python wrapper; replaced with absolute-wrapper jobs1864756/57 |
 | 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
 | 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
