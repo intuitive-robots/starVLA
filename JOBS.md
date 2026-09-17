@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 17:19 CEST.
+Last refreshed: 2026-09-17 17:24 CEST.
 
 ## Running / queued
 
@@ -21,7 +21,10 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 | Job | Name | What | State |
 |---|---|---|---|
 | 1858694 | tr_v5_piv4 | Full QwenPI_v4 LIBERO seeds42/43 at20k after passed smoke | RUNNING |
-| 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | PENDING (Priority) |
+| 1858835 / 1858836 | ep_piv4_s42 / s43 | Exact4k LIBERO-plus evals after successful full QwenPI_v4 training1858694 | PENDING (Dependency) |
+| 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | RUNNING |
+| 1858851 | tr_rcpiv4_rs | Automatic RoboCasa continuation from latest checkpoint after first12h segment1858730 | PENDING (Dependency) |
+| 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa17-task ×48-episode evals at step50k after continuation1858851 | PENDING (Dependency) |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps | PENDING (Priority) |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps | PENDING (Priority) |
 | 1850693 | enc_dec_2b_v5_final_action_tracetime_w001 | other workstream (not this session) | RUNNING 21:52 |
@@ -87,6 +90,23 @@ sbatch --parsable --job-name=tr_rc365_piv4 train_robocasa365_seed_pair_slurm.sh 
   examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4.yaml \
   ervla_robocasa365_piv4 4 42  # 1858730
 
+sbatch --parsable --dependency=afterany:1858730 --job-name=tr_rcpiv4_rs \
+  train_robocasa365_seed_pair_slurm.sh \
+  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4.yaml \
+  ervla_robocasa365_piv4 4 42 --trainer.is_resume true  # 1858851
+
+sbatch --parsable -J rc_piv4_s4 -t 03:00:00 --dependency=afterok:1858851 \
+  -o /e/scratch/m3/blank4/rc365_smoke/rc_piv4_s4_%j.out \
+  -e /e/scratch/m3/blank4/rc365_smoke/rc_piv4_s4_%j.out \
+  --export=ALL,MANIFEST=/e/scratch/m3/blank4/rc365_smoke/manifest_piv4_s4.txt,OUTDIR=robocasa365_piv4_50k,SEED=42,VIDEOS=0,CKPT_STEP=50000 \
+  /e/scratch/m3/blank4/rc365_smoke/rc365_units.sbatch  # 1858852
+
+sbatch --parsable -J rc_piv4_s42 -t 03:00:00 --dependency=afterok:1858851 \
+  -o /e/scratch/m3/blank4/rc365_smoke/rc_piv4_s42_%j.out \
+  -e /e/scratch/m3/blank4/rc365_smoke/rc_piv4_s42_%j.out \
+  --export=ALL,MANIFEST=/e/scratch/m3/blank4/rc365_smoke/manifest_piv4_s42.txt,OUTDIR=robocasa365_piv4_50k,SEED=42,VIDEOS=0,CKPT_STEP=50000 \
+  /e/scratch/m3/blank4/rc365_smoke/rc365_units.sbatch  # 1858853
+
 sbatch --parsable --job-name=tr_rc365_s42_rs --export=ALL,\
 CAUSAL_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_causal.yaml,\
 V5_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_v5.yaml,\
@@ -113,15 +133,15 @@ sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
   ervla_v5_piv4_actiononly 42 43  # 1858694
 
 # Only after full training succeeds:
-sbatch --parsable --job-name=ep_piv4_s42 \
+sbatch --parsable --dependency=afterok:1858694 --job-name=ep_piv4_s42 \
   eval_libero_plus_slurm.sh \
   --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s42/checkpoints/steps_20000_pytorch_model.pt \
-  --exact_tasks_per_suite 1000
+  --exact_tasks_per_suite 1000  # 1858835
 
-sbatch --parsable --job-name=ep_piv4_s43 \
+sbatch --parsable --dependency=afterok:1858694 --job-name=ep_piv4_s43 \
   eval_libero_plus_slurm.sh \
   --ckpt playground/Checkpoints/ervla_v5_piv4_actiononly_s43/checkpoints/steps_20000_pytorch_model.pt \
-  --exact_tasks_per_suite 1000
+  --exact_tasks_per_suite 1000  # 1858836
 
 sbatch --parsable --job-name=tr_q35enc_pair --export=ALL,\
 YAML_A=examples/LIBERO-plus/train_files/starvla_libero_plus_q35encdec_enconly_gr00t_deeps.yaml,\
