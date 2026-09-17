@@ -67,9 +67,24 @@ class _QWen3_5_EncDec_Interface(_QWen3_5_VL_Interface):
                 "decoder inputs. Set framework.qwenvl.skip_decoder=true."
             )
 
+        # `fla` (flash-linear-attention) backs Qwen3.5's DeltaNet layers and picks its device
+        # ONCE, at import, from triton's active driver -- a @functools.cache'd probe. In a
+        # training process that probe sometimes fails ("Triton is not supported on current
+        # platform, roll back to CPU"), fla binds to torch.cpu, and the run dies minutes later
+        # inside the kernel with
+        #   AttributeError: module 'torch.cpu' has no attribute 'device'   (torch >= 2.9)
+        # It is per PROCESS, not per node: a probe in a separate process reports cuda while the
+        # training process binds cpu, which is why a launcher-side preflight could not catch it.
+        # So: make CUDA live before the import chain, then check what fla actually bound.
+        self._ensure_triton_compiler()
+        if torch.cuda.is_available():
+            torch.zeros(1, device="cuda")
+
         if Q35_ENCDEC_REPO not in sys.path:
             sys.path.insert(0, Q35_ENCDEC_REPO)
         from train.models.qwen35_enc_dec import build_qwen35_enc_dec
+
+        self._repair_fla_device_binding()
 
         # Build FROM the trained checkpoint directory when we have one. Its config.json
         # carries enc_proj, and `from_pretrained` resolves `encoder_layers.*`, `enc_norm`,
@@ -142,6 +157,90 @@ class _QWen3_5_EncDec_Interface(_QWen3_5_VL_Interface):
 
             self.model._enc_layer = _enc_layer_collecting
             logger.info(f"collecting all {len(encoder_blocks)} Qwen3.5 encoder layer states")
+
+
+
+    @staticmethod
+    def _ensure_triton_compiler() -> None:
+        """Point triton at the compiler the image actually ships.
+
+        Triton builds a small C utility when its CUDA backend initialises, and it looks for
+        ``cc``/``gcc`` on PATH. starVLA.sif has neither under those names -- only conda's
+        ``aarch64-conda-linux-gnu-cc`` -- so the backend raises, ``get_available_device()``
+        answers "cpu", and fla binds to torch.cpu. That is the root of the whole chain that
+        ends in "module 'torch.cpu' has no attribute 'device'" minutes into training, and of
+        "Failed to find C compiler" once the binding is repaired. Setting CC before the import
+        fixes both; _repair_fla_device_binding stays as a backstop for a probe that fails for
+        some other reason.
+        """
+        if os.environ.get("CC"):
+            return
+        import glob
+
+        for pattern in (
+            "/opt/conda/envs/*/bin/*-linux-gnu-cc",
+            "/opt/conda/envs/*/bin/*-linux-gnu-gcc",
+        ):
+            for candidate in sorted(glob.glob(pattern)):
+                if os.access(candidate, os.X_OK):
+                    os.environ["CC"] = candidate
+                    logger.info(f"triton has no cc/gcc on PATH; using {candidate}")
+                    # nvcc needs a host compiler too, and looks for `gcc` by NAME rather
+                    # than honouring CC -- on Hopper fla compiles its DeltaNet kernels
+                    # through TileLang, which shells out to nvcc and dies with
+                    #   gcc: No such file or directory
+                    #   nvcc fatal: Failed to preprocess host compiler properties.
+                    # -ccbin points it at the same conda compiler.
+                    host_cxx = candidate.replace("-cc", "-gcc") if candidate.endswith("-cc") else candidate
+                    if os.access(host_cxx, os.X_OK) and "-ccbin" not in os.environ.get("NVCC_PREPEND_FLAGS", ""):
+                        os.environ["NVCC_PREPEND_FLAGS"] = (
+                            os.environ.get("NVCC_PREPEND_FLAGS", "") + f" -ccbin {host_cxx}"
+                        ).strip()
+                        logger.info(f"nvcc host compiler: {host_cxx}")
+                    return
+        logger.warning(
+            "no C compiler found for triton; Qwen3.5 linear-attention kernels cannot be "
+            "compiled. Set CC to a working compiler."
+        )
+
+    @staticmethod
+    def _repair_fla_device_binding() -> None:
+        """Re-point fla at CUDA when its import-time probe fell back to CPU.
+
+        Everything fla derives from that probe is bound at import (``device``,
+        ``device_torch_lib``, the autocast partials and ``custom_device_ctx``), so all of them
+        have to be rebuilt -- setting ``device`` alone leaves the CPU library in place. This is
+        the binding fla produces itself on a healthy node, so it changes no numerics.
+        """
+        import functools
+
+        try:
+            import fla.utils as fla_utils
+        except ImportError:  # a non-Qwen3.5 stack that never pulls fla in
+            return
+        # Check device_torch_lib, NOT device. When the probe fails fla sets
+        # device='cpu' -> device_torch_lib=torch.cpu, and then rewrites device back to
+        # 'cuda' for the autocast partials while LEAVING device_torch_lib on torch.cpu
+        # (fla/utils.py: `device = 'cuda' if device == 'cpu' else device`). So `device`
+        # reads 'cuda' on a broken binding and checking it hides the very thing we are
+        # repairing -- which is exactly how the first version of this fix no-opped.
+        if getattr(fla_utils, "device_torch_lib", None) is torch.cuda:
+            return
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"fla bound to device={getattr(fla_utils, 'device', None)!r} and CUDA is not "
+                "available; Qwen3.5 linear attention cannot run here."
+            )
+        logger.warning(
+            "fla bound device_torch_lib=%r at import (triton probe failed in this process); "
+            "re-pointing it at torch.cuda",
+            getattr(getattr(fla_utils, "device_torch_lib", None), "__name__", None),
+        )
+        fla_utils.device = "cuda"
+        fla_utils.device_torch_lib = torch.cuda
+        fla_utils.autocast_custom_fwd = functools.partial(torch.amp.custom_fwd, device_type="cuda")
+        fla_utils.autocast_custom_bwd = functools.partial(torch.amp.custom_bwd, device_type="cuda")
+        fla_utils.custom_device_ctx = lambda index: torch.cuda.device(index)
 
     # ------------------------------------------------------------------ forward
     def forward(
