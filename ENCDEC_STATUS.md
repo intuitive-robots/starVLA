@@ -139,3 +139,51 @@ other); `PickPlaceSinkToCounter` fails in the renderer 3/3 attempts.
 The enc-dec investment is not lost — it produced a reproducible +3pp with the GR00T head and the
 shared-z result that sits on top of our board. But the evidence says **backbone quality is not the
 bottleneck**; how the action head reads the encoder is. That is where the next runs should go.
+
+---
+
+## 6. Update — 2026-09-17
+
+### The state ablation says the opposite of the overfitting hypothesis
+
+Serving both 50k seed-4 checkpoints with `--args.include-state False`, paired against the
+benchmark cells (same seed, same scenes, 48 eps):
+
+| task | causal +state | causal **−state** | v5 +state | v5 **−state** |
+|---|---|---|---|---|
+| OpenStandMixerHead | 0.83 | **0.00** | 0.81 | **0.83** |
+| PickPlaceCounterToStove | 0.65 | **0.00** | 0.67 | **0.48** |
+| TurnOnElectricKettle | 0.60 | **0.00** | 0.71 | **0.46** |
+
+The causal arm needs proprioception almost totally; the enc-dec arm barely misses it. That is
+a point FOR the enc-dec backbone that equal mean success rates hide: same score, far more
+robustness to a degraded prompt.
+
+**Caveat, and the follow-up.** Dropping state also removes the `[STATE] … [ACTION]` suffix, so
+this conflates information with prompt format. In a causal model the trailing tokens are where
+the summary accumulates; a bidirectional encoder spreads it. The clean test keeps the format
+and corrupts the values (shuffle or zero the bins) — a few lines in the eval bridge behind an
+env var, run on the same three tasks.
+
+### GR00T head + shared-z now exists
+
+`shared_z` was 123 call sites inside `QwenPI_v3`, which is the only reason the two largest
+effects had never been combined. It is now `starVLA/model/modules/shared_z.py` (`SharedZMixin`),
+with the classes and five helpers moved verbatim — QwenPI_v3's losses and parameter count are
+byte-identical before and after (`scripts/`-adjacent harness, 25 terms compared).
+
+`GR00T_ActionHeader` now forwards `z_conditioning` / `encoder_memory_keep` to the DiT as
+`extra_conditioning` / `cross_attention_row_mask`. Both already existed in the shared
+`cross_attention_dit`; only PI's wrapper passed them. Defaults are `None`, so existing GR00T
+runs are unchanged.
+
+Running as **1851382** (seeds 42/43), evals 1851383/1851384.
+
+### Still blocked: q35 encoder-only
+
+Fifth attempt printed `fla/triton preflight OK` and then died with the same
+`module 'torch.cpu' has no attribute 'device'`. The binding happens **per process**: fla
+resolves its device at import from triton's driver, and a probe in a separate process cannot
+predict what the training process will see. The fix has to run inside the training process —
+initialise CUDA before the import chain that pulls in fla, and repair the binding if it still
+came out as CPU.
