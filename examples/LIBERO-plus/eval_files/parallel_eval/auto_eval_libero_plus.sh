@@ -350,8 +350,11 @@ for ((g=0; g<num_gpus; g++)); do
         # debugging. partition_idx (this node's rank) makes it unique per node.
         log_file="${server_log_dir}/partition${partition_idx}_gpu_${gpu_id}_port_${port}.log"
         server_logs+=("${log_file}")
-        echo "Launching policy server on gpu=${gpu_id}, port=${port}, log=${log_file}"
-        setsid bash -lc "CUDA_VISIBLE_DEVICES=${gpu_id} ${POLICY_SERVER_PYTHON} deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\" --max_batch_size \"${max_batch_size}\" --max_wait_time \"${max_wait_time}\"" > "${log_file}" 2>&1 &
+        # POLICY_SERVER_GPU pins every server to one device so the sim GPUs carry only
+        # EGL renderers. Inference is batched, so one GH200 serves many clients, and it
+        # takes the model copies (~6GB each) off the rendering devices.
+        echo "Launching policy server on gpu=${POLICY_SERVER_GPU:-${gpu_id}} (sims on ${gpu_id}), port=${port}, log=${log_file}"
+        setsid bash -lc "CUDA_VISIBLE_DEVICES=${POLICY_SERVER_GPU:-${gpu_id}} ${POLICY_SERVER_PYTHON} deployment/model_server/server_policy.py --ckpt_path \"${your_ckpt}\" --port \"${port}\" --use_bf16 --idle_timeout \"${server_idle_timeout}\" --max_batch_size \"${max_batch_size}\" --max_wait_time \"${max_wait_time}\"" > "${log_file}" 2>&1 &
         server_pids+=($!)
     done
 done

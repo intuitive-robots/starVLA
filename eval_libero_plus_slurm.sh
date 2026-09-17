@@ -111,8 +111,18 @@ DEFAULT_SUITES=(libero_10 libero_goal libero_object libero_spatial)
 CKPT="${your_ckpt:-}"
 SUITE="${suite:-all}"
 NUM_TRIALS="${num_trials:-1}"
-WORKERS_PER_GPU="${workers_per_gpu:-8}"
-SERVERS_PER_GPU="${servers_per_gpu:-2}"
+# Measured 2026-09-17 on libero_goal, 1000 eps, zonly+GR00T (non-CoT), startup-corrected:
+#   servers/GPU  workers/GPU  layout                rollout-only   score (ref .801)
+#        1            32      servers on GPU0          4348 eps/h      0.804   <- default
+#        2             8      co-located (old default) 3550 eps/h        --
+#        1            48      co-located               3540 eps/h      0.808
+#        1         3x48      sims on GPU1-3 only      much slower       --
+# 48 workers/GPU renders clean on LIBERO-plus (no aborts, no framebuffer errors), so
+# 32 is not a safety limit -- it is simply where throughput peaked. CoT models, which
+# are inference-bound rather than sim-bound, gain from MORE clients per server (16
+# clients beat 4 by 1.9x), so raise workers_per_gpu for those.
+WORKERS_PER_GPU="${workers_per_gpu:-32}"
+SERVERS_PER_GPU="${servers_per_gpu:-1}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"
 MAX_TASKS_PER_SUITE="${max_tasks_per_suite:-0}"
@@ -260,6 +270,10 @@ if [ -z "${MAX_BATCH_SIZE}" ]; then
     [ "${MAX_BATCH_SIZE}" -lt 32 ] && MAX_BATCH_SIZE=32
     echo "max_batch_size not set -> ${MAX_BATCH_SIZE} (clients per server, floor 32)"
 fi
+# Policy servers on GPU0 by default: it keeps the model copies off the other rendering
+# devices and measured fastest. Sims still run on every GPU. Set POLICY_SERVER_GPU="" to
+# co-locate each server with its own GPU again.
+export POLICY_SERVER_GPU="${POLICY_SERVER_GPU-0}"
 export STARVLA_RESUME_EVAL="${RESUME_EVAL:-0}"
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
 export SUITE_SERVERS_PER_GPU="${SERVERS_PER_GPU}"
