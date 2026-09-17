@@ -117,7 +117,12 @@ GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"
 MAX_TASKS_PER_SUITE="${max_tasks_per_suite:-0}"
 EXACT_TASKS_PER_SUITE="${exact_tasks_per_suite:-0}"
-MAX_BATCH_SIZE="${max_batch_size:-32}"
+# Derived, not fixed: the server can only batch requests that are actually in flight,
+# and that is clients-per-server = workers_per_gpu / servers_per_gpu. A hard 32 silently
+# capped throughput once workers_per_gpu went past 32, while a value far above the client
+# count costs nothing (it is a ceiling, not a target -- the dispatcher never waits when
+# max_wait_time is 0). A GH200 has ~96GB, so headroom is not the constraint.
+MAX_BATCH_SIZE="${max_batch_size:-}"
 MAX_WAIT_TIME="${max_wait_time:-0.0}"
 SAVE_VIDEO="${save_video:-False}"
 OBJECT_PERTURB_M="${object_perturb_m:-0.0}"
@@ -250,6 +255,11 @@ export your_ckpt output_dir
 # rolls out exactly the same episodes as an uninterrupted one.
 # NOT the default: re-evaluating the same checkpoint after a code change must not
 # silently reuse shards produced by the old code.
+if [ -z "${MAX_BATCH_SIZE}" ]; then
+    MAX_BATCH_SIZE=$(( (WORKERS_PER_GPU + SERVERS_PER_GPU - 1) / SERVERS_PER_GPU ))
+    [ "${MAX_BATCH_SIZE}" -lt 32 ] && MAX_BATCH_SIZE=32
+    echo "max_batch_size not set -> ${MAX_BATCH_SIZE} (clients per server, floor 32)"
+fi
 export STARVLA_RESUME_EVAL="${RESUME_EVAL:-0}"
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
 export SUITE_SERVERS_PER_GPU="${SERVERS_PER_GPU}"
