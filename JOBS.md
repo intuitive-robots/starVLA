@@ -20,6 +20,9 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
+| 1864634 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | SUBMITTED |
+| 1864635 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | SUBMITTED |
 | 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
 | 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
 | 1864092 / 1864093 | tr_tl2a_42 / 43 | Tied two-pass predicted-trace GR00T, one seed per4-GPU node,16/device, global64,20k | SUBMITTED — smokes1864038/39 passed |
@@ -166,6 +169,21 @@ slots and action path. Its full run is gated on these smokes:
 ```bash
 sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s42 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s42 --seed 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864418
 sbatch --parsable -t 02:00:00 --job-name=sm_tl0_s43 train_libero_slurm.sh --config examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_null_all.yaml --run_id ervla_v5_gr00t_traceloop_2pass_noz_null_all_4gpu_smoke_s43 --seed 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864419
+```
+
+### Orthogonal causal attribution controls 1864634–1864643
+
+The rollout interventions use a detached clean worktree at commit62e8d98 so unrelated
+working-tree edits cannot change evaluation behavior. Prompt-only uses a symlink to the
+identical2.4GB weight file and changes only `framework.cot.generate_at_inference`.
+
+```bash
+# Submitted from /e/scratch/m3/blank4/starVLA_trace_eval; absolute paths abbreviated here.
+sbatch --parsable --time=12:00:00 --job-name=ep_cot_wrong --export=ALL,STARVLA_COT_CORRUPT=roll,output_dir=<wrong-trace-output>,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt <ours-v3-cotw01>/final_model/pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 16 --servers_per_gpu 1 --max_batch_size 16 --max_wait_time 0.0 --sif <live-tree>/playground/sims/sif/libero-plus-v0.5.0-arm64.sif  # 1864634
+sbatch --parsable --time=12:00:00 --job-name=ep_cot_prompt --export=ALL,output_dir=<prompt-only-output>,POLICY_SERVER_GPU= eval_libero_plus_slurm.sh --ckpt <promptonly-view>/final_model/pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 16 --servers_per_gpu 1 --max_batch_size 16 --max_wait_time 0.0 --sif <live-tree>/playground/sims/sif/libero-plus-v0.5.0-arm64.sif  # 1864635
+
+sbatch --parsable -t 02:00:00 --job-name=sm_cz42 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64_smoke,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_smoke train_config_pair_slurm.sh 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864642
+sbatch --parsable -t 02:00:00 --job-name=sm_cz43 --export=ALL,YAML_A=examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml,RUN_A=ervla_causal_gr00t_fullmem_noz_b64_smoke,YAML_B=examples/LIBERO/train_files/ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64.yaml,RUN_B=ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_smoke train_config_pair_slurm.sh 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1  # 1864643
 ```
 
 ```bash
