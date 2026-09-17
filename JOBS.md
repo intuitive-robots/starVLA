@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 16:30 CEST.
+Last refreshed: 2026-09-17 17:13 CEST.
 
 ## Running / queued
 
@@ -20,7 +20,8 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1857753 | ix_piv4_smoke | Interactive2h/4GPU allocation for corrected QwenPI_v4 LIBERO seeds42/43, 2GPUs/run | PENDING (Priority) |
+| 1857753 | ix_piv4_smoke | Interactive2h/4GPU: corrected LIBERO smoke passed; RoboCasa seeds4/42 smoke running, 2GPUs/run | RUNNING |
+| 1858694 | tr_v5_piv4 | Full QwenPI_v4 LIBERO seeds42/43 at20k after passed smoke | PENDING (Priority) |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps | PENDING (Priority) |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps | PENDING (Priority) |
 | 1850693 | enc_dec_2b_v5_final_action_tracetime_w001 | other workstream (not this session) | RUNNING 21:52 |
@@ -37,6 +38,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1857753 / LIBERO phase | ix_piv4_smoke | **PASSED** — both seeds completed20 updates and step10/20 eval; s42 loss1.675→0.904, MSE.01982→.01378; s43 loss1.049→0.846, MSE.01945→.01346; nonzero encoder gradients and complete step20 checkpoints |
 | 1857343 | sm_v5_piv4 | **FAILED before update1** — v4 bypassed v3 constructor and lacked `cot_dropout_enabled`; fixed in4dde3dd |
 | 1857345 | sm_rc365_piv4 | **FAILED before update1** — same missing constructor state; fixed in worktree commitd2a0690 |
 | 1851382 | tr_zonly_gr00t | **COMPLETED** — seeds42/43 reached20k in5h55m; checkpoints ready and exact4k evals1851383/84 eligible |
@@ -101,7 +103,7 @@ sbatch --parsable -t 02:00:00 --job-name=sm_v5_piv4 train_seed_pair_slurm.sh \
 # Only after that smoke has completed and its logs/checkpoint have been inspected:
 sbatch --parsable --job-name=tr_v5_piv4 train_seed_pair_slurm.sh \
   examples/LIBERO/train_files/ervla_v5_piv4_actiononly.yaml \
-  ervla_v5_piv4_actiononly 42 43
+  ervla_v5_piv4_actiononly 42 43  # 1858694
 
 # Only after full training succeeds:
 sbatch --parsable --job-name=ep_piv4_s42 \
