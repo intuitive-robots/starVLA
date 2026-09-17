@@ -20,8 +20,14 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1863773 | sm_gz4f_015 | Fixed GR00T+z-memory4 + full encoder memory dropout0.15, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
-| 1863772 | sm_gz4f_100 | Fixed GR00T+z-memory4 + full encoder memory dropout1, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
+| 1863879 | sm_tl_2p | Tied two-pass predicted-trace GR00T, no readout/no z, alternating attention, seeds42/43;20 updates + eval10/20 | SUBMITTED |
+| 1863878 | sm_tl_1p | Matched one-pass trace-head GR00T control, no readout/no z, alternating attention, seeds42/43;20 updates + eval10/20 | SUBMITTED |
+| 1863856 / 1863857 | ep_gz4f015_42 / 43 | Exact4k LIBERO-plus after fixed z-memory4 dropout0.15 full pair1863853 | PENDING (Dependency) |
+| 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus after fixed z-memory4 dropout1 full pair1863852 | PENDING (Dependency) |
+| 1863853 | tr_gz4f_015 | Fixed GR00T z-memory4 + full encoder memory dropout0.15, seeds42/43,20k,batch64 | RUNNING — smoke1863773 passed |
+| 1863852 | tr_gz4f_100 | Fixed GR00T z-memory4, encoder memory fully masked, seeds42/43,20k,batch64 | RUNNING — smoke1863772 passed |
+| 1863773 | sm_gz4f_015 | **PASSED** — full-hidden fixed arm;20 updates,eval10/20,finite loss,mean keep rates0.823/0.872,complete checkpoints |
+| 1863772 | sm_gz4f_100 | **PASSED** — z-memory-only fixed arm;20 updates,eval10/20,finite loss,keep rate0,complete checkpoints |
 | 1863684 | sm_gz4_015 | **PASSED but superseded** — used 32 learned readout tokens; not promoted because GR00T retained-memory test should use full hidden sequence |
 | 1863683 | sm_gz4_100 | **PASSED but superseded** — same readout config; z-only input itself was unaffected, but paired design was replaced |
 | 1861663 | ep_gz_015_43 | Exact4k LIBERO-plus; afterok:1861661, seed43 | SUBMITTED |
@@ -95,6 +101,24 @@ that local fork component.
 ```bash
 sbatch --parsable -t 02:00:00 --job-name=sm_gz4f_100 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_zmem4_fullmem_memdrop100_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 sbatch --parsable -t 02:00:00 --job-name=sm_gz4f_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_zmem4_fullmem_memdrop015_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+```
+
+### Fixed GR00T shared-z full runs and exact4k evaluations 1863852–1863857
+
+```bash
+sbatch --parsable --time=12:00:00 --job-name=tr_gz4f_100 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64 42 43
+sbatch --parsable --time=12:00:00 --job-name=tr_gz4f_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64 42 43
+```
+
+Exact4k jobs1863854/55 depend afterok on1863852; jobs1863856/57 depend afterok on
+1863853. Each uses the corresponding seed42/43 step20k checkpoint with1000 exact tasks
+per suite,8 workers/GPU,2 servers/GPU,batch4 and zero batching wait.
+
+### Alternating trace-loop smokes 1863878 / 1863879
+
+```bash
+sbatch --parsable -t 02:00:00 --job-name=sm_tl_1p train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_1pass_noz_all.yaml ervla_v5_gr00t_traceloop_1pass_noz_all_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+sbatch --parsable -t 02:00:00 --job-name=sm_tl_2p train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_traceloop_2pass_noz_pred_all.yaml ervla_v5_gr00t_traceloop_2pass_noz_pred_all_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 ```
 
 ```bash
