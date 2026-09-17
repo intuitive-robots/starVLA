@@ -12,11 +12,11 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 23:10 CEST.
+Last refreshed: 2026-09-18 00:58 CEST.
 
 ## Running / queued
 
-Refreshed 2026-09-18 00:10 CEST from `squeue`, `sacct`, raw training logs and raw rollout JSONs (see `scripts/jobs_status.sh`).
+Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and raw rollout JSONs (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
@@ -27,7 +27,6 @@ Refreshed 2026-09-18 00:10 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
 | 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, same checkpoint/tasks, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | RUNNING on `libero_10`; n=0 completed at Sep18 00:10, no failed shards or hard process error; replaces zero-episode1864634 |
-| 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | RUNNING on `libero_goal`; partial `libero_10`=786/1,000 (78.600%), empty failed-shard file; replaces zero-episode1864635 |
 | 1864634 / 1864635 | ep_cot_wrong / prompt | **CANCELLED before rollout** — detached worktree lacked generated policy-server Python wrapper; replaced with absolute-wrapper jobs1864756/57 |
 | 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
 | 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | PENDING (Dependency) |
@@ -74,6 +73,7 @@ Refreshed 2026-09-18 00:10 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1864757 | ep_cot_prompt | **COMPLETED** in1:05:55, exit0; identical causal-CoT weights with `generate_at_inference:false`; 3,284/4,000=82.100%, SE0.606pp, all failed-shard files empty; clean advantage only0.975pp /1.15 combined SE |
 | 1863688 / 1863690 / 1863692 | tr_rc_gz_42 / tr_rc_gz_4 / tr_rc_gzm | **CANCELLED by user at57s** — RoboCasa GR00T full runs stopped after a flaw was found in z-only conditioning; no result may be used |
 | 1863689 / 1863691 / 1863693 | tr_rc_gz42_rs / tr_rc_gz4_rs / tr_rc_gzm_rs | **CANCELLED before start** — automatic resume dependencies for the stopped RoboCasa runs |
 | 1863697–1863702 | rc_gnoz / rc_gz / rc_gm015, seeds4/42 | **CANCELLED before start** — chained18-task evaluations for the stopped RoboCasa runs |

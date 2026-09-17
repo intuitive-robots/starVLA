@@ -93,6 +93,14 @@ def collect_libero(tree: pathlib.Path) -> list[dict]:
             if found is None:
                 continue
             successes, episodes = found
+            # Evaluators create zero-count aggregate stubs before any shard lands.
+            # Those files describe missing work, not a zero-success evaluation.
+            if episodes <= 0:
+                continue
+            if not 0 <= successes <= episodes:
+                raise ValueError(
+                    f"Invalid LIBERO counts in {path}: {successes}/{episodes}"
+                )
             rate, se = rate_se(successes, episodes)
             file_rows.append({"tree": tree.name, "run": run, "arm": arm_of(run),
                               "seed": training_seed(tree, run), "benchmark": benchmark,
@@ -127,6 +135,8 @@ def collect_robocasa(tree: pathlib.Path) -> list[dict]:
         if any(v not in (True, False, 0, 1) for v in outcomes):
             raise ValueError(f"Non-binary successes in {path}")
         successes, episodes = sum(int(v) for v in outcomes), len(outcomes)
+        if episodes <= 0:
+            continue
         computed, se = rate_se(successes, episodes)
         reported = blob.get("success_rate")
         if reported is not None and not math.isclose(float(reported), computed, abs_tol=1e-12):

@@ -52,4 +52,18 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(c.training_seed(self.root,'ervla_w'),'43')
         self.assertEqual(c.arm_of('ervla_zbase_pi_sharedz_control'),'encoder/shared-z-off-control')
         self.assertNotEqual(c.arm_of('ervla_k2_pi_cam3d_cot05_pifix_nolatent'),'causal')
+    def test_zero_count_stubs_are_missing_not_failures(self):
+        root = self.root/'playground/Checkpoints/run/results'
+        self.write(root/'libero-plus/overall_results.json', {
+            'libero_10': {'overall': {'total_count': 0, 'success_count': 0}},
+            'libero_goal': {'overall': {'total_count': 1, 'success_count': 0}},
+        })
+        rc = self.root/'playground/Checkpoints/rc/checkpoints/steps_1_pytorch_model.eval'
+        self.write(rc/'robocasa_OpenDrawer_empty.json', {
+            'env': 'robocasa/OpenDrawer', 'successes': [], 'success_rate': 0.0,
+        })
+        libero_rows = c.collect_libero(self.root)
+        self.assertEqual(len(libero_rows), 1)
+        self.assertEqual(libero_rows[0]['suite_or_task'], 'libero_goal')
+        self.assertEqual(c.collect_robocasa(self.root), [])
 if __name__=='__main__':unittest.main()
