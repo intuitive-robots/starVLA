@@ -50,6 +50,11 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
 
         self.input_embedding_dim = diffusion_model_cfg_kwargs["input_embedding_dim"]
         self.model = QwenPIv4DiT(**diffusion_model_cfg_kwargs)
+        # The v4 topology is fixed: every block mixes action/state tokens with
+        # its matching VLM layer.  Keep this attribute for the shared v3
+        # training/sampling implementation, which uses it only to select the
+        # legacy all-cross compatibility path.
+        self.layerwise_attention_layout = "fused_dual"
         self.dit_out_hidden_size = self.input_embedding_dim
         self.action_dim = action_config.action_dim
         self.action_horizon = int(action_config.action_horizon)
@@ -72,11 +77,14 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
             hidden_dim=1024,
             output_dim=self.action_dim,
         )
-        self.future_tokens = nn.Embedding(
-            action_config.num_target_vision_tokens,
-            self.input_embedding_dim,
+        num_future_tokens = int(action_config.num_target_vision_tokens)
+        self.future_tokens = (
+            nn.Embedding(num_future_tokens, self.input_embedding_dim)
+            if num_future_tokens > 0
+            else None
         )
-        nn.init.normal_(self.future_tokens.weight, mean=0.0, std=0.02)
+        if self.future_tokens is not None:
+            nn.init.normal_(self.future_tokens.weight, mean=0.0, std=0.02)
 
         if action_config.add_pos_embed:
             self.position_embedding = nn.Embedding(
@@ -93,6 +101,16 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
         )
         self.num_timestep_buckets = action_config.num_timestep_buckets
         self.config = action_config
+
+        # Shared v3 inference optionally attaches a probe-derived residual
+        # readout.  v4 does not enable one by default, but the inherited
+        # sampler expects these fields to exist.
+        self._flow_residual_readout_path = None
+        self._flow_residual_readout = None
+        self._flow_residual_mean = None
+        self._flow_residual_scale = None
+        self._flow_residual_strength = None
+        self._flow_residual_norm_cap_ratio = None
 
     def _normalize_encoder_states(self, vl_embs):
         """Accept QwenPI layer-wise states and GR00T single-layer states.
@@ -118,12 +136,18 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
         actions: torch.Tensor,
         state: torch.Tensor = None,
         encoder_attention_mask=None,
+        return_clean_actions: bool = False,
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ):
+        if z_conditioning is not None or encoder_memory_keep is not None:
+            raise ValueError("QwenPI_v4 shared-z conditioning is not implemented")
         return super().forward(
             self._normalize_encoder_states(vl_embs_list),
             actions,
             state,
             encoder_attention_mask=encoder_attention_mask,
+            return_clean_actions=return_clean_actions,
         )
 
     @torch.no_grad()
@@ -132,7 +156,11 @@ class LayerwiseFlowmatchingActionHeadV4(LayerwiseFlowmatchingActionHead):
         vl_embs_list,
         state: torch.Tensor = None,
         encoder_attention_mask=None,
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ) -> torch.Tensor:
+        if z_conditioning is not None or encoder_memory_keep is not None:
+            raise ValueError("QwenPI_v4 shared-z conditioning is not implemented")
         return super().predict_action(
             self._normalize_encoder_states(vl_embs_list),
             state,

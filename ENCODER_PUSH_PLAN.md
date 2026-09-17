@@ -1,12 +1,12 @@
 # Encoder push plan — 2026-09-17
 
-**Prioritize an identifiable shared-latent encoder contribution, then improve geometry robustness and closed-loop readout.** Do not optimize the probe score as the objective. We have a 5.72 pp shared-z gain over the internal causal baseline, but directionality alone is not isolated, RoboCasa’s2.27 pp pooled gap is below two episode SE, and the strongest verified external LIBERO-plus reference is 84.8% versus our 77.375% two-seed mean.
+**Prioritize an identifiable shared-latent encoder contribution, then test whether dense layer-wise conditioning can improve the action head without sacrificing temporal coherence.** Do not optimize the probe score as the objective. We have a 5.72 pp shared-z gain over the internal causal baseline, but directionality alone is not isolated, RoboCasa’s2.27 pp pooled gap is below two episode SE, and the strongest verified external LIBERO-plus reference is 84.8% versus our 77.375% two-seed mean.
 
 All proposed effects below are hypotheses, in absolute percentage points relative to the relevant matched control, not measured results or additive gains. Costs use GH200 GPU-hours and include validation evals where stated. Healthy 4k LIBERO-plus eval:5–7 GPU-h, 1.3–1.7 h on 4 GPUs. One LIBERO training seed: roughly 15 GPU-h; a two-seed pair used 30 GPU-h over 7.5 h. RoboCasa from-scratch causal+encoder pair at a training seed: approximately80 GPU-h/20 h on 4 GPUs, including resume; a 10k-step continuation pair is estimated16–24 GPU-h/4–6 h. These are extrapolations from logs, not reservations. Queue time and rendering failures are additional. Every Booster allocation must use all 4 GPUs, via independent jobs/shards as appropriate.
 
 Use a fixed development task set for screens, then evaluate the selected recipe once on frozen4k/official task lists and all seeds. Report all confirmations, including failures. A “kill” below stops that intervention after the specified evidence; it never turns missing outcomes into zeros. No jobs were launched by this audit.
 
-**September 17 priority revision after auditing upstream StarVLA:** keep the conditional-go verdict, but do no new architecture training until shared-z+GR00T completes and released Qwen3-VL-PI is evaluated on our exact4k task IDs. Upstream's reported77.0% is a4B/100k/full-finetune/horizon8 result on all10,030 tasks, not a reproduction of our2B/20k/horizon16 causal recipe. Reproducing that released baseline now outranks camera routing; see [the audit](UPSTREAM_LIBERO_PLUS_AUDIT.md). Protocol completion and causal+shared-z attribution remain required. Camera routing is the sole new candidate only after those gates. MLM/layer/DCT sweeps remain deferred. This revision changes the plan only; no jobs were launched or architecture code changed.
+**September 17 topology revision:** upstream's reported77.0% Qwen3-PI checkpoint used the historical all-cross LayerwiseFM path. [Issue #372](https://github.com/starVLA/starVLA/issues/372) and [PR #373](https://github.com/starVLA/starVLA/pull/373) establish that this path has no action-token self-attention: action positions and the direct state token cannot exchange information. Our DROID all-cross runs showed the expected noisy within-chunk actions. Therefore legacy all-cross is a reproduction/diagnostic control only, not a candidate paper architecture. The day-1 architecture test is QwenPI_v4 fused dual attention: every block receives its matching VLM layer while action/state tokens remain in the key/value set and can interact. It runs in parallel with completion of shared-z+GR00T; camera routing moves behind this topology gate. Upstream's77.0% remains a4B/100k/full-finetune/horizon8 result on all10,030 tasks, not a reproduction of our2B/20k/horizon16 recipe; see [the audit](UPSTREAM_LIBERO_PLUS_AUDIT.md).
 
 ## Ranked experiments
 
@@ -28,19 +28,25 @@ Use a fixed development task set for screens, then evaluate the selected recipe 
 
 **Expected effect:** best partial dropout could add0–2 pp over zonly; alignment effects may shrink with seeds. **Budget:**140–165 GPU-h for7new train+eval runs;1–2 days on 3–4 nodes. **Kill:** if a component changes success<1 pp in both seeds or reverses without a clear failure category, omit that component from the causal story. Do not call zonly an unsupervised control.
 
-### 4. Test the actual encoder-objective switch — defer unless claiming an MLM-loss contribution
+### 4. Dense layer-wise conditioning with temporal action mixing (QwenPI_v4) — would strengthen the paper
+
+**Hypothesis/evidence:** current alternating PI preserves coherent chunks but only14of28 action blocks receive VLM memory. Historical all-cross runs condition every block and reached76.425% locally and77.0% upstream, but their action positions are conditionally independent and DROID exposed noisy within-chunk behavior. **Change:** use QwenPI_v4 fused dual attention, where each action/state query attends to `[action/state tokens; matching VLM-layer tokens]` in every block. Compare to the existing v5 alternating action-only seeds42/43 with the same encoder checkpoint, frozen modules, data, augmentation, global batch64, width1024,28 blocks, horizon16, zero target tokens, optimizer and20k steps. Verify cross-position gradients, state gradients and padding-mask invariance before launch. Do not substitute legacy all-cross for v4.
+
+**Expected effect:**0–3 pp over the v5 alternating action-only mean, with better temporal structure than legacy all-cross. **Budget:**~30GPU-h for the two-seed training pair and12–16GPU-h for two exact4k evaluations; approximately8–10h training plus2h evaluation, queue excluded. **Kill:** stop after the matched pair if mean LIBERO-plus gain is<1pp, either seed regresses>2pp, throughput exceeds2× without a clear gain, or action-difference/jerk diagnostics regress. A promoted result must retain the same topology on DROID/RoboCasa; LIBERO success alone cannot declare the temporal problem solved.
+
+### 5. Test the actual encoder-objective switch — defer unless claiming an MLM-loss contribution
 
 **Hypothesis/evidence:** masked slots/readout rather than MLM loss may explain the “MLM control” result; its loss_enabled is false. **Change:** same checkpoint, prompt slots, mapping data and memory path, encoder_mlm.loss_enabled off/on at fixed low weight, plus the no-slot control; log masked-target coverage. Reuse only controls with identical configs. Two seeds, matched compute.
 
 **Expected effect:**−2 to +2 pp; no current isolated positive evidence. **Budget:**85–130 GPU-h for4–6 train+eval runs if a slot control can be reused;1–2 days. **Kill:** discard the objective claim if added loss does not beat slot-only in both seeds or harms plain LIBERO by>1 pp. Keep objective/architecture terminology precise in the paper.
 
-### 5. Finish shared-z+GR00T; add a causal+GR00T control — must have for the paper
+### 6. Finish shared-z+GR00T; add a causal+GR00T control — must have for the paper
 
 **Hypothesis/evidence:** readout quality limits use of the encoder representation. V5-GR00T exceeds v5-PI by 1.50 pp across two seeds, while much higher probe R² often produces little rollout gain. **Change:** existing1851382 and dependent 1851383/84 already cover the encoder shared-z-GR00T arm; add equally trained causal-GR00T and causal-shared-z-GR00T if needed for an interaction claim. Do not count a different head as evidence for directionality.
 
 **Expected effect:**0–2 pp over shared-z-PI; the two effects may not combine. **Budget:**existing pair~30 GPU-h +10–14evalGPU-h; two extra causal seeds 40–45 GPU-h, ~10 h/node. **Kill:** if mean gain<1 pp or one seed regresses>2 pp, keep PI as the main recipe. If causal benefits equally, report a head effect.
 
-### 6. Camera-routed shared-z queries — sole new architecture candidate before the deadline; would strengthen the paper
+### 7. Camera-routed shared-z queries — conditional second architecture candidate; would strengthen the paper
 
 **Hypothesis/evidence:** DROID ext+wrist dilution motivates testing competition between camera token groups, but those probes are not from the best shared-z policy. Shared-z camera success is 58.16%; this is remaining headroom, not evidence that fusion causes the errors. Current `SharedZPooler` already has four learned 512D queries, flattened and projected to a single128D z. All queries attend all valid memory tokens. A separate128D z per camera would increase capacity and change the action interface, confounding the first test.
 
@@ -52,37 +58,37 @@ Use a fixed development task set for screens, then evaluate the selected recipe 
 
 **Expected effect and budget:** direction and magnitude unknown; +1–3overall pp is a planning target, not an evidence-based forecast. Allow10–20GPU-h for a matched short screen and45–95GPU-h for two-seed full training/evaluation, depending on whether exact controls can be reused; plain-LIBERO guardrail evaluation is extra. Training/eval estimates inherit measured~15GPU-h per20k-step seed and6–8GPU-h per4k evaluation; allow2–3calendar days plus integration/queue time. Reserve a maximum115GPU-h before extra guardrails and stop if core controls would be delayed. Do not combine camera routing with dropout, wider z, GR00T or new losses in this test. Camera dropout and independently supervised per-camera latents are follow-ups after the deadline; image-space targets use different camera frames and cannot simply be duplicated onto both latents.
 
-### 7. Format-preserving state training and vision controls on RoboCasa — must have for the paper
+### 8. Format-preserving state training and vision controls on RoboCasa — must have for the paper
 
 **Hypothesis/evidence:** causal 0/144 without state but 94/144 with shuffled state implicates prompt structure; encoder’s robust advantage is narrower than the no-state table suggests. **Change:** delimiters retained with missing-value markers; real/shuffle/random/zero matched across arms, seeds 4/42, and task sets selected before evaluation. Add encoder and causal continuations with state_dropout_rate0.1 and 0.3; maintain prompt structure at dropout. Include vision-zero/one-camera controls to distinguish state reliance from visual policy competence.
 
 **Expected effect:** format repair may improve causal more; state dropout may give0–3 pp encoder clean success and 5–15 pp corrupted-state robustness. **Budget:**20–35 GPU-h for the expanded diagnostic matrix plus 40–70 GPU-h for paired continuation screens and two-seed confirmation;1–2 days. **Kill:** reject “encoder is less proprioception-dependent” if it does not persist in≥2 corruption types and both seeds; reject a training variant if clean success drops>1 pp. Direct continuous state into DiT is a separate later ablation, not an assumed fix.
 
-### 8. Replan more often; limited inference refinement — would strengthen the paper
+### 9. Replan more often; limited inference refinement — would strengthen the paper
 
 **Hypothesis/evidence:** the encoder fits actions better yet may accumulate closed-loop errors; n_action_steps8 executes half the 16-action prediction. **Change:** execute 4/8/16 predicted actions with fixed trained horizon and 4 flow steps, on the same episodes. Evaluate8 flow steps only for the best execution length. For mask-trained arms, average2–4mask-conditioned continuous predictions as a separate latency-costed ablation; do not average incompatible discrete gripper modes blindly.
 
 **Expected effect:**−2 to +2 pp, especially recovery/long tasks. **Budget:**30–55 GPU-h for screens and paired 4k confirmations;8–16 h over 2 nodes. **Kill:**<1 pp confirmed gain or>2×latency without meaningful robustness improvement. Existing30k/96-episode flow-step results do not justify sweeping many integration counts. Keep train-time horizon unchanged; new horizons need retraining.
 
-### 9. Small auxiliary readout and masking-ratio screen — post-deadline under the revised schedule
+### 10. Small auxiliary readout and masking-ratio screen — post-deadline under the revised schedule
 
 **Hypothesis/evidence:** action co-training spreads decodability, but final dense and tracetime hurt the spatial/VQA aggregate. No evidence localizes an earlier useful layer. **Change:** first probe layers 4/8/14/20/28 on matched policies, then at most one low-weight auxiliary action head (0.001/0.01) at a selected layer or learned text+vision query. Compare action masking ratios 0/0.15/0.3, with an equal-duration no-head continuation and fixed target handling. Do not train all combinations.
 
 **Expected effect:**−2 to +1.5 pp; lower priority than shared-z because probe-to-success ordering is currently negative. **Budget:**4–8 GPU-h measurement plus 45–80 GPU-h for short continuations and two confirmations;1day if launched by day 4. **Kill:** probe improves without≥1 pp rollout gain, or spatial/VQA retention drops>1 pp. The 11-readout ranking cannot authorize this experiment on its own.
 
-### 10. Frequency-domain loss on the action chunk — post-deadline under the revised schedule
+### 11. Frequency-domain loss on the action chunk — post-deadline under the revised schedule
 
 **Hypothesis/evidence:** temporal supervision may improve usable trajectories rather than generic feature quality; [VLANeXt](https://arxiv.org/html/2602.18532v1) reports a successful frequency-domain action objective. **Change:** small DCT loss on predicted clean16-step action chunks, separate motion/gripper scaling, retaining the existing flow objective; one-seed continuation screen then2 seeds for a winner. Check whether current temporal-z loss already captures the benefit.
 
 **Expected effect:**0–2 pp, especially motion consistency; untested here. **Budget:**35–65 GPU-h;1day. **Kill:** no confirmed success gain, worse gripper switching, or extra training cost without recovery benefit. This is a literature-inspired intervention, not an explanation already proved by our probes.
 
-### 11. Official competitors and third behavior benchmark — must have for a broad/SOTA claim
+### 12. Official competitors and third behavior benchmark — must have for a broad/SOTA claim
 
 **Hypothesis/evidence:** outperforming causal+PI does not establish the paper’s broad thesis; strongest verified released references are substantially stronger. **Change:** evaluate released OFT and InternVLA-A1.5 alongside our selected checkpoints on matched official LIBERO/plus protocols; state explicitly which training distributions differ. RoboCasa: include all 18 atomic tasks with official horizons; a 50-task SOTA claim additionally needs the prescribed training/splits. For a third behavior domain, prefer an already supported SimplerEnv task family with existing action data; audit embodiment/action compatibility before spending compute. Spatial/VQA scores and DROID probes do not count.
 
 **Expected effect:**information, not guaranteed gains. **Budget:**40–100 GPU-h evals; third-domain training80–160 GPU-h as a rough unmeasured allowance, 2–4 days; official 50-task foundation-policy training is not credibly costed from current logs. **Kill:** if third-domain integration is not producing valid smoke rollouts by day 3, narrow the claim; never present an unvalidated adapter score as a benchmark. No unfamiliar full training campaign after day 5.
 
-### 12. Larger latent/teacher or discrete masked-action architecture — post-deadline
+### 13. Larger latent/teacher or discrete masked-action architecture — post-deadline
 
 **Hypothesis/evidence:** [Discrete Diffusion VLA](https://arxiv.org/abs/2508.20072) uses adaptive remasking; [InternVLA-A1.5](https://huggingface.co/InternRobotics/InternVLA-A1.5-Libero) supervises latent foresight with a video teacher. **Change:** z width/query-count scaling, richer future targets, teacher distillation, or a properly trained masked discrete action decoder with confidence-based refinement. This is not an inference flag on today’s continuous shared-z model.
 
@@ -90,6 +96,6 @@ Use a fixed development task set for screens, then evaluate the selected recipe 
 
 ## Resource order and paper decision
 
-Reserve first capacity for protocol completion and rank2, then the minimum rank3 ablations that support the selected claim and completion of already-running rank5 work. Rank6 gets one bounded discretionary slot; it replaces ranks4/9/10 unless the manuscript explicitly claims an MLM-loss contribution. Rank7 starts with the format diagnostic, not a dropout sweep. Rank8 gets one execution-length comparison only if capacity remains. Do not launch a third-domain integration effort from scratch during this window; an already working domain can strengthen a broad claim. The previous400–650GPU-h figure was an estimate for a broader control package, not a booked or sufficient budget for every listed experiment. Camera work adds55–115GPU-h before clean-task guardrails only if it is not offset by deferred work. Queue capacity is unverified; with one node, drop the camera experiment before delaying attribution controls and final seeds.
+Reserve first capacity for protocol completion and rank2, then the minimum rank3 ablations that support the selected claim. Run the bounded rank4 QwenPI_v4 pair now because it directly resolves the dense-conditioning/temporal-coherence conflict and can share the day-1 window with already-running rank6 work. Rank7 camera routing starts only if v4 and GR00T+z leave a clear camera/readout bottleneck; it replaces ranks5/10/11 unless the manuscript explicitly claims an MLM-loss contribution. Rank8 starts with the format diagnostic, not a dropout sweep. Rank9 gets one execution-length comparison only if capacity remains. Do not launch a third-domain integration effort from scratch during this window; an already working domain can strengthen a broad claim. The previous400–650GPU-h figure was an estimate for a broader control package, not a booked or sufficient budget for every listed experiment. Camera work adds55–115GPU-h before clean-task guardrails only if it is not offset by deferred work. Queue capacity is unverified; with one node, drop the camera experiment before delaying attribution controls and final seeds.
 
 Predeclare the main claim by day 4, select the final recipe by day 5, and freeze all headline results by day 8 (September 24). A result that arrives later may enter an appendix if independently audited, but must not rewrite the thesis. If causal+shared-z closes the gap, pivot the claim to the shared-latent architecture and clearly name the encoder/pretraining bundle; if RoboCasa remains neutral, a “wins everywhere” encoder claim is unsupported.
