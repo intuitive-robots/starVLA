@@ -128,6 +128,7 @@ class QwenGR00TTraceLoop(Qwen_GR00T):
         )
         self._last_trace_prediction = None
         self._last_trace_coverage = None
+        self._last_trace_pass_delta = None
 
     def _append_trace_slots(self, instruction: str) -> str:
         slots = " ".join([self.trace_slot_token] * self.trace_num_points)
@@ -205,6 +206,7 @@ class QwenGR00TTraceLoop(Qwen_GR00T):
                 sum(target_present) / max(len(target_present), 1)
             )
             if self.trace_num_passes == 1:
+                self._last_trace_pass_delta = prediction.new_zeros(())
                 return pass1
 
             if self.trace_pass2_source == "predicted":
@@ -225,7 +227,12 @@ class QwenGR00TTraceLoop(Qwen_GR00T):
             coordinates = (coordinates.clamp(0, 1) * bins).round() / bins
             coordinate_embeddings = self.trace_loop.embed(coordinates)
             with self._coordinate_embedding_override(slot_mask, coordinate_embeddings):
-                return original_forward(*args, **kwargs)
+                pass2 = original_forward(*args, **kwargs)
+            self._last_trace_pass_delta = (
+                pass2.hidden_states[-1].detach().float()
+                - hidden1.detach().float()
+            ).abs().mean()
+            return pass2
 
         return original_forward, traced_forward, raw_targets, target_present
 
@@ -259,9 +266,14 @@ class QwenGR00TTraceLoop(Qwen_GR00T):
         if result.get("structured_aux_loss") is not None:
             raise RuntimeError("trace loop cannot share the structured_aux trainer slot")
         result["structured_aux_loss"] = trace_loss
-        result["trace_loop/loss"] = trace_loss.detach()
-        result["trace_loop/coverage"] = self._last_trace_coverage.detach()
-        result["trace_loop/prediction_std"] = prediction.detach().std(unbiased=False)
+        result["structured_aux/trace_loss"] = trace_loss.detach()
+        result["structured_aux/trace_coverage"] = self._last_trace_coverage.detach()
+        result["structured_aux/trace_prediction_std"] = prediction.detach().std(
+            unbiased=False
+        )
+        result["structured_aux/trace_pass_delta"] = (
+            self._last_trace_pass_delta.detach()
+        )
         return result
 
     @torch.inference_mode()

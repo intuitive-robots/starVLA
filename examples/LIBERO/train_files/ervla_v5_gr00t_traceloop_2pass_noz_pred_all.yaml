@@ -1,5 +1,6 @@
 # TRACE-LOOP ARM. Full training remains gated on the 20-update trainer-eval smoke.
-# Two GPUs/run, per-device batch32, global action batch64. Seed/run_id are launcher-overridden.
+# Four GPUs/run, per-device batch16, effective global batch64.
+# The tied two-pass graph exceeds95GB/GPU at microbatch32.
 # Match upstream StarVLA/NVIDIA GR00T: full final-layer VLM token sequence,
 # alternating cross-only and action-self-only DiT blocks, no local query compressor.
 run_id: ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s42
@@ -103,7 +104,7 @@ datasets:
     data_mix: libero_mixed
     action_type: delta_qpos
     sequential_step_sampling: false
-    per_device_batch_size: 32
+    per_device_batch_size: 16
     drop_last: true
     load_all_data_for_training: true
     video_backend: decord
