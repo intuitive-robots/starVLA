@@ -5,6 +5,11 @@
   "mtime": "2026-09-16T22:51:43.886122"
  },
  {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_CloseFridge_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "f328d8b8a8e907387562f151de234c16ecb43b093b868e19227ee7da1b8d4301",
+  "mtime": "2026-09-17T17:29:48.303581"
+ },
+ {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_CloseFridge_seed42_envs24_eps48_h500_act8_native_s4_50k.json",
   "sha256": "a4f3879844bf10f8b3af8b9f7508221a34fd9110625c6e510d92a5873bcf77be",
   "mtime": "2026-09-16T22:53:24.078145"
@@ -30,6 +35,11 @@
   "mtime": "2026-09-16T23:04:16.237164"
  },
  {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenDrawer_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "653134ac4330532c3c8508f6ecad59d56261f0ca8c6bb9ad33afff55300e0020",
+  "mtime": "2026-09-17T17:26:10.873302"
+ },
+ {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenDrawer_seed42_envs24_eps48_h500_act8_native_s4_50k.json",
   "sha256": "3a99e630e1a443c3ed12b1640e16ae63d0fe6d2106be9bc4454cfb58502087a2",
   "mtime": "2026-09-16T23:08:21.576936"
@@ -43,6 +53,11 @@
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps24_h500_act8_native_smoke_C_shuffled.json",
   "sha256": "a35fadca3d007970f4af6198f0047a8881d78064669ebd00114e046d1b4970d2",
   "mtime": "2026-09-17T10:06:28.405242"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "24e6104e7572801982092f81d22f547db329d5f4f7f52ae2a69ccaa8695273fc",
+  "mtime": "2026-09-17T17:25:45.726200"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps48_h500_act8_native_nostate.json",
@@ -73,6 +88,11 @@
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_PickPlaceCounterToCabinet_seed42_envs24_eps48_h500_act8_native_s4_50k.json",
   "sha256": "3ee6eb282ce2d2cfb301eebcee7ab3f10d077aae8cee0440364de58b9050e0b8",
   "mtime": "2026-09-16T23:14:17.083834"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_PickPlaceCounterToStove_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "75f0e23d7fc7459b7ef387c2600f1cd7f1c11348420910dee700981faed5f61d",
+  "mtime": "2026-09-17T17:26:02.116221"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_PickPlaceCounterToStove_seed42_envs24_eps48_h500_act8_native_nostate.json",
@@ -120,6 +140,11 @@
   "mtime": "2026-09-16T23:23:28.273969"
  },
  {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnElectricKettle_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "d8c9d03ce2414978e54e51632e04f3fca8dee37783da5119d36ddc03c956b733",
+  "mtime": "2026-09-17T17:25:44.931450"
+ },
+ {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnElectricKettle_seed42_envs24_eps48_h500_act8_native_nostate.json",
   "sha256": "221fb4638d4adf48201c79429651f406e5d93eb2e5ee141256e81bf26f43dcf6",
   "mtime": "2026-09-17T09:47:10.245242"
@@ -143,6 +168,11 @@
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnElectricKettle_seed42_envs24_eps48_h500_act8_native_st_zero.json",
   "sha256": "0f8176b845b12e9bda65500bd67e9c68e5226da24a7811968f5d833337330b72",
   "mtime": "2026-09-17T10:34:24.162484"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnMicrowave_seed42_envs24_eps48_h500_act8_native_egl.json",
+  "sha256": "b058a9dee72c83420f5a050ddb8750dfb1ef6129988e9a10be5d1f2bc8b87175",
+  "mtime": "2026-09-17T17:29:33.509426"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnMicrowave_seed42_envs24_eps48_h500_act8_native_s4_50k.json",
@@ -3665,6 +3695,56 @@
   "mtime": "2026-09-05T09:27:09.332437"
  },
  {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/libero_10/overall_results.json",
+  "sha256": "289a5ef98a7b25930ac05899178dde1cdaa9e54282cd7b12a7a7e5e243ae3f6b",
+  "mtime": "2026-09-17T16:50:10.194683"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/libero_goal/overall_results.json",
+  "sha256": "6886cc6dd5e52103efde769f365931362d5cfd8805fa06f4349bac71ce709cd1",
+  "mtime": "2026-09-17T17:02:57.663034"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/libero_object/overall_results.json",
+  "sha256": "77d82d2a7da60d34704bcb31fba3b82eed914ece2bec7e1b753e7389588a4626",
+  "mtime": "2026-09-17T17:17:16.867086"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/libero_spatial/overall_results.json",
+  "sha256": "5441ed38c988a6b3ba3f4b6fe4e24f4fe6ee296b5d779d7d10f0b61d36f570fd",
+  "mtime": "2026-09-17T17:30:27.089792"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json",
+  "sha256": "de159a8df058bab2a8402e22fc9984fa276966c7b2c4109b4235c71da25e097d",
+  "mtime": "2026-09-17T17:30:27.188538"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/libero_10/overall_results.json",
+  "sha256": "7d0ea1de9991a6008619c47bd789320bc508d19766b19653fc6587f49aa31558",
+  "mtime": "2026-09-17T16:54:21.602174"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/libero_goal/overall_results.json",
+  "sha256": "8d70a478c5a2499a4008b28db6d71417a10faaf0fb57f9ee03513eb89283127e",
+  "mtime": "2026-09-17T17:10:08.088577"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/libero_object/overall_results.json",
+  "sha256": "2fdf728713e5cdecd29639b2d6fabf2a79c1955699065bac988f10ca995411be",
+  "mtime": "2026-09-17T17:25:34.004442"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/libero_spatial/overall_results.json",
+  "sha256": "c6d7f4f0771e704a995e30b8c3becdd6f79eaa4753efc6d2e6c4e5655b8fe6ea",
+  "mtime": "2026-09-17T17:40:00.442967"
+ },
+ {
+  "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/overall_results.json",
+  "sha256": "7004a1e13d85dc2c10d88b00b367fa44fa82fa95f03b0bb61b7c0fcca1ee31be",
+  "mtime": "2026-09-17T17:40:00.730413"
+ },
+ {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal/results/libero-plus-4k-exact-sharedz-v2-w4/libero_10/overall_results.json",
   "sha256": "be70853f8b1c6cc15b9e6646e410810e30f7c35e7323ab256b3646aa52416077",
   "mtime": "2026-09-05T12:49:58.912268"
@@ -5006,23 +5086,23 @@
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/libero_goal/overall_results.json",
-  "sha256": "9b0eb0bdcf7fe871464e049a24a14a0b3b2c06b8da8335043725155353b47b5b",
-  "mtime": "2026-08-10T21:29:39.357436"
+  "sha256": "bd5b0af730cb1284829b9c3ee39af7c7c933fac5813156cc008e90b05deadd40",
+  "mtime": "2026-09-17T18:01:05.482928"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/libero_object/overall_results.json",
-  "sha256": "53ddd5b715c8082d80157738f0631ab19c8efd538aaebaf836e91723b55de7d9",
-  "mtime": "2026-08-10T21:42:11.169896"
+  "sha256": "d6f6a99d0270d3554145a3f878a2d5a8afd2c56521b129a75cde37aafd7c4878",
+  "mtime": "2026-09-17T17:43:16.071560"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/libero_spatial/overall_results.json",
-  "sha256": "b51287098c656f648a63a611aca608c3ec7266c1e55929a69d727fa3c8a99d13",
-  "mtime": "2026-08-10T21:56:30.453274"
+  "sha256": "402b5f8d7c7e427f94176dce198edfd8028159648155daa32466710a87cf45a4",
+  "mtime": "2026-09-17T17:20:43.007661"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/overall_results.json",
-  "sha256": "61998fea2672378309feaffee6648ac9765791457e3122607a1674c1648de62e",
-  "mtime": "2026-08-10T21:56:30.528381"
+  "sha256": "1498dede20ff4c42bb0b5f8905eb8974287ccfa9339e5bdcb42f4bd5b28eac7f",
+  "mtime": "2026-09-17T18:01:07.433987"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours/results/libero-plus/libero_10/overall_results.json",
@@ -5241,13 +5321,13 @@
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/libero_goal/overall_results.json",
-  "sha256": "60d5f951702d5e61de4cbfc45741258599f57acf1b35a05c92efc8aaa00dc08f",
-  "mtime": "2026-08-11T01:14:19.420948"
+  "sha256": "f084172b6f870b7e90a232ff78b30aa49d40d782b9a3a5f4a94475f1487cd823",
+  "mtime": "2026-09-17T16:55:14.964253"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/libero_object/overall_results.json",
-  "sha256": "343e5e1006a313ef64de1633d9ba9043e68461d484264078f86e678ecb7d0991",
-  "mtime": "2026-08-11T01:27:02.461186"
+  "sha256": "2f462c2c5f416c1376a1c198a3c7bd9fbfc1b6e08d001860af02d90f5c88cb6a",
+  "mtime": "2026-09-17T16:46:45.213652"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/libero_spatial/overall_results.json",
@@ -5256,8 +5336,8 @@
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/overall_results.json",
-  "sha256": "8bc374fc6e361c457c0f5c61534e0576edcdec4f9e4654a0477d47cbedee9e64",
-  "mtime": "2026-08-11T01:42:43.057453"
+  "sha256": "f568db7b8c79f7d91a4890bad275dde57903ff9e6dd72c4c285a248b4e9648b8",
+  "mtime": "2026-09-17T16:55:16.700388"
  },
  {
   "path": "/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_deeps/results/libero-plus/libero_10/overall_results.json",

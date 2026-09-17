@@ -3,9 +3,6 @@ from pathlib import Path
 A=Path('/e/project1/m3/blank4/code/starVLA');B=Path('/e/project1/m3/blank4/code/starVLA-upstream-merge');D=Path('/e/project1/m3/blank4/code/train_downstream');O=A/'results_collected';O.mkdir(exist_ok=True)
 rows=list(csv.DictReader((O/'results_master.csv').open()))
 raw={p:json.loads(Path(p).read_text()) for p in sorted({x['source_path'] for x in rows})}
-(O/'raw_results_snapshot.json').write_text(json.dumps(raw,sort_keys=True))
-manifest=[{'path':p,'sha256':hashlib.sha256(Path(p).read_bytes()).hexdigest(),'mtime':datetime.datetime.fromtimestamp(Path(p).stat().st_mtime).isoformat()} for p in raw]
-(O/'source_manifest.json').write_text(json.dumps(manifest,indent=1))
 def stat(s,n):
  p=s/n if n else float('nan');return {'s':s,'n':n,'p':p,'se':math.sqrt(p*(1-p)/n) if n else float('nan')}
 def pool(rs):return stat(sum(int(x['successes']) for x in rs),sum(int(x['n_episodes']) for x in rs))
@@ -13,12 +10,29 @@ def fmt(v):return f"{v['p']*100:.3f} ± {v['se']*100:.3f}; {v['s']}/{v['n']}"
 def link(p,label=None):return f'[{label or Path(p).name}]({p})'
 def table(headers,rs):return '\n'.join(['| '+' | '.join(headers)+' |','|'+'---|'*len(headers)]+['| '+' | '.join(map(str,r))+' |' for r in rs])+'\n'
 def rstat(d):o=d.get('overall',d);return stat(o['success_count'],o['total_count'])
-# Independent audit against raw payload, including all nested suites and RC booleans.
-issues=[]
+# Evaluation jobs update root JSONs while the collector and this audit run. If a source changed
+# between the two snapshots, exclude that whole source from this report instead of combining CSV
+# counts from one moment with perturbation data from another. The next collection will pick it up.
+def row_raw_stat(x,b):
+ if x['benchmark']=='robocasa365':return stat(sum(b['successes']),len(b['successes']))
+ return rstat(b if 'total_count' in b.get('overall',{}) and x['suite_or_task']!='overall' else b[x['suite_or_task']])
+changed_sources=set()
+for x in rows:
+ try:v=row_raw_stat(x,raw[x['source_path']])
+ except (KeyError,TypeError):changed_sources.add(x['source_path']);continue
+ if v['s']!=int(x['successes']) or v['n']!=int(x['n_episodes']):changed_sources.add(x['source_path'])
+if changed_sources:
+ print(f"! excluded {len(changed_sources)} source(s) modified after collection",file=sys.stderr)
+ rows=[x for x in rows if x['source_path'] not in changed_sources]
+ raw={p:b for p,b in raw.items() if p not in changed_sources}
+(O/'raw_results_snapshot.json').write_text(json.dumps(raw,sort_keys=True))
+manifest=[{'path':p,'sha256':hashlib.sha256(Path(p).read_bytes()).hexdigest(),'mtime':datetime.datetime.fromtimestamp(Path(p).stat().st_mtime).isoformat()} for p in raw]
+(O/'source_manifest.json').write_text(json.dumps(manifest,indent=1))
+# Independent audit against the frozen raw payload, including all nested suites and RC booleans.
+issues=[(p,'','source changed after collection; excluded from this snapshot') for p in sorted(changed_sources)]
 for x in rows:
  b=raw[x['source_path']]
- if x['benchmark']=='robocasa365':v=stat(sum(b['successes']),len(b['successes']))
- else:v=rstat(b if 'total_count' in b.get('overall',{}) and x['suite_or_task']!='overall' else b[x['suite_or_task']])
+ v=row_raw_stat(x,b)
  assert v['s']==int(x['successes']) and v['n']==int(x['n_episodes']),x
  if v['n']:assert abs(v['p']-float(x['success_rate']))<1e-8,x
 for p,b in raw.items():
@@ -46,7 +60,7 @@ for run in {k[0] for k in plus}:
 causal=[canonical[f'ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s{s}'] for s in (42,43,44)]
 z=[canonical[f'ervla_zonly_pi_sharedz_ground_temporal_v5_s{s}'] for s in (42,43)]
 families={'causal':causal,'shared-z v5':z}
-for label,base,seeds in [('v5 GR00T','ervla_v5_gr00t_actiononly_s',[42,43]),('v5 PI','ervla_v5_pi_actiononly_pifix_s',[42,43]),('old bidir PI','ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s',[42,43,44]),('v5 PI augmentation','ervla_v5_pi_actiononly_pifix_aug_s',[42,43]),('v5aux PI','ervla_v5aux_pi_actiononly_pifix_s',[42,43]),('shared-z augmentation','ervla_zonly_pi_sharedz_ground_temporal_aug_s',[42,43]),('cam3d masked','ervla_k_pi_cam3d_cot05_masked',[None,43])]:
+for label,base,seeds in [('shared-z GR00T','ervla_zonly_gr00t_sharedz_ground_temporal_v5_s',[42,43]),('v5 GR00T','ervla_v5_gr00t_actiononly_s',[42,43]),('v5 PI','ervla_v5_pi_actiononly_pifix_s',[42,43]),('old bidir PI','ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s',[42,43,44]),('v5 PI augmentation','ervla_v5_pi_actiononly_pifix_aug_s',[42,43]),('v5aux PI','ervla_v5aux_pi_actiononly_pifix_s',[42,43]),('shared-z augmentation','ervla_zonly_pi_sharedz_ground_temporal_aug_s',[42,43]),('cam3d masked','ervla_k_pi_cam3d_cot05_masked',[None,43])]:
  families[label]=[canonical[base+(str(s) if base.endswith('_s') else '_seed'+str(s))] if s else canonical[base] for s in seeds]
 def fstats(vs):
  v=stat(sum(x['s'] for x in vs),sum(x['n'] for x in vs));v.update(mean=st.mean(x['p'] for x in vs),sd=st.stdev(x['p'] for x in vs) if len(vs)>1 else None,seeds=len(vs));return v

@@ -22,7 +22,7 @@ The raw sources are the corresponding canonical rows above; config sources are `
 
 **The LIBERO-plus advantage is primarily geometry/initial-state robustness.** Replicated shared-z versus causal gains14.67 pp in robot init,11.57 in object layout,6.72 in language,6.41 in camera, but loses2.51 in background and0.89 in sensor noise; lighting is+0.44. The last three gains/losses are small relative to their uncertainty and category multiplicity. W has the same geometry pattern, with sensor noise−1.20 pp. The shared-z seed43 headline is particularly fragile to seed selection: seed42 is1.8 pp lower. No full-protocol plain-LIBERO comparison establishes an in-distribution advantage.
 
-**CoT’s82.6/82.2 are still not4,000-episode results.** Their surviving roots have1,153 episodes, while newer libero_10 suite files have1,000 each. The rest of the new full run has not been aggregated. For ours_v3, libero_10 alone changes209/256→833/1,000 (+1.659 pp); det_v3 changes208/256→787/1,000 (−2.550 pp). Never combine that new suite with old roots. The det_readout suite update is726/1,000. The ours_full649/1,000 suite file is historical (September12), not evidence that replacement1855180 landed; the scratch740/1,000 file is also from September12. Neither can be combined with new shards or treated as an overall score.
+**One CoT result is now full-protocol and it currently wins internally.** `libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01` completed at3,249/4,000=81.225% after resume job1856685; every suite has1,000 episodes and the failure sentinels are empty. This is one training seed and has no clean/prompt-only/wrong-trace intervention yet. `ours_v3_cotw01` is still partial at2,862/3,473=82.407% while spatial resume1858474 runs, so it cannot be ranked. The older82.6/82.2 roots remain1,153-episode smoke results and must not be mixed with the new exact4k roots.
 
 A descriptive estimate using **all25 runs** with a surviving four-suite small result and full result (one smallest-n old artifact per run; all32 transitions are tabulated) gives median full−small **−0.259 pp**, mean−0.055 pp,10th–90th empirical quantiles−2.784 to+1.940 pp, observed range−5.241 to+9.867 pp. This does not justify a blanket−3.6 pp haircut. Applied mechanically to the two CoT roots, the median projection is about82.3/81.9%, with an empirical sensitivity band roughly79.8–84.5/79.4–84.1%; this is **not a confidence interval or a benchmark result**. Different protocols and winner selection limit transportability. The claimed old-zonly0.812 small file no longer survives among its raw root artifacts, so that historical shrinkage cannot be verified from the current JSONs.
 
@@ -117,7 +117,9 @@ No training or evaluation jobs were launched by this audit. Existing work is all
 |---|---|---|
 |1850294 | COMPLETED,1h28m06s | shared-z v5 seed42,20k checkpoint,3,059/4,000; fully landed |
 |1836354 | COMPLETED,1h38m38s | shared-z v5 seed43,20k,3,131/4,000 |
-|1850350 /1850351 /1850352 | RUNNING,~4h38m elapsed | CoT ours_v3/det_v3/det_readout; roots still small-n, new first suite landed; final_model checkpoints exist |
+|1850350 /1850351 /1850352 | TIMEOUT after5h | initial CoT exact4k evaluations; replacement jobs must determine final status |
+|1856685 | COMPLETED,2h21m | det_v3 goal resume; final root3,249/4,000=81.225%, empty failure sentinels |
+|1858474 | RUNNING | ours_v3 spatial resume; root2,862/3,473=82.407% remains partial |
 |1850353 | FAILED,2h36m19s | ours_full;8 exhausted first-suite shards, no new complete4k root |
 |1855180 | RUNNING,~1h12m elapsed | replacement ours_full with16 shards; log already contains multiple exhausted shards; new result not landed |
 |1851382 | RUNNING,~4h05m | shared-z+GR00T training42/43; existing job, no new training launched |

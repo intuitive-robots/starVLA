@@ -25,11 +25,11 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 | 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | RUNNING |
 | 1858851 | tr_rcpiv4_rs | Automatic RoboCasa continuation from latest checkpoint after first12h segment1858730 | PENDING (Dependency) |
 | 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa17-task ×48-episode evals at step50k after continuation1858851 | PENDING (Dependency) |
-| 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps | PENDING (Priority) |
-| 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps | PENDING (Priority) |
+| 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus exact4k, zonly+GR00T s43 | **COMPLETED** — 3131/4000 = 78.275% |
+| 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus exact4k, zonly+GR00T s42 | **COMPLETED** — 3147/4000 = 78.675% |
 | 1850693 | enc_dec_2b_v5_final_action_tracetime_w001 | other workstream (not this session) | RUNNING 21:52 |
-| 1850350 | ep_t_trace_ours_v3_cotw01 | CoT-trace re-eval @1000 eps/suite — ours_v3_cotw01 (was 0.826 @1153) | RUNNING 33:30 |
-| 1850351 | ep_ot_trace_det_v3_cotw01 | CoT-trace re-eval @1000 eps/suite — det_v3_cotw01 (was 0.822 @1153) | RUNNING 33:30 |
+| 1850350 / 1858474 | ep_t_trace_ours_v3_cotw01 / spatial resume | CoT-trace exact4k — ours_v3_cotw01 | first job **TIMEOUT**; resume **RUNNING**, root2862/3473=82.407% partial |
+| 1850351 / 1856685 | ep_ot_trace_det_v3_cotw01 / goal resume | CoT-trace exact4k — det_v3_cotw01 | first job **TIMEOUT**; resume **COMPLETED**,3249/4000=81.225% |
 | 1850352 | ep_race_det_cotw1_readout | CoT-trace re-eval @1000 eps/suite — det_cotw1_readout (was 0.790) | RUNNING 33:30 |
 | 1850353 | ep__trace_ours_full_cotw1 | CoT-trace re-eval @1000 eps/suite — ours_full_cotw1 (was 0.787) | RUNNING 33:30 |
 | 1850294 | ep_zonly_v5_s42 | LIBERO-plus eval, zonly v5 s42 @1000 eps (rerun after CUDA abort) | RUNNING 38:18 |

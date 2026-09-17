@@ -6,11 +6,11 @@ Computed from raw JSON snapshots, not from the status documents. Scores below ar
 
 ## Audit and canonical rule
 
-Read 1096 unique raw JSON artifacts, producing 1954 rows; all row counts and rates independently checked. 0 stored-rate mismatches. Snapshot: [raw_results_snapshot.json](results_collected/raw_results_snapshot.json); source hashes: [source_manifest.json](results_collected/source_manifest.json). Master CSV retains root and suite-local artifacts as different result_dir variants. Never sum those variants.
+Read 1112 unique raw JSON artifacts, producing 1976 rows; all row counts and rates independently checked. 0 stored-rate mismatches. Snapshot: [raw_results_snapshot.json](results_collected/raw_results_snapshot.json); source hashes: [source_manifest.json](results_collected/source_manifest.json). Master CSV retains root and suite-local artifacts as different result_dir variants. Never sum those variants.
 
 Canonical LIBERO-plus: require four suites, ≥4,000 episodes and no nonempty failed_shards file at the root; prefer exactly 1,000 per suite, then an explicit 4k-exact directory, then lexical directory order. Never select by success rate or file modification time. This is the user-requested **internal full protocol**; the official benchmark evaluates all perturbation tasks, so 4,000 is not automatically an official leaderboard protocol. Root/suite-local disagreement excludes a result from an unqualified claim until explained. Identical copies are not replications.
 
-`seed` now means training seed from config.full.yaml, falling back to run name. RC JSON seed 42 is the environment/server seed even for training seed 4. `is_full_protocol` for RC means all declared internal manifest tasks at 48 episodes; it does not mean the official 50-task protocol. A blank checkpoint_step in LIBERO means the raw aggregate does not identify it; do not infer a checkpoint from training max_steps.
+`seed` now means training seed from config.full.yaml, falling back to run name. RC JSON seed42 is the environment/server seed even for training seed4. `is_full_protocol` for RC means all declared internal manifest tasks at 48 episodes; it does not mean the official 50-task protocol. A blank checkpoint_step in LIBERO means the raw aggregate does not identify it; do not infer a checkpoint from training max_steps.
 
 ## LIBERO-plus seed summaries (canonical full protocol only)
 
@@ -18,6 +18,7 @@ Canonical LIBERO-plus: require four suites, ≥4,000 episodes and no nonempty fa
 |---|---|---|---|---|
 | causal | 42,43,44 | 71.658 ± 0.775 | 71.658 ± 0.411; 8599/12000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s43/results/libero-plus/overall_results.json) [44](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s44/results/libero-plus/overall_results.json) |
 | shared-z v5 | 42,43 | 77.375 ± 1.273 | 77.375 ± 0.468; 6190/8000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_v5_s43/results/libero-plus/overall_results.json) |
+| shared-z GR00T | 42,43 | 78.475 ± 0.283 | 78.475 ± 0.460; 6278/8000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/overall_results.json) |
 | v5 GR00T | 42,43 | 74.625 ± 1.025 | 74.625 ± 0.487; 5970/8000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_gr00t_actiononly_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_gr00t_actiononly_s43/results/libero-plus/overall_results.json) |
 | v5 PI | 42,43 | 73.125 ± 0.354 | 73.125 ± 0.496; 5850/8000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_s43/results/libero-plus/overall_results.json) |
 | old bidir PI | 42,43,44 | 72.092 ± 0.063 | 72.092 ± 0.409; 8651/12000 | [42](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero-plus/overall_results.json) [43](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s43/results/libero-plus/overall_results.json) [44](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s44/results/libero-plus/overall_results.json) |
@@ -34,11 +35,12 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 
 | run | directory | C | % ± SE; successes/n | source |
 |---|---|---|---|---|
-| ervla_k_pi_cam3d_cot05_masked | libero-plus-4k-exact-v1 | yes | 76.850 ± 0.667; 3074/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05_masked/results/libero-plus-4k-exact-v1/overall_results.json) |
+| libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01 | libero-plus | yes | 81.225 ± 0.617; 3249/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/overall_results.json) |
 | ervla_u_pi_layerwise_decoder_cot_rand | libero-plus | yes | 76.800 ± 0.667; 3072/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_u_pi_layerwise_decoder_cot_rand/results/libero-plus/overall_results.json) |
+| ervla_v_pi_decoder_staged_cot | libero-plus | yes | 75.875 ± 0.676; 3035/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v_pi_decoder_staged_cot/results/libero-plus/overall_results.json) |
+| ervla_k_pi_cam3d_cot05_masked | libero-plus-4k-exact-v1 | yes | 76.850 ± 0.667; 3074/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05_masked/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_u_pi_layerwise_decoder_cot | libero-plus-4k-exact-rawcot32-v1 | yes | 75.975 ± 0.676; 3039/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_u_pi_layerwise_decoder_cot/results/libero-plus-4k-exact-rawcot32-v1/overall_results.json) |
 | ervla_u_pi_layerwise_decoder_cot | libero-plus-4k-exact-v1 | no | 75.975 ± 0.676; 3039/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_u_pi_layerwise_decoder_cot/results/libero-plus-4k-exact-v1/overall_results.json) |
-| ervla_v_pi_decoder_staged_cot | libero-plus | yes | 75.875 ± 0.676; 3035/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v_pi_decoder_staged_cot/results/libero-plus/overall_results.json) |
 | ervla_k_pi_cam3d_cot05_masked_seed43 | libero-plus-4k-exact-v1 | yes | 74.175 ± 0.692; 2967/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05_masked_seed43/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus-4k-exact-correctedpi-r2 | yes | 73.600 ± 0.697; 2944/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-plus-4k-exact-correctedpi-r2/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus-4k-exact-rawcot32-v1 | no | 72.425 ± 0.707; 2897/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-plus-4k-exact-rawcot32-v1/overall_results.json) |
@@ -50,9 +52,9 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 | run | directory | C | % ± SE; successes/n | source |
 |---|---|---|---|---|
 | libero_plus_qwen08b_gr00t_deeps | libero-plus | yes | 77.175 ± 0.664; 3087/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_deeps/results/libero-plus/overall_results.json) |
-| libero_gr00t_arm_plain_ft | libero-plus | yes | 73.325 ± 0.699; 2933/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_gr00t_arm_plain_ft/results/libero-plus/overall_results.json) |
 | ervla_v5_gr00t_actiononly_s42 | libero-plus | yes | 75.350 ± 0.681; 3014/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_gr00t_actiononly_s42/results/libero-plus/overall_results.json) |
 | ervla_v5_gr00t_actiononly_s43 | libero-plus | yes | 73.900 ± 0.694; 2956/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_gr00t_actiononly_s43/results/libero-plus/overall_results.json) |
+| libero_gr00t_arm_plain_ft | libero-plus | yes | 73.325 ± 0.699; 2933/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_gr00t_arm_plain_ft/results/libero-plus/overall_results.json) |
 
 ### causal
 
@@ -68,19 +70,19 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 
 | run | directory | C | % ± SE; successes/n | source |
 |---|---|---|---|---|
-| ervla_w_pi_encoder_actiononly | libero-plus-4k-exact-v1 | yes | 76.425 ± 0.671; 3057/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_aug_s42 | libero-plus | yes | 74.800 ± 0.686; 2992/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_aug_s42/results/libero-plus/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-4k-exact-correctedpi-r2 | yes | 74.700 ± 0.687; 2988/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-plus-4k-exact-correctedpi-r2/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-4k-exact-correctedpi-r2 | yes | 74.500 ± 0.689; 2980/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-plus-4k-exact-correctedpi-r2/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_s43 | libero-plus | yes | 73.375 ± 0.699; 2935/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_s43/results/libero-plus/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_s42 | libero-plus | yes | 72.875 ± 0.703; 2915/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_s42/results/libero-plus/overall_results.json) |
 | ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s43 | libero-plus | yes | 72.150 ± 0.709; 2886/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s43/results/libero-plus/overall_results.json) |
 | ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s44 | libero-plus | yes | 72.100 ± 0.709; 2884/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s44/results/libero-plus/overall_results.json) |
 | ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s42 | libero-plus | yes | 72.025 ± 0.710; 2881/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero-plus/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_aug_s43 | libero-plus | yes | 72.025 ± 0.710; 2881/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_aug_s43/results/libero-plus/overall_results.json) |
-| ervla_b_bidir | libero-plus-4k-exact-v1 | yes | 71.800 ± 0.711; 2872/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_b_bidir/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_vlmlr1e6_s42 | libero-plus | yes | 58.200 ± 0.780; 2328/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_vlmlr1e6_s42/results/libero-plus/overall_results.json) |
 | ervla_v5_pi_actiononly_pifix_vlmlr1e6_s4 | libero-plus | yes | 54.700 ± 0.787; 2188/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5_pi_actiononly_pifix_vlmlr1e6_s4/results/libero-plus/overall_results.json) |
+| ervla_w_pi_encoder_actiononly | libero-plus-4k-exact-v1 | yes | 76.425 ± 0.671; 3057/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero-plus-4k-exact-v1/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-4k-exact-correctedpi-r2 | yes | 74.700 ± 0.687; 2988/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-plus-4k-exact-correctedpi-r2/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-4k-exact-correctedpi-r2 | yes | 74.500 ± 0.689; 2980/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-plus-4k-exact-correctedpi-r2/overall_results.json) |
+| ervla_b_bidir | libero-plus-4k-exact-v1 | yes | 71.800 ± 0.711; 2872/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_b_bidir/results/libero-plus-4k-exact-v1/overall_results.json) |
 
 ### encoder/mlm
 
@@ -103,10 +105,10 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 |---|---|---|---|---|
 | ervla_pi_decoder_latent_v_mid8_18 | decoder-latent-plus-gpuids | yes | 75.025 ± 0.684; 3001/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_decoder_latent_v_mid8_18/results/decoder-latent-plus-gpuids/overall_results.json) |
 | ervla_z2_pi_w32_tied_dynamics | libero-plus | yes | 76.050 ± 0.675; 3042/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z2_pi_w32_tied_dynamics/results/libero-plus/overall_results.json) |
-| ervla_pi_projected_numeric_noaux | libero-plus-4k-exact-numeric-w4-restart-v3 | yes | 74.425 ± 0.690; 2977/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_noaux/results/libero-plus-4k-exact-numeric-w4-restart-v3/overall_results.json) |
 | ervla_z3_pi_w32_anchor_tied_dynamics | libero-plus | yes | 74.350 ± 0.690; 2974/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z3_pi_w32_anchor_tied_dynamics/results/libero-plus/overall_results.json) |
 | ervla_v5aux_pi_actiononly_pifix_s43 | libero-plus | yes | 72.200 ± 0.708; 2888/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5aux_pi_actiononly_pifix_s43/results/libero-plus/overall_results.json) |
 | ervla_v5aux_pi_actiononly_pifix_s42 | libero-plus | yes | 72.075 ± 0.709; 2883/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5aux_pi_actiononly_pifix_s42/results/libero-plus/overall_results.json) |
+| ervla_pi_projected_numeric_noaux | libero-plus-4k-exact-numeric-w4-restart-v3 | yes | 74.425 ± 0.690; 2977/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_noaux/results/libero-plus-4k-exact-numeric-w4-restart-v3/overall_results.json) |
 | ervla_i_dec_choice_cam3d | libero-plus-4k-exact-v1 | yes | 71.050 ± 0.717; 2842/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_i_dec_choice_cam3d/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_h_enc_choice_cam3d | libero-plus-4k-exact-v1 | yes | 70.525 ± 0.721; 2821/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_h_enc_choice_cam3d/results/libero-plus-4k-exact-v1/overall_results.json) |
 | ervla_d_cam3d_rand_8gpu | libero-plus-4k-exact-v1 | yes | 70.450 ± 0.721; 2818/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_d_cam3d_rand_8gpu/results/libero-plus-4k-exact-v1/overall_results.json) |
@@ -120,14 +122,16 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 
 | run | directory | C | % ± SE; successes/n | source |
 |---|---|---|---|---|
+| ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42 | libero-plus | yes | 78.675 ± 0.648; 3147/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json) |
+| ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43 | libero-plus | yes | 78.275 ± 0.652; 3131/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_gr00t_sharedz_ground_temporal_v5_s43/results/libero-plus/overall_results.json) |
 | ervla_zonly_pi_sharedz_ground_temporal_v5_s43 | libero-plus | yes | 78.275 ± 0.652; 3131/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_v5_s43/results/libero-plus/overall_results.json) |
 | ervla_zonly_pi_sharedz_ground_temporal | libero-plus | no | 77.633 ± 0.647; 3221/4149 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal/results/libero-plus/overall_results.json) |
 | ervla_zonly_pi_sharedz_ground_temporal_aug_s43 | libero-plus | yes | 76.875 ± 0.667; 3075/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_aug_s43/results/libero-plus/overall_results.json) |
-| ervla_zonly_pi_sharedz_ground_temporal | libero-plus-4k-exact-sharedz-v2-w4 | yes | 76.600 ± 0.669; 3064/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal/results/libero-plus-4k-exact-sharedz-v2-w4/overall_results.json) |
 | ervla_zonly_pi_sharedz_ground_temporal_v5_s42 | libero-plus | yes | 76.475 ± 0.671; 3059/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json) |
 | ervla_zonly_pi_sharedz_ground_temporal_aug_s42 | libero-plus | yes | 75.775 ± 0.677; 3031/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_aug_s42/results/libero-plus/overall_results.json) |
 | ervla_zshuf_pi_sharedz_ground_temporal | libero-plus | yes | 75.625 ± 0.679; 3025/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zshuf_pi_sharedz_ground_temporal/results/libero-plus/overall_results.json) |
 | ervla_znodrop_pi_sharedz_ground_temporal | libero-plus | yes | 74.875 ± 0.686; 2995/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_znodrop_pi_sharedz_ground_temporal/results/libero-plus/overall_results.json) |
+| ervla_zonly_pi_sharedz_ground_temporal | libero-plus-4k-exact-sharedz-v2-w4 | yes | 76.600 ± 0.669; 3064/4000 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal/results/libero-plus-4k-exact-sharedz-v2-w4/overall_results.json) |
 
 ### shared-z/zsup
 
@@ -138,7 +142,7 @@ Every sibling directory is retained. C = canonical by the rule above; alternate 
 
 ## Perturbation breakdown
 
-| category | causal (3 seeds) | shared-z v5 (2 seeds) | shared-z zsup (seed 42) | encoder W (seed 42) | encoder MLM (seed 42) |
+| category | causal (3 seeds) | shared-z v5 (2 seeds) | shared-z zsup (seed42) | encoder W (seed42) | encoder MLM (seed42) |
 |---|---|---|---|---|---|
 | Background Textures | 91.493 ± 0.776; 1183/1293 | 88.979 ± 1.067; 767/862 | 92.575 ± 1.263; 399/431 | 92.343 ± 1.281; 398/431 | 93.039 ± 1.226; 401/431 |
 | Camera Viewpoints | 51.753 ± 1.143; 989/1911 | 58.163 ± 1.382; 741/1274 | 59.812 ± 1.943; 381/637 | 58.399 ± 1.953; 372/637 | 57.771 ± 1.957; 368/637 |
@@ -183,9 +187,9 @@ All available root artifacts are listed separately from LIBERO-plus. Most use 10
 | ervla_i_dec_choice_cam3d | libero | 97.750 ± 0.742; 391/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_i_dec_choice_cam3d/results/libero/overall_results.json) |
 | ervla_j_dec_choice_staged_cam3d | libero | 96.500 ± 0.919; 386/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_j_dec_choice_staged_cam3d/results/libero/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero | 96.000 ± 0.980; 384/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero/overall_results.json) |
-| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-step 10000 | 85.000 ± 1.785; 340/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-step10000/overall_results.json) |
+| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-step10000 | 85.000 ± 1.785; 340/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-step10000/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero | 98.500 ± 0.608; 394/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero/overall_results.json) |
-| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-step 10000 | 87.250 ± 1.668; 349/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-step10000/overall_results.json) |
+| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-step10000 | 87.250 ± 1.668; 349/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-step10000/overall_results.json) |
 | ervla_k_pi_cam3d_cot05 | libero | 57.750 ± 2.470; 231/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05/results/libero/overall_results.json) |
 | ervla_k_pi_cam3d_cot05 | libero-maskfix | 35.500 ± 2.393; 142/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05/results/libero-maskfix/overall_results.json) |
 | ervla_k_pi_cam3d_cot05_masked | libero | 96.500 ± 0.919; 386/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05_masked/results/libero/overall_results.json) |
@@ -207,9 +211,9 @@ All available root artifacts are listed separately from LIBERO-plus. Most use 10
 | ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s43 | libero | 96.000 ± 0.980; 384/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s43/results/libero/overall_results.json) |
 | ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s44 | libero | 98.500 ± 0.608; 394/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s44/results/libero/overall_results.json) |
 | ervla_pi_decoder_latent_v_mid8_18 | decoder-latent-libero | 97.250 ± 0.818; 389/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_decoder_latent_v_mid8_18/results/decoder-latent-libero/overall_results.json) |
-| ervla_pi_projected_numeric_correct | libero-step 20000-numeric-v1 | 95.500 ± 1.037; 382/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_correct/results/libero-step20000-numeric-v1/overall_results.json) |
-| ervla_pi_projected_numeric_noaux | libero-step 20000-numeric-v1 | 95.750 ± 1.009; 383/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_noaux/results/libero-step20000-numeric-v1/overall_results.json) |
-| ervla_pi_projected_numeric_shuffled | libero-step 20000-numeric-v1 | 95.500 ± 1.037; 382/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_shuffled/results/libero-step20000-numeric-v1/overall_results.json) |
+| ervla_pi_projected_numeric_correct | libero-step20000-numeric-v1 | 95.500 ± 1.037; 382/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_correct/results/libero-step20000-numeric-v1/overall_results.json) |
+| ervla_pi_projected_numeric_noaux | libero-step20000-numeric-v1 | 95.750 ± 1.009; 383/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_noaux/results/libero-step20000-numeric-v1/overall_results.json) |
+| ervla_pi_projected_numeric_shuffled | libero-step20000-numeric-v1 | 95.500 ± 1.037; 382/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_pi_projected_numeric_shuffled/results/libero-step20000-numeric-v1/overall_results.json) |
 | ervla_q_pi_split14_base_cot | libero | 97.000 ± 0.853; 388/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_q_pi_split14_base_cot/results/libero/overall_results.json) |
 | ervla_r_pi_split18_base_cot | libero | 96.750 ± 0.887; 387/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_r_pi_split18_base_cot/results/libero/overall_results.json) |
 | ervla_s_pi_overlap18_base_cot | libero | 97.750 ± 0.742; 391/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_s_pi_overlap18_base_cot/results/libero/overall_results.json) |
@@ -223,13 +227,13 @@ All available root artifacts are listed separately from LIBERO-plus. Most use 10
 | ervla_v5aux_pi_actiononly_pifix_s43 | libero | 98.250 ± 0.656; 393/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v5aux_pi_actiononly_pifix_s43/results/libero/overall_results.json) |
 | ervla_v_pi_decoder_staged_cot | libero | 96.250 ± 0.950; 385/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_v_pi_decoder_staged_cot/results/libero/overall_results.json) |
 | ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero | 94.500 ± 1.140; 378/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-step 10000 | 85.000 ± 1.785; 340/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-step10000/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-step10000 | 85.000 ± 1.785; 340/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-step10000/overall_results.json) |
 | ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero | 96.000 ± 0.980; 384/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-step 10000 | 89.750 ± 1.517; 359/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-step10000/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-step10000 | 89.750 ± 1.517; 359/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-step10000/overall_results.json) |
 | ervla_w_pi_encoder_actiononly | libero | 97.750 ± 0.742; 391/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero/overall_results.json) |
 | ervla_x_pi_encoder_actiononly_freeze8 | libero | 98.750 ± 0.556; 395/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_x_pi_encoder_actiononly_freeze8/results/libero/overall_results.json) |
 | ervla_y2_pi_k_structaux15_cot | libero | 97.500 ± 0.781; 390/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero/overall_results.json) |
-| ervla_y2_pi_k_structaux15_cot | libero-step 10000 | 94.500 ± 1.140; 378/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero-step10000/overall_results.json) |
+| ervla_y2_pi_k_structaux15_cot | libero-step10000 | 94.500 ± 1.140; 378/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero-step10000/overall_results.json) |
 | ervla_z1_pi_w32_anchor | libero | 96.000 ± 0.980; 384/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z1_pi_w32_anchor/results/libero/overall_results.json) |
 | ervla_z2_pi_w32_tied_dynamics | libero | 97.250 ± 0.818; 389/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z2_pi_w32_tied_dynamics/results/libero/overall_results.json) |
 | ervla_z3_pi_w32_anchor_tied_dynamics | libero-r2 | 95.750 ± 1.009; 383/400 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z3_pi_w32_anchor_tied_dynamics/results/libero-r2/overall_results.json) |
@@ -289,7 +293,7 @@ All available root artifacts are listed separately from LIBERO-plus. Most use 10
 
 ## RoboCasa internal 17-task benchmark, 50k checkpoints
 
-Protocol: environment seed 42, 24 vector envs, 48 episodes/task, horizon500, execute 8 of predicted 16, native images, left external + wrist, state included. Training seeds 4 and 42 are separate. Training dataset is target_atomic_2cam, not Human300 pretraining. Each arm has the same 17 tasks; PickPlaceSinkToCounter is omitted by both manifests. The official atomic set has 18 tasks; official overall has 50.
+Protocol: environment seed42, 24 vector envs, 48 episodes/task, horizon500, execute8 of predicted16, native images, left external + wrist, state included. Training seeds4 and42 are separate. Training dataset is target_atomic_2cam, not Human300 pretraining. Each arm has the same 17 tasks; PickPlaceSinkToCounter is omitted by both manifests. The official atomic set has 18 tasks; official overall has 50.
 
 | arm | train seed | task count | % ± SE; successes/n | manifest |
 |---|---|---|---|---|
@@ -321,7 +325,7 @@ Protocol: environment seed 42, 24 vector envs, 48 episodes/task, horizon500, exe
 
 ## State-value corruption — separate three-task diagnostic
 
-Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKettle. Format retained for st_*; code replaces the sin/cos state before tokenization. Shuffle permutes slots; random uses random angles with sin/cos pairs; zero makes all slots zero (off the sin/cos manifold). The JSON lacks an explicit corruption-mode field: tag + manifest + client code are the provenance, so future evals should serialize mode and realized input hashes.
+Only seed4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKettle. Format retained for st_*; code replaces the sin/cos state before tokenization. Shuffle permutes slots; random uses random angles with sin/cos pairs; zero makes all slots zero (off the sin/cos manifold). The JSON lacks an explicit corruption-mode field: tag + manifest + client code are the provenance, so future evals should serialize mode and realized input hashes.
 
 | run | tag | % ± SE; successes/n | raw task sources |
 |---|---|---|---|
@@ -369,9 +373,9 @@ Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKet
 | ervla_j_dec_choice_staged_cam3d | libero-plus | 67.188 ± 2.935; 172/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_j_dec_choice_staged_cam3d/results/libero-plus/overall_results.json) |
 | ervla_j_dec_choice_staged_cam3d | smoke_eval_fix2_20260901_libero_plus | 58.333 ± 14.232; 7/12 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_j_dec_choice_staged_cam3d/results/smoke_eval_fix2_20260901_libero_plus/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus | 72.656 ± 2.786; 186/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-plus/overall_results.json) |
-| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus-step 10000-sampled256 | 64.453 ± 2.992; 165/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-plus-step10000-sampled256/overall_results.json) |
+| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus-step10000-sampled256 | 64.453 ± 2.992; 165/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_latent32/results/libero-plus-step10000-sampled256/overall_results.json) |
 | ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus | 73.828 ± 2.747; 189/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-plus/overall_results.json) |
-| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus-step 10000-sampled256 | 66.016 ± 2.960; 169/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-plus-step10000-sampled256/overall_results.json) |
+| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus-step10000-sampled256 | 66.016 ± 2.960; 169/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k2_pi_cam3d_cot05_pifix_nolatent/results/libero-plus-step10000-sampled256/overall_results.json) |
 | ervla_k_pi_cam3d_cot05 | libero-plus | 35.938 ± 2.999; 92/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05/results/libero-plus/overall_results.json) |
 | ervla_k_pi_cam3d_cot05 | libero-plus-maskfix | 20.312 ± 2.515; 52/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05/results/libero-plus-maskfix/overall_results.json) |
 | ervla_k_pi_cam3d_cot05_masked | libero-plus | 80.469 ± 2.478; 206/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_k_pi_cam3d_cot05_masked/results/libero-plus/overall_results.json) |
@@ -392,14 +396,14 @@ Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKet
 | ervla_t_pi_overlap18_structaux_cot | libero-plus | 72.656 ± 2.786; 186/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_t_pi_overlap18_structaux_cot/results/libero-plus/overall_results.json) |
 | ervla_u_pi_layerwise_decoder_cot | libero-plus | 74.609 ± 2.720; 191/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_u_pi_layerwise_decoder_cot/results/libero-plus/overall_results.json) |
 | ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus | 77.344 ± 2.616; 198/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-plus/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-step 10000-sampled256 | 64.453 ± 2.992; 165/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-plus-step10000-sampled256/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-step10000-sampled256 | 64.453 ± 2.992; 165/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_latent32/results/libero-plus-step10000-sampled256/overall_results.json) |
 | ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus | 73.438 ± 2.760; 188/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-plus/overall_results.json) |
-| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-step 10000-sampled256 | 71.875 ± 2.810; 184/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-plus-step10000-sampled256/overall_results.json) |
+| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-step10000-sampled256 | 71.875 ± 2.810; 184/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w2_pi_encoder_actiononly_pifix_nolatent/results/libero-plus-step10000-sampled256/overall_results.json) |
 | ervla_w_pi_encoder_actiononly | libero-plus | 75.781 ± 2.678; 194/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero-plus/overall_results.json) |
 | ervla_w_pi_encoder_actiononly | libero-plus-256-rerun-20260903 | 75.000 ± 2.706; 192/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero-plus-256-rerun-20260903/overall_results.json) |
 | ervla_x_pi_encoder_actiononly_freeze8 | libero-plus | 71.484 ± 2.822; 183/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_x_pi_encoder_actiononly_freeze8/results/libero-plus/overall_results.json) |
 | ervla_y2_pi_k_structaux15_cot | libero-plus | 71.875 ± 2.810; 184/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero-plus/overall_results.json) |
-| ervla_y2_pi_k_structaux15_cot | libero-plus-step 10000-sampled256 | 69.922 ± 2.866; 179/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero-plus-step10000-sampled256/overall_results.json) |
+| ervla_y2_pi_k_structaux15_cot | libero-plus-step10000-sampled256 | 69.922 ± 2.866; 179/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_y2_pi_k_structaux15_cot/results/libero-plus-step10000-sampled256/overall_results.json) |
 | ervla_z1_pi_w32_anchor | libero-plus | 73.047 ± 2.773; 187/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z1_pi_w32_anchor/results/libero-plus/overall_results.json) |
 | ervla_z3_pi_w32_anchor_tied_dynamics | libero-plus-r2 | 73.828 ± 2.747; 189/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_z3_pi_w32_anchor_tied_dynamics/results/libero-plus-r2/overall_results.json) |
 | ervla_zbase_pi_sharedz_control | libero-plus | 73.828 ± 2.747; 189/256 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_zbase_pi_sharedz_control/results/libero-plus/overall_results.json) |
@@ -439,7 +443,6 @@ Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKet
 | libero_plus_qwen08b_gr00t_cot_trace_det_full | libero-plus | 77.190 ± 1.236; 890/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_full/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_det_v2 | libero-plus | 76.062 ± 1.257; 877/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v2/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_det_v3 | libero-plus | 78.057 ± 1.219; 900/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3/results/libero-plus/overall_results.json) |
-| libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01 | libero-plus | 82.220 ± 1.126; 948/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_ours | libero-plus | 71.250 ± 1.265; 912/1280 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_ours_centroid | libero-plus | 76.323 ± 1.252; 880/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_centroid/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_ours_cotw1_readout_scratch | libero-plus | 78.664 ± 1.206; 907/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_cotw1_readout_scratch/results/libero-plus/overall_results.json) |
@@ -448,7 +451,7 @@ Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKet
 | libero_plus_qwen08b_gr00t_cot_trace_ours_full | libero-plus | 75.542 ± 1.266; 871/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_full/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_ours_full_cotw1 | libero-plus | 78.664 ± 1.206; 907/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_full_cotw1/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_cot_trace_ours_full_ft | libero-plus | 71.376 ± 1.373; 773/1083 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_full_ft/results/libero-plus/overall_results.json) |
-| libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01 | libero-plus | 82.567 ± 1.117; 952/1153 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/overall_results.json) |
+| libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01 | libero-plus | 82.407 ± 0.646; 2862/3473 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_gr00t_v2 | libero-plus | 70.466 ± 1.436; 711/1009 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_gr00t_v2/results/libero-plus/overall_results.json) |
 | libero_plus_qwen08b_oft_cot_trace_ours | libero-plus | 39.688 ± 1.367; 508/1280 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_plus_qwen08b_oft_cot_trace_ours/results/libero-plus/overall_results.json) |
 | libero_qwen08b_base_16chunk | libero-plus | 70.172 ± 0.950; 1628/2320 | [overall_results.json](/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/libero_qwen08b_base_16chunk/results/libero-plus/overall_results.json) |
@@ -458,6 +461,7 @@ Only seed 4, 50k; OpenStandMixerHead, PickPlaceCounterToStove, TurnOnElectricKet
 
 | run | tag | protocol | % ± SE; successes/n | sources |
 |---|---|---|---|---|
+| ervla_robocasa365_pi_causal_s4 | egl | steps_50000_pytorch_model.eval/seed42_envs24_eps48_h500_act8_native_egl | 46.528 ± 2.939; 134/288 | [CloseFridge](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_CloseFridge_seed42_envs24_eps48_h500_act8_native_egl.json) [OpenDrawer](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenDrawer_seed42_envs24_eps48_h500_act8_native_egl.json) [OpenStandMixerHead](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps48_h500_act8_native_egl.json) [PickPlaceCounterToStove](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_PickPlaceCounterToStove_seed42_envs24_eps48_h500_act8_native_egl.json) [TurnOnElectricKettle](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnElectricKettle_seed42_envs24_eps48_h500_act8_native_egl.json) [TurnOnMicrowave](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_TurnOnMicrowave_seed42_envs24_eps48_h500_act8_native_egl.json) |
 | ervla_robocasa365_pi_causal_s4 | smoke_B_realstate | steps_50000_pytorch_model.eval/seed42_envs24_eps24_h500_act8_native_smoke_B_realstate | 83.333 ± 7.607; 20/24 | [OpenStandMixerHead](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps24_h500_act8_native_smoke_B_realstate.json) |
 | ervla_robocasa365_pi_causal_s4 | smoke_C_shuffled | steps_50000_pytorch_model.eval/seed42_envs24_eps24_h500_act8_native_smoke_C_shuffled | 83.333 ± 7.607; 20/24 | [OpenStandMixerHead](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps24_h500_act8_native_smoke_C_shuffled.json) |
 | ervla_robocasa365_pi_causal_s42 | legacy | steps_30000_pytorch_model.eval/legacy | 40.000 ± 10.954; 8/20 | [OpenDrawer](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s42/checkpoints/steps_30000_pytorch_model.eval/robocasa_OpenDrawer.json) [TurnOnMicrowave](/e/project1/m3/blank4/code/starVLA-upstream-merge/playground/Checkpoints/ervla_robocasa365_pi_causal_s42/checkpoints/steps_30000_pytorch_model.eval/robocasa_TurnOnMicrowave.json) |
@@ -496,41 +500,41 @@ Changing sample size also changes task composition, and some directories reflect
 
 | run | small directory | small % ± SE; s/n | canonical directory | full % ± SE; s/n | Δ pp |
 |---|---|---|---|---|---|
-| ervla_i_dec_choice_cam3d | libero-plus | 72.266 ± 2.798; 185/256 | libero-plus-4k-exact-v1 | 71.050 ± 0.717; 2842/4000 | -1.216 |
+| ervla_p_causal_pi_masked | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-v1 | 70.800 ± 0.719; 2832/4000 | +2.050 |
+| ervla_mlm_pi_encoder_cam3d | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-mlm-fast-v1 | 73.925 ± 0.694; 2957/4000 | +5.175 |
 | ervla_w_pi_encoder_actiononly | libero-plus | 75.781 ± 2.678; 194/256 | libero-plus-4k-exact-v1 | 76.425 ± 0.671; 3057/4000 | +0.644 |
 | ervla_w_pi_encoder_actiononly | libero-plus-256-rerun-20260903 | 75.000 ± 2.706; 192/256 | libero-plus-4k-exact-v1 | 76.425 ± 0.671; 3057/4000 | +1.425 |
-| ervla_zsup_pi_sharedz_ground_temporal | libero-plus | 78.906 ± 2.550; 202/256 | libero-plus-4k-exact-sharedz-v1 | 78.125 ± 0.654; 3125/4000 | -0.781 |
-| ervla_d_cam3d_rand_8gpu | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-v1 | 70.450 ± 0.721; 2818/4000 | -1.034 |
-| ervla_u_pi_layerwise_decoder_cot | libero-plus | 74.609 ± 2.720; 191/256 | libero-plus-4k-exact-rawcot32-v1 | 75.975 ± 0.676; 3039/4000 | +1.366 |
-| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus | 73.828 ± 2.747; 189/256 | libero-plus-4k-exact-correctedpi-r2 | 73.600 ± 0.697; 2944/4000 | -0.228 |
-| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus-step 10000-sampled256 | 66.016 ± 2.960; 169/256 | libero-plus-4k-exact-correctedpi-r2 | 73.600 ± 0.697; 2944/4000 | +7.584 |
-| ervla_mlm_pi_encoder_control | libero-plus | 77.734 ± 2.600; 199/256 | libero-plus-4k-exact-mlm-fast-v1 | 75.525 ± 0.680; 3021/4000 | -2.209 |
-| ervla_mlm_pi_encoder_cam3d_rand | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-mlm-fast-v1 | 71.225 ± 0.716; 2849/4000 | -0.259 |
-| ervla_h_enc_choice_cam3d | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-v1 | 70.525 ± 0.721; 2821/4000 | +1.775 |
-| ervla_d_cam3d_8gpu | libero-plus | 71.094 ± 2.833; 182/256 | libero-plus-4k-exact-v1 | 68.400 ± 0.735; 2736/4000 | -2.694 |
-| ervla_g_cam3d_cot05 | libero-plus | 70.703 ± 2.845; 181/256 | libero-plus-4k-exact-v1 | 69.825 ± 0.726; 2793/4000 | -0.878 |
-| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus | 72.656 ± 2.786; 186/256 | libero-plus-4k-exact-correctedpi-k32-v1 | 71.475 ± 0.714; 2859/4000 | -1.181 |
-| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus-step 10000-sampled256 | 64.453 ± 2.992; 165/256 | libero-plus-4k-exact-correctedpi-k32-v1 | 71.475 ± 0.714; 2859/4000 | +7.022 |
-| ervla_mlm_pi_encoder_cam3d_slotdrop15_nolabeldrop_noditdrop | libero-plus | 75.391 ± 2.692; 193/256 | libero-plus-4k-exact-mlm-fast-v1 | 70.150 ± 0.724; 2806/4000 | -5.241 |
+| ervla_b_bidir | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-v1 | 71.800 ± 0.711; 2872/4000 | +0.316 |
 | ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus | 73.438 ± 2.760; 188/256 | libero-plus-4k-exact-correctedpi-r2 | 74.700 ± 0.687; 2988/4000 | +1.262 |
-| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-step 10000-sampled256 | 71.875 ± 2.810; 184/256 | libero-plus-4k-exact-correctedpi-r2 | 74.700 ± 0.687; 2988/4000 | +2.825 |
-| ervla_zsupdec_pi_sharedz_ground_temporal | libero-plus | 75.000 ± 2.706; 192/256 | libero-plus-4k-exact-sharedz-v1-w4 | 76.250 ± 0.673; 3050/4000 | +1.250 |
+| ervla_w2_pi_encoder_actiononly_pifix_nolatent | libero-plus-step10000-sampled256 | 71.875 ± 2.810; 184/256 | libero-plus-4k-exact-correctedpi-r2 | 74.700 ± 0.687; 2988/4000 | +2.825 |
 | ervla_g_cross_only | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-v1 | 69.950 ± 0.725; 2798/4000 | -1.534 |
-| ervla_p_causal_pi_masked | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-v1 | 70.800 ± 0.719; 2832/4000 | +2.050 |
-| ervla_z3_pi_w32_anchor_tied_dynamics | libero-plus-r2 | 73.828 ± 2.747; 189/256 | libero-plus | 74.350 ± 0.690; 2974/4000 | +0.522 |
-| ervla_zbase_pi_sharedz_control | libero-plus | 73.828 ± 2.747; 189/256 | libero-plus-4k-exact-sharedz-v1 | 71.550 ± 0.713; 2862/4000 | -2.278 |
-| ervla_j_dec_choice_staged_cam3d | smoke_eval_fix2_20260901_libero_plus | 58.333 ± 14.232; 7/12 | libero-plus-4k-exact-v1 | 68.200 ± 0.736; 2728/4000 | +9.867 |
-| ervla_j_dec_choice_staged_cam3d | libero-plus | 67.188 ± 2.935; 172/256 | libero-plus-4k-exact-v1 | 68.200 ± 0.736; 2728/4000 | +1.013 |
-| ervla_mlm_pi_encoder_cam3d | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-mlm-fast-v1 | 73.925 ± 0.694; 2957/4000 | +5.175 |
+| ervla_u_pi_layerwise_decoder_cot | libero-plus | 74.609 ± 2.720; 191/256 | libero-plus-4k-exact-rawcot32-v1 | 75.975 ± 0.676; 3039/4000 | +1.366 |
+| ervla_mlm_pi_encoder_cam3d_slotdrop15_nolabeldrop_noditdrop | libero-plus | 75.391 ± 2.692; 193/256 | libero-plus-4k-exact-mlm-fast-v1 | 70.150 ± 0.724; 2806/4000 | -5.241 |
 | ervla_k_pi_cam3d_cot05_masked | libero-plus | 80.469 ± 2.478; 206/256 | libero-plus-4k-exact-v1 | 76.850 ± 0.667; 3074/4000 | -3.619 |
 | ervla_k_pi_cam3d_cot05_masked | libero-plus-256-rerun-20260903 | 79.688 ± 2.515; 204/256 | libero-plus-4k-exact-v1 | 76.850 ± 0.667; 3074/4000 | -2.838 |
-| ervla_b_bidir | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-v1 | 71.800 ± 0.711; 2872/4000 | +0.316 |
-| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus | 77.344 ± 2.616; 198/256 | libero-plus-4k-exact-correctedpi-r2 | 74.500 ± 0.689; 2980/4000 | -2.844 |
-| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-step 10000-sampled256 | 64.453 ± 2.992; 165/256 | libero-plus-4k-exact-correctedpi-r2 | 74.500 ± 0.689; 2980/4000 | +10.047 |
+| ervla_g_cam3d_cot05 | libero-plus | 70.703 ± 2.845; 181/256 | libero-plus-4k-exact-v1 | 69.825 ± 0.726; 2793/4000 | -0.878 |
+| ervla_z3_pi_w32_anchor_tied_dynamics | libero-plus-r2 | 73.828 ± 2.747; 189/256 | libero-plus | 74.350 ± 0.690; 2974/4000 | +0.522 |
+| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus | 73.828 ± 2.747; 189/256 | libero-plus-4k-exact-correctedpi-r2 | 73.600 ± 0.697; 2944/4000 | -0.228 |
+| ervla_k2_pi_cam3d_cot05_pifix_nolatent | libero-plus-step10000-sampled256 | 66.016 ± 2.960; 169/256 | libero-plus-4k-exact-correctedpi-r2 | 73.600 ± 0.697; 2944/4000 | +7.584 |
+| ervla_j_dec_choice_staged_cam3d | smoke_eval_fix2_20260901_libero_plus | 58.333 ± 14.232; 7/12 | libero-plus-4k-exact-v1 | 68.200 ± 0.736; 2728/4000 | +9.867 |
+| ervla_j_dec_choice_staged_cam3d | libero-plus | 67.188 ± 2.935; 172/256 | libero-plus-4k-exact-v1 | 68.200 ± 0.736; 2728/4000 | +1.013 |
+| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus | 72.656 ± 2.786; 186/256 | libero-plus-4k-exact-correctedpi-k32-v1 | 71.475 ± 0.714; 2859/4000 | -1.181 |
+| ervla_k2_pi_cam3d_cot05_pifix_latent32 | libero-plus-step10000-sampled256 | 64.453 ± 2.992; 165/256 | libero-plus-4k-exact-correctedpi-k32-v1 | 71.475 ± 0.714; 2859/4000 | +7.022 |
+| ervla_d_cam3d_rand_8gpu | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-v1 | 70.450 ± 0.721; 2818/4000 | -1.034 |
+| ervla_i_dec_choice_cam3d | libero-plus | 72.266 ± 2.798; 185/256 | libero-plus-4k-exact-v1 | 71.050 ± 0.717; 2842/4000 | -1.216 |
+| ervla_h_enc_choice_cam3d | libero-plus | 68.750 ± 2.897; 176/256 | libero-plus-4k-exact-v1 | 70.525 ± 0.721; 2821/4000 | +1.775 |
 | ervla_a_causal | libero-plus | 69.141 ± 2.887; 177/256 | libero-plus-4k-exact-v1 | 69.525 ± 0.728; 2781/4000 | +0.384 |
+| ervla_d_cam3d_8gpu | libero-plus | 71.094 ± 2.833; 182/256 | libero-plus-4k-exact-v1 | 68.400 ± 0.735; 2736/4000 | -2.694 |
+| ervla_zsupdec_pi_sharedz_ground_temporal | libero-plus | 75.000 ± 2.706; 192/256 | libero-plus-4k-exact-sharedz-v1-w4 | 76.250 ± 0.673; 3050/4000 | +1.250 |
+| ervla_mlm_pi_encoder_cam3d_rand | libero-plus | 71.484 ± 2.822; 183/256 | libero-plus-4k-exact-mlm-fast-v1 | 71.225 ± 0.716; 2849/4000 | -0.259 |
+| ervla_mlm_pi_encoder_control | libero-plus | 77.734 ± 2.600; 199/256 | libero-plus-4k-exact-mlm-fast-v1 | 75.525 ± 0.680; 3021/4000 | -2.209 |
+| ervla_zsup_pi_sharedz_ground_temporal | libero-plus | 78.906 ± 2.550; 202/256 | libero-plus-4k-exact-sharedz-v1 | 78.125 ± 0.654; 3125/4000 | -0.781 |
+| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus | 77.344 ± 2.616; 198/256 | libero-plus-4k-exact-correctedpi-r2 | 74.500 ± 0.689; 2980/4000 | -2.844 |
+| ervla_w2_pi_encoder_actiononly_pifix_latent32 | libero-plus-step10000-sampled256 | 64.453 ± 2.992; 165/256 | libero-plus-4k-exact-correctedpi-r2 | 74.500 ± 0.689; 2980/4000 | +10.047 |
+| ervla_zbase_pi_sharedz_control | libero-plus | 73.828 ± 2.747; 189/256 | libero-plus-4k-exact-sharedz-v1 | 71.550 ± 0.713; 2862/4000 | -2.278 |
 
 
-5 root/suite-local discrepancies found; see [audit_details.json](results_collected/audit_details.json) for every count and source. They can be stale roots while re-evaluation is writing suite files. Do not merge these partial writes with old root totals.
+4 root/suite-local discrepancies found; see [audit_details.json](results_collected/audit_details.json) for every count and source. They can be stale roots while re-evaluation is writing suite files. Do not merge these partial writes with old root totals.
 
 ## Inventory and failures
 
@@ -544,13 +548,13 @@ All result directory names, including directories without root aggregates: `deco
 
 ## Answers that determine the paper
 
-**Encoder > causal is conditional on what “encoder” means.** Shared-z v5 averages77.375% (SD1.273 pp, n 8,000) against causal 71.658% (SD0.775 pp, n 12,000): +5.717±0.623 pp using episode SE. Restricting both to seeds 42/43 gives +5.375 pp; the paired seed gains are +3.975 and +6.775 pp. That is a reproducible internal-protocol gain, although two seeds give a very unstable small-sample confidence interval. The simpler old bidirectional control gains only +0.433±0.580 pp; v5+PI gains +1.467±0.644 pp; v5+GR00T gains +2.967±0.637 pp. The GR00T comparison changes the head as well as the backbone relative to causal+PI, so it is not a clean directionality effect.
+**Encoder > causal is conditional on what “encoder” means.** Shared-z v5 averages77.375% (SD1.273 pp, n8,000) against causal71.658% (SD0.775 pp, n12,000): +5.717±0.623 pp using episode SE. Restricting both to seeds42/43 gives+5.375 pp; the paired seed gains are+3.975 and+6.775 pp. That is a reproducible internal-protocol gain, although two seeds give a very unstable small-sample confidence interval. The simpler old bidirectional control gains only+0.433±0.580 pp; v5+PI gains+1.467±0.644 pp; v5+GR00T gains+2.967±0.637 pp. The GR00T comparison changes the head as well as the backbone relative to causal+PI, so it is not a clean directionality effect.
 
-On RoboCasa, causal 580/1,632=35.539±1.185% versus v5 617/1,632=37.806±1.200% gives **+2.267±1.687 pp**, below two combined episode SE. Per-seed gains are +0.980 pp (seed 4) and +3.554 pp (seed 42); training-seed SDs are 1.040 pp causal and 0.780 pp v5. All 17 declared tasks exist for both seeds; they do not constitute the official 18-task atomic or50-task overall benchmark. On plain LIBERO, the same-arm n400 runs are smoke tests under the requested criterion: no matched full-protocol claim is established. LIBERO and its perturbation extension are also not two independent robot domains.
+On RoboCasa, causal580/1,632=35.539±1.185% versus v5 617/1,632=37.806±1.200% gives **+2.267±1.687 pp**, below two combined episode SE. Per-seed gains are+0.980 pp (seed4) and+3.554 pp (seed42); training-seed SDs are1.040 pp causal and0.780 pp v5. All17 declared tasks exist for both seeds; they do not constitute the official18-task atomic or50-task overall benchmark. On plain LIBERO, the same-arm n400 runs are smoke tests under the requested criterion: no matched full-protocol claim is established. LIBERO and its perturbation extension are also not two independent robot domains.
 
 **Shared-z is the better-supported intervention; the encoder objective is not isolated.** Config.full.yaml comparisons, excluding run/output paths, show:
 
-| comparison (all n 4,000 each) | effect ± combined SE (pp) | what actually changes |
+| comparison (all n4,000 each) | effect ± combined SE (pp) | what actually changes |
 |---|---|---|
 | zsup78.125 − zbase71.550 | +6.575 ±0.968 | shared-z module, supervision and temporal path together; not a one-factor objective test |
 | zsup78.125 − zonly76.600 | +1.525 ±0.936 | only memory_dropout_rate0.15→1.0 |
@@ -558,54 +562,54 @@ On RoboCasa, causal 580/1,632=35.539±1.185% versus v5 617/1,632=37.806±1.200% 
 | zsup78.125 − zshuf75.625 | +2.500 ±0.942 | only shuffle_targets false→true |
 | MLM-control75.525 − W2-corrected74.700 | +0.825 ±0.967 | masked slots/prompt path; MLM **loss disabled** in the control |
 
-The raw sources are the corresponding canonical rows above; config sources are `playground/Checkpoints/<run>/config.full.yaml`. Zonly is not “no supervision”: it has grounding, phase, trajectory and temporal losses, a 128-dimensional z and 4 learned queries; memory dropout 1 forces the expert through z. Zbase has no shared_z block despite its name. “All bidirectional versus causal” changes checkpoint pretraining and frozen modules too. Causal+shared-z with the identical supervision is missing. The decisive experiment is encoder on/off × shared-z on/off at matched pretraining/data/compute, with a separate actual MLM-loss switch.
+The raw sources are the corresponding canonical rows above; config sources are `playground/Checkpoints/<run>/config.full.yaml`. Zonly is not “no supervision”: it has grounding, phase, trajectory and temporal losses, a128-dimensional z and4 learned queries; memory dropout1 forces the expert through z. Zbase has no shared_z block despite its name. “All bidirectional versus causal” changes checkpoint pretraining and frozen modules too. Causal+shared-z with the identical supervision is missing. The decisive experiment is encoder on/off × shared-z on/off at matched pretraining/data/compute, with a separate actual MLM-loss switch.
 
-**Compute is not yet matched.** The seed-pair launcher allocates two GPUs per run, but shared-z v5 config.full.yaml uses per-device batch 16 and the actual DeepSpeed log confirms train_batch_size32 (`slurm_logs/train_seed_pair_1836346_s42.log:334`). Causal and v5-PI configs use per-device batch 32 on two GPUs (nominal global64). At 20k steps this is approximately0.64M versus 1.28M sampled examples before any sampler repeats. Shared-z head dropout is 0.2, causal/v5-PI0.0, and v5-GR00T0.1. These are additional recipe factors; neither a matched-compute nor sample-efficiency claim follows from equal step counts. The launcher comment saying batch 64 does not match the shared-z run.
+**Compute is not yet matched.** The seed-pair launcher allocates two GPUs per run, but shared-z v5 config.full.yaml uses per-device batch16 and the actual DeepSpeed log confirms train_batch_size32 (`slurm_logs/train_seed_pair_1836346_s42.log:334`). Causal and v5-PI configs use per-device batch32 on two GPUs (nominal global64). At20k steps this is approximately0.64M versus1.28M sampled examples before any sampler repeats. Shared-z head dropout is0.2, causal/v5-PI0.0, and v5-GR00T0.1. These are additional recipe factors; neither a matched-compute nor sample-efficiency claim follows from equal step counts. The launcher comment saying batch64 does not match the shared-z run.
 
-**RoboCasa has task-specific reversals.** Pooling two seeds gives96 episodes per arm/task. Largest encoder gains: TurnOnMicrowave 37/96 versus 23/96 (+14.58 pp), OpenDrawer 37/96 versus 26/96 (+11.46), TurnOnElectricKettle 66/96 versus 56/96 (+10.42). Largest losses: CoffeeSetupMug 38/96 versus 52/96 (−14.58), SlideDishwasherRack 43/96 versus 51/96 (−8.33), TurnOnSinkFaucet 39/96 versus 46/96 (−7.29). These small task samples are descriptive; no multiplicity-adjusted win is asserted. Treating tasks as the sampling unit gives SE1.876 pp for the mean paired task difference, again leaving +2.267 pp below two SE. Sources and individual n/SE are in the per-task table above.
+**RoboCasa has task-specific reversals.** Pooling two seeds gives96 episodes per arm/task. Largest encoder gains: TurnOnMicrowave37/96 versus23/96 (+14.58 pp), OpenDrawer37/96 versus26/96 (+11.46), TurnOnElectricKettle66/96 versus56/96 (+10.42). Largest losses: CoffeeSetupMug38/96 versus52/96 (−14.58), SlideDishwasherRack43/96 versus51/96 (−8.33), TurnOnSinkFaucet39/96 versus46/96 (−7.29). These small task samples are descriptive; no multiplicity-adjusted win is asserted. Treating tasks as the sampling unit gives SE1.876 pp for the mean paired task difference, again leaving+2.267 pp below twoSE. Sources and individual n/SE are in the per-task table above.
 
-**The LIBERO-plus advantage is primarily geometry/initial-state robustness.** Replicated shared-z versus causal gains 14.67 pp in robot init, 11.57 in object layout, 6.72 in language, 6.41 in camera, but loses2.51 in background and 0.89 in sensor noise; lighting is +0.44. The last three gains/losses are small relative to their uncertainty and category multiplicity. W has the same geometry pattern, with sensor noise −1.20 pp. The shared-z seed 43 headline is particularly fragile to seed selection: seed 42 is 1.8 pp lower. No full-protocol plain-LIBERO comparison establishes an in-distribution advantage.
+**The LIBERO-plus advantage is primarily geometry/initial-state robustness.** Replicated shared-z versus causal gains14.67 pp in robot init,11.57 in object layout,6.72 in language,6.41 in camera, but loses2.51 in background and0.89 in sensor noise; lighting is+0.44. The last three gains/losses are small relative to their uncertainty and category multiplicity. W has the same geometry pattern, with sensor noise−1.20 pp. The shared-z seed43 headline is particularly fragile to seed selection: seed42 is1.8 pp lower. No full-protocol plain-LIBERO comparison establishes an in-distribution advantage.
 
-**CoT’s82.6/82.2 are still not 4,000-episode results.** Their surviving roots have 1,153 episodes, while newer libero_10 suite files have 1,000 each. The rest of the new full run has not been aggregated. For ours_v3, libero_10 alone changes 209/256→833/1,000 (+1.659 pp); det_v3 changes 208/256→787/1,000 (−2.550 pp). Never combine that new suite with old roots. The det_readout suite update is 726/1,000. The ours_full649/1,000 suite file is historical (September 12), not evidence that replacement1855180 landed; the scratch 740/1,000 file is also from September 12. Neither can be combined with new shards or treated as an overall score.
+**One CoT result is now full-protocol and it currently wins internally.** `libero_plus_qwen08b_gr00t_cot_trace_det_v3_cotw01` completed at3,249/4,000=81.225% after resume job1856685; every suite has1,000 episodes and the failure sentinels are empty. This is one training seed and has no clean/prompt-only/wrong-trace intervention yet. `ours_v3_cotw01` is still partial at2,862/3,473=82.407% while spatial resume1858474 runs, so it cannot be ranked. The older82.6/82.2 roots remain1,153-episode smoke results and must not be mixed with the new exact4k roots.
 
-A descriptive estimate using **all 25 runs** with a surviving four-suite small result and full result (one smallest-n old artifact per run; all 32 transitions are tabulated) gives median full−small **−0.259 pp**, mean −0.055 pp, 10th–90th empirical quantiles −2.784 to +1.940 pp, observed range −5.241 to +9.867 pp. This does not justify a blanket −3.6 pp haircut. Applied mechanically to the two CoT roots, the median projection is about 82.3/81.9%, with an empirical sensitivity band roughly 79.8–84.5/79.4–84.1%; this is **not a confidence interval or a benchmark result**. Different protocols and winner selection limit transportability. The claimed old-zonly0.812 small file no longer survives among its raw root artifacts, so that historical shrinkage cannot be verified from the current JSONs.
+A descriptive estimate using **all25 runs** with a surviving four-suite small result and full result (one smallest-n old artifact per run; all32 transitions are tabulated) gives median full−small **−0.259 pp**, mean−0.055 pp,10th–90th empirical quantiles−2.784 to+1.940 pp, observed range−5.241 to+9.867 pp. This does not justify a blanket−3.6 pp haircut. Applied mechanically to the two CoT roots, the median projection is about82.3/81.9%, with an empirical sensitivity band roughly79.8–84.5/79.4–84.1%; this is **not a confidence interval or a benchmark result**. Different protocols and winner selection limit transportability. The claimed old-zonly0.812 small file no longer survives among its raw root artifacts, so that historical shrinkage cannot be verified from the current JSONs.
 
-**No single raw success score collapses the observed shared-z gain**: seed 42 still beats causal 42 by 3.975 pp if the seed 43 result is discarded. The encoder-specific explanation is much less secure than those counts. Its most consequential missing result is a causal backbone with the same shared-z bottleneck, supervision and compute; if that reaches77–78%, the claim becomes a shared-latent training/readout contribution rather than an encoder-directionality win. Among existing files, the seed 43 shared-z 4k JSON is the key replication, audited as 3,131/4,000 with matching suite totals, but independent policy/input contract verification remains essential. Confidence: high in the arithmetic, moderate in matched-protocol implementation, low in directionality as the identified cause.
+**No single raw success score collapses the observed shared-z gain**: seed42 still beats causal42 by3.975 pp if the seed43 result is discarded. The encoder-specific explanation is much less secure than those counts. Its most consequential missing result is a causal backbone with the same shared-z bottleneck, supervision and compute; if that reaches77–78%, the claim becomes a shared-latent training/readout contribution rather than an encoder-directionality win. Among existing files, the seed43 shared-z4k JSON is the key replication, audited as3,131/4,000 with matching suite totals, but independent policy/input contract verification remains essential. Confidence: high in the arithmetic, moderate in matched-protocol implementation, low in directionality as the identified cause.
 
 ## Discrepancies with ENCDEC_STATUS.md and docs/STATUS.md
 
 | narrative | raw audit / correction |
 |---|---|
-| “best protocol-complete0.783,” seed 42 pending | seed 42 landed0.76475; report two-seed 0.77375±0.01273 SD, not best-seed 0.78275 |
-| old shared-z 0.776 treated as comparable to exact 4k |0.77633165 has 4,149 episodes; its exact 4k sibling is 0.766. Keep both; canonical exact 4k by declared rule |
-| “inside zonly backbone makes no difference” | point estimates are old0.766 versus v5 mean 0.77375; no strong backbone conclusion from one old seed/two new seeds |
-| status ranking leaves out objective/backbone siblings | W0.76425, MLM-control0.75525, W20.747, zsup0.78125, qwen08b-GR00T0.77175 and decoder-latent0.75025 all have 4k artifacts |
-| equal20k steps / launcher batch 64 implies matched compute | shared-z v5 actual global batch 32; causal/v5-PI nominal64, with different head dropout 0.2/0.0/0.1. Equal steps are not equal sample or compute budget |
+| “best protocol-complete0.783,” seed42 pending | seed42 landed0.76475; report two-seed0.77375±0.01273 SD, not best-seed0.78275 |
+| old shared-z0.776 treated as comparable to exact4k |0.77633165 has4,149 episodes; its exact4k sibling is0.766. Keep both; canonical exact4k by declared rule |
+| “inside zonly backbone makes no difference” | point estimates are old0.766 versus v5 mean0.77375; no strong backbone conclusion from one old seed/two new seeds |
+| status ranking leaves out objective/backbone siblings | W0.76425, MLM-control0.75525, W20.747, zsup0.78125, qwen08b-GR00T0.77175 and decoder-latent0.75025 all have4k artifacts |
+| equal20k steps / launcher batch64 implies matched compute | shared-z v5 actual global batch32; causal/v5-PI nominal64, with different head dropout0.2/0.0/0.1. Equal steps are not equal sample or compute budget |
 | qwen08b-GR00T or head comparison proves encoder advantage | different backbones/heads; no matched causal-GR00T control for the v5 head contrast |
-| seed 42 RoboCasa incomplete after 15/34 retry units | union of surviving JSONs now has 34/34 declared benchmark units, matching both 17-task manifests; old failures are attempts, not final missing tasks |
-| RoboCasa “0.363 vs0.373” | correct for seed 4 (296/816 vs 304/816), incomplete for current evidence: seed 42 is 284/816 vs 313/816 |
-| enc-dec hardly needs state, causal needs it totally | no-state 6 cells reproduce, but suffix deletion confounds input information with prompt format; shuffled values preserve causal 94/144 versus encoder 87/144 |
-| state-corruption follow-up not done |18/18 st_* files exist after 1854695 fills5 missing units; zeros favor encoder, shuffle does not |
-| more flow steps ruled out | small30k experiment only: existing files contain mixed24- and 96-episode cells; these do not rule out another checkpoint/task dependence |
-| training loss lower “at every bin” and quoted25k0.0387/0.0401 | re-binning raw logs uses explicit [25k, 30k): seed 42 v50.033593 vs causal 0.034903; seed 4 0.033526 vs0.034123. [45k, 50k) seed 4 0.021225 vs0.021804, seed 42 0.021235 vs0.021688. Direction survives; exact quoted25k values are not this bin definition |
-| paired open-loop cosine 0.964 / gripper98% establishes “same actions” | these are diagnostic aggregate similarities, not equivalent policies; low-frequency decisive mistakes can change closed-loop success. Raw openloop JSONs are separate from rollout n |
-| 17-task paired RC sweep takes40 min | successful seed 4 log timestamps22:44:36→23:41:32 give56m56s; sacct allocation57m57s. The 42m39s retry was partial work, not a complete fresh benchmark |
-|929 rollouts/h/GPU ⇒ about 3,700/h/node | individual-client throughput excludes launch/load costs. Complete 1,632-rollout paired sweep delivered~1,690/h/node from start/end timestamps |
-| CoT 1850350–53 queued |1850350–52 running at audit;1850353 failed after 8 exhausted shards; replacement1855180 running with multiple exhausted shards |
-| shared-z+GR00T never combined | later status update is correct: training1851382 already running, evals 1851383/84 dependent; no final result yet |
-| q35 port/device blocker | historical repeated failures are real, but replacement1852305 is now RUNNING with dependent evals 1852306/7; no completed benchmark proves resolution |
+| seed42 RoboCasa incomplete after15/34 retry units | union of surviving JSONs now has34/34 declared benchmark units, matching both17-task manifests; old failures are attempts, not final missing tasks |
+| RoboCasa “0.363 vs0.373” | correct for seed4 (296/816 vs304/816), incomplete for current evidence: seed42 is284/816 vs313/816 |
+| enc-dec hardly needs state, causal needs it totally | no-state6 cells reproduce, but suffix deletion confounds input information with prompt format; shuffled values preserve causal94/144 versus encoder87/144 |
+| state-corruption follow-up not done |18/18 st_* files exist after1854695 fills5 missing units; zeros favor encoder, shuffle does not |
+| more flow steps ruled out | small30k experiment only: existing files contain mixed24- and96-episode cells; these do not rule out another checkpoint/task dependence |
+| training loss lower “at every bin” and quoted25k0.0387/0.0401 | re-binning raw logs uses explicit [25k,30k): seed42 v50.033593 vs causal0.034903; seed4 0.033526 vs0.034123. [45k,50k) seed4 0.021225 vs0.021804, seed42 0.021235 vs0.021688. Direction survives; exact quoted25k values are not this bin definition |
+| paired open-loop cosine0.964 / gripper98% establishes “same actions” | these are diagnostic aggregate similarities, not equivalent policies; low-frequency decisive mistakes can change closed-loop success. Raw openloop JSONs are separate from rollout n |
+| 17-task paired RC sweep takes40 min | successful seed4 log timestamps22:44:36→23:41:32 give56m56s; sacct allocation57m57s. The42m39s retry was partial work, not a complete fresh benchmark |
+|929 rollouts/h/GPU ⇒ about3,700/h/node | individual-client throughput excludes launch/load costs. Complete1,632-rollout paired sweep delivered~1,690/h/node from start/end timestamps |
+| CoT1850350–53 queued |1850350–52 running at audit;1850353 failed after8 exhausted shards; replacement1855180 running with multiple exhausted shards |
+| shared-z+GR00T never combined | later status update is correct: training1851382 already running, evals1851383/84 dependent; no final result yet |
+| q35 port/device blocker | historical repeated failures are real, but replacement1852305 is now RUNNING with dependent evals1852306/7; no completed benchmark proves resolution |
 | docs/STATUS final dense still in flight, no continuation control needed | final dense and raw evaluations exist; full-epoch aggregate0.690442→0.671040. A no-head continuation remains needed to isolate auxiliary loss |
 | dense is best / probes alone identify the strongest model | early aux-dense aggregate0.677429 recomputes; it is spatial/VQA, not policy success; final_action_head0.683575 beats final dense0.671040 among those continuations |
-|0.6780 final_action_linear /0.6400 tracetime | recomputed0.677859 /0.639572; weight 0.01 tracetime rerun now0.666865 and must remain a separate arm |
+|0.6780 final_action_linear /0.6400 tracetime | recomputed0.677859 /0.639572; weight0.01 tracetime rerun now0.666865 and must remain a separate arm |
 | all probe records durable and correctly indexed | collector overwrote generic starVLA patch-only identities, defaulting to Bridge. Fixed source identity, dataset inference and full measurement fingerprint; see PROBE_INSIGHTS.md |
-| probe sweep missing two DROID-wrist cells | both now landed; the full-table launcher used wrist-only for33 sim cells, previously mislabeled external; desired ext+wrist patch/token coverage is 66/99, not 99/99 |
-| broader decodability means earlier action access or a useful proxy | no layer sweep exists; available policy-triplet readouts have Spearman −0.5; most11-readout policy cells are absent |
+| probe sweep missing two DROID-wrist cells | both now landed; the full-table launcher used wrist-only for33sim cells, previously mislabeled external; desired ext+wrist patch/token coverage is66/99, not99/99 |
+| broader decodability means earlier action access or a useful proxy | no layer sweep exists; available policy-triplet readouts have Spearman−0.5; most11-readout policy cells are absent |
 
 Existing bug descriptions about extra-camera indexing, RoboCasa target slices and ridge scaling are retained as historical constraints, not assumed to invalidate every corrected run. Mechanistic assertions about encoder-memory identity, upstream defaults and byte-identical refactors are code-validation claims, not measurable from success JSONs; this audit does not recertify them. Lower training loss is not benchmark evidence. Full loss-bin sources are in [training_loss_bins.json](results_collected/training_loss_bins.json).
 
 ## Raw hand checks and collector changes
 
-Manually read these JSON count fields independently of collector output, then independently asserted **all 1,954 row counts/rates** against raw payloads:
+Manually read these JSON count fields independently of collector output, then independently asserted **all1,954 row counts/rates** against raw payloads:
 
 | source | direct arithmetic | result |
 |---|---|---|
@@ -613,8 +617,8 @@ Manually read these JSON count fields independently of collector output, then in
 | `playground/Checkpoints/ervla_zonly_pi_sharedz_ground_temporal_v5_s42/results/libero-plus/overall_results.json` |3,059/4,000 |0.76475 |
 | `playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero-plus/overall_results.json` |2,900/4,000 |0.725 |
 | `playground/Checkpoints/ervla_w_pi_encoder_actiononly/results/libero-plus-4k-exact-v1/overall_results.json` |3,057/4,000 |0.76425 |
-| `playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero/overall_results.json` | plain top-level suites, 381/400 |0.9525 |
-| worktree `playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps48_h500_act8_native_s4_50k.json` |40 true values/48; payload seed 42 is eval seed |0.8333333333; training seed 4 |
+| `playground/Checkpoints/ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s42/results/libero/overall_results.json` | plain top-level suites,381/400 |0.9525 |
+| worktree `playground/Checkpoints/ervla_robocasa365_pi_causal_s4/checkpoints/steps_50000_pytorch_model.eval/robocasa_OpenStandMixerHead_seed42_envs24_eps48_h500_act8_native_s4_50k.json` |40 true values/48; payload seed42 is eval seed |0.8333333333; training seed4 |
 
 `collect_results.py` already handled both LIBERO shapes. Fixed: training-seed attribution; RC task names from JSON env; full filename protocol in result_dir so legacy scaling/steps experiments cannot collapse into an empty tag; binary-outcome validation; task-manifest-based RC completion; nonempty failed_shards exclusion from full flags; shared-z control arm labeling. No stored success-rate disagreements were found. Changes affect grouping and eligibility, not underlying outcomes. Commands were rerun with filtered outputs directed to separate folders so the master remains unfiltered.
 
@@ -626,7 +630,7 @@ Checked2026-09-17. No external paper provides per-episode outcomes here, so n an
 |---|---|---|---|
 | LIBERO | OpenVLA-OFT |97.1% | four suites; multi-image+state recipe, parallel chunks and continuous L1 prediction; [authors](https://openvla-oft.github.io/) |
 | LIBERO | Discrete Diffusion VLA |96.3% | masked discrete actions, adaptive parallel decoding/remasking; [paper](https://arxiv.org/abs/2508.20072). This is an action-decoder method, not identical to our encoder+DiT |
-| LIBERO | VLANeXt |97.4% | four-suite result, 10k-step recipe study with batch 256; [paper, Tables2–3](https://arxiv.org/html/2602.18532v1) |
+| LIBERO | VLANeXt |97.4% | four-suite result,10k-step recipe study with batch256; [paper, Tables2–3](https://arxiv.org/html/2602.18532v1) |
 | LIBERO | Cosmos Policy |98.5% | video-diffusion-derived control, much larger training budget; [authors’ ICLR2026 entry](https://moojink.com/) |
 | LIBERO | InternVLA-A1.5 |98.9% | released LIBERO-tuned checkpoint; strongest plain-LIBERO result verified here; [model card](https://huggingface.co/InternRobotics/InternVLA-A1.5-Libero) |
 | LIBERO-plus | π0 / π0-FAST |53.6% /61.6% | official zero-shot robustness comparison, not our PI-head causal control; [benchmark authors](https://github.com/sylvestf/LIBERO-plus) |
@@ -638,18 +642,18 @@ Checked2026-09-17. No external paper provides per-episode outcomes here, so n an
 | LIBERO-plus | SRPO |82.1% | official benchmark’s listed result; RL/post-training and data scope differ; [benchmark](https://github.com/sylvestf/LIBERO-plus), [SRPO paper](https://arxiv.org/abs/2511.15605) |
 | LIBERO-plus | InternVLA-A1.5 |84.8% | released zero-shot benchmark result, same LIBERO-tuned checkpoint; strongest verified here; [model card](https://huggingface.co/InternRobotics/InternVLA-A1.5-Libero) |
 
-Our shared-z mean 77.375% is 7.425 pp below the 84.8% reference, but this is a **descriptive, protocol-unmatched difference**, not a statistical comparison. To claim a leaderboard win, run the released competitor and our frozen checkpoint through the same complete official task list, camera/state contract, action execution/horizon, checkpoint-selection rule and training-data declaration. The internal4k exact sampler must be published or replaced by the official task list. Plain n400 cannot certify a win over published97–99% results. Original LIBERO commonly evaluates50 episodes per each of 40 tasks (2,000 total); the requested≥4,000 gate is a stricter internal rule, not the universal literature definition.
+Our shared-z mean77.375% is7.425 pp below the84.8% reference, but this is a **descriptive, protocol-unmatched difference**, not a statistical comparison. To claim a leaderboard win, run the released competitor and our frozen checkpoint through the same complete official task list, camera/state contract, action execution/horizon, checkpoint-selection rule and training-data declaration. The internal4k exact sampler must be published or replaced by the official task list. Plain n400 cannot certify a win over published97–99% results. Original LIBERO commonly evaluates50 episodes per each of40 tasks (2,000 total); the requested≥4,000 gate is a stricter internal rule, not the universal literature definition.
 
-| RoboCasa365 official method | overall50 tasks | atomic-seen18 tasks | why our 17-task score is not comparable |
+| RoboCasa365 official method | overall50 tasks | atomic-seen18 tasks | why our17-task score is not comparable |
 |---|---|---|---|
-| Xiaomi-Robotics-1 |57.4% |80.2% | stronger verified official leader, different pretraining and all 50 target tasks |
+| Xiaomi-Robotics-1 |57.4% |80.2% | stronger verified official leader, different pretraining and all50 target tasks |
 | ABot-M0.6 |46.6% |79.4% | different training and evaluation scope |
-| GR00T N1.5 |23.9% |50.7% | official re-evaluation uses RoboCasa1.0.1 and 1.5× longer horizon |
+| GR00T N1.5 |23.9% |50.7% | official re-evaluation uses RoboCasa1.0.1 and1.5× longer horizon |
 | GR00T N1.6 |21.9% |51.1% | official policy, not just our GR00T-style action head |
 | π0.5 |16.9% |39.6% | Human300 multi-task pretraining and official splits |
 | π0 |14.8% |34.6% | same distinction;35.54/37.81% on our target-atomic training is not a win over official overall14.8% |
 
-All six rows: [official leaderboard, updated2026-09-12](https://robocasa.ai/leaderboard.html); protocol/config details: [benchmark repository](https://github.com/robocasa-benchmark/leaderboard), [GR00T submission](https://github.com/robocasa-benchmark/leaderboard/blob/main/submissions_md/gr00t_n1.5_2026_05_19.md). The official overall combines18 atomic-seen, 16 composite-seen, 16 composite-unseen tasks. A 17-task horizon500 target-trained evaluation lacks one atomic task and all composite tasks. Reviewers need task lists, kitchen split/version, task-specific horizons, n/task, data budget, model size, full/LoRA training and seed variation. Our incomplete official scope cannot be repaired by comparing percentages alone.
+All six rows: [official leaderboard, updated2026-09-12](https://robocasa.ai/leaderboard.html); protocol/config details: [benchmark repository](https://github.com/robocasa-benchmark/leaderboard), [GR00T submission](https://github.com/robocasa-benchmark/leaderboard/blob/main/submissions_md/gr00t_n1.5_2026_05_19.md). The official overall combines18 atomic-seen,16 composite-seen,16 composite-unseen tasks. A17-task horizon500 target-trained evaluation lacks one atomic task and all composite tasks. Reviewers need task lists, kitchen split/version, task-specific horizons, n/task, data budget, model size, full/LoRA training and seed variation. Our incomplete official scope cannot be repaired by comparing percentages alone.
 
 Relevant design ideas: VLANeXt’s learned query buffer and frequency-domain action objective motivate small readout/frequency ablations; its state-to-VLM result cautions against assuming direct state-to-DiT injection will help. OFT motivates a deterministic parallel continuous-action baseline. Discrete Diffusion VLA motivates adaptive refinement only for a model trained for masked action reconstruction. InternVLA-A1.5’s latent foresight supervision is related to our shared-z temporal signal, but copying its large video teacher is post-deadline work. None of these reports establishes bidirectional-encoder superiority by itself.
 
@@ -659,27 +663,25 @@ No training or evaluation jobs were launched by this audit. Existing work is all
 
 | job | observed status around14:00 CEST2026-09-17 | checkpoint/result evidence |
 |---|---|---|
-|1850294 | COMPLETED, 1h28m06s | shared-z v5 seed 42,20k checkpoint, 3,059/4,000; fully landed |
-|1836354 | COMPLETED, 1h38m38s | shared-z v5 seed 43,20k, 3,131/4,000 |
-|1850350 /1850351 /1850352 | RUNNING, ~4h38m elapsed | CoT ours_v3/det_v3/det_readout; roots still small-n, new first suite landed; final_model checkpoints exist |
-|1850353 | FAILED, 2h36m19s | ours_full;8 exhausted first-suite shards, no new complete4k root |
-|1855180 | RUNNING, ~1h12m elapsed | replacement ours_full with 16 shards; log already contains multiple exhausted shards; new result not landed |
-|1851382 | RUNNING, ~4h05m | shared-z+GR00T training 42/43; existing job, no new training launched |
-|1851383 /1851384 | PENDING dependency | dependent shared-z+GR00T evals; no 4k root yet |
-|1852305 | RUNNING, ~3h29m | q35 pair replacement, previously absent from JOBS ledger; status is not proof of final success |
+|1850294 | COMPLETED,1h28m06s | shared-z v5 seed42,20k checkpoint,3,059/4,000; fully landed |
+|1836354 | COMPLETED,1h38m38s | shared-z v5 seed43,20k,3,131/4,000 |
+|1850350 /1850351 /1850352 | TIMEOUT after5h | initial CoT exact4k evaluations; replacement jobs must determine final status |
+|1856685 | COMPLETED,2h21m | det_v3 goal resume; final root3,249/4,000=81.225%, empty failure sentinels |
+|1858474 | RUNNING | ours_v3 spatial resume; root2,862/3,473=82.407% remains partial |
+|1850353 | FAILED,2h36m19s | ours_full;8 exhausted first-suite shards, no new complete4k root |
+|1855180 | RUNNING,~1h12m elapsed | replacement ours_full with16 shards; log already contains multiple exhausted shards; new result not landed |
+|1851382 | RUNNING,~4h05m | shared-z+GR00T training42/43; existing job, no new training launched |
+|1851383 /1851384 | PENDING dependency | dependent shared-z+GR00T evals; no4k root yet |
+|1852305 | RUNNING,~3h29m | q35 pair replacement, previously absent from JOBS ledger; status is not proof of final success |
 |1852306 /1852307 | PENDING dependency | q35 evals, no completed result yet |
-|1850179 | COMPLETED, 42m39s | partial retry attempt; union with 1842872 now supplies seed 42’s 34/34 declared RC units |
-|1851833 /1854695 | COMPLETED, 2h18m06s /10m02s | corruption matrix plus 5-unit repair; all 18 JSONs now exist |
-|1850693 | COMPLETED, 2h50m08s | tracetime weight 0.01; aggregate and 6 pooled-probe dataset/camera records landed |
-|1851073 /1855867 | COMPLETED / COMPLETED (25m01s) | both flagged DROID-wrist patch/token records landed;33 sim wrist-only cells must not fill combined-camera slots |
-|1855204 | RUNNING | existing final-action-linear weight 0.1 work; separate from finished linear arm |
+|1850179 | COMPLETED,42m39s | partial retry attempt; union with1842872 now supplies seed42’s34/34 declared RC units |
+|1851833 /1854695 | COMPLETED,2h18m06s /10m02s | corruption matrix plus5-unit repair; all18 JSONs now exist |
+|1850693 | COMPLETED,2h50m08s | tracetime weight0.01; aggregate and6 pooled-probe dataset/camera records landed |
+|1851073 /1855867 | COMPLETED / COMPLETED (25m01s) | both flagged DROID-wrist patch/token records landed;33sim wrist-only cells must not fill combined-camera slots |
+|1855204 | RUNNING | existing final-action-linear weight0.1 work; separate from finished linear arm |
 
 The complete read-only accounting snapshot is [jobs_accounting.txt](results_collected/jobs_accounting.txt). `scripts/jobs_status.sh` was read and run. CoT stdout/stderr inspected at `slurm_logs/eval_libero_plus_<jobid>.{out,err}`; raw snapshot precedes any later overwritten root. Failed-shard rows above list every nonempty sentinel. Scratch manifests/client logs were inspected; `failed_units_*` is absent, so explicit JSON-vs-manifest coverage is the completion criterion.
 
-Healthy 20k LIBERO-plus exact 4k evals take 1.3–1.7 h on one 4-GPU node (5.2–6.8 GPU-h), not the CoT runtime. CoT is already>4.6 h and only part-way through suites: budget 8–12 h plus retries, 32–48 GPU-h, with a hard checkpoint on shard completion. RC17-task paired sweep is 57m fresh (about 3.9 GPU-h); a single policy gets roughly 30–60m depending on scheduling. Per-task client logs show~3–5 min sim time plus startup, not48 independent sequential GPU jobs. Allocate 1.5–2 h for a complete pair with retry margin. Existing LIBERO seed-pair training took 7h31m on 4 GPUs; RC training required an initial 12 h allocation plus~7h38m resume for paired arms. Future cost estimates are planning ranges, not guaranteed runtimes.
+Healthy20k LIBERO-plus exact4k evals take1.3–1.7h on one4-GPU node (5.2–6.8GPU-h), not the CoT runtime. CoT is already>4.6h and only part-way through suites: budget8–12h plus retries,32–48GPU-h, with a hard checkpoint on shard completion. RC17-task paired sweep is57m fresh (about3.9GPU-h); a single policy gets roughly30–60m depending on scheduling. Per-task client logs show~3–5min sim time plus startup, not48 independent sequential GPU jobs. Allocate1.5–2h for a complete pair with retry margin. Existing LIBERO seed-pair training took7h31m on4GPUs; RC training required an initial12h allocation plus~7h38m resume for paired arms. Future cost estimates are planning ranges, not guaranteed runtimes.
 
-Video inventory only: worktree `results/robocasa365_rollouts_30k/` has 40 video files and `results/robocasa365_pnp_30k/` has 96; neither directory exists in the live tree. Videos are not counted as additional outcomes. Open-loop diagnostic JSONs at `/e/scratch/m3/blank4/rc365_smoke/openloop_driver_{causal,v5}_1842595.json` show 126 queries each, cosine 0.963782/0.964206 and gripper agreement 0.983383/0.987351,16 driving episodes each. They do not independently verify the 17-task benchmark or prove policy equivalence.
-
-## Reproduction
-
-Run `python scripts/collect_results.py --min-episodes 4000`, then `python scripts/audit_encoder_results.py`. In train_downstream run `python scripts/collect_all_probes.py`, `python scripts/build_full_table.py`, and `python scripts/harvest_eval_results.py`; then in this tree run `python scripts/audit_probe_insights.py` and `python scripts/format_encoder_reports.py`. The numerical audit is regenerated from raw files; `scripts/encoder_audit_narrative.md`, external references and job commentary are a dated human-reviewed snapshot and must be reviewed if results change. Tests: `python -m unittest discover -s test -p test_collect_results.py`; probe regression tests live in train_downstream/tests/test_probe_collection.py.
+Video inventory only: worktree `results/robocasa365_rollouts_30k/` has40 video files and `results/robocasa365_pnp_30k/` has96; neither directory exists in the live tree. Videos are not counted as additional outcomes. Open-loop diagnostic JSONs at `/e/scratch/m3/blank4/rc365_smoke/openloop_driver_{causal,v5}_1842595.json` show126 queries each, cosine0.963782/0.964206 and gripper agreement0.983383/0.987351,16 driving episodes each. They do not independently verify the17-task benchmark or prove policy equivalence.
