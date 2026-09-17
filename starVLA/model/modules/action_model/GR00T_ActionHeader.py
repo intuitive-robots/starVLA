@@ -390,6 +390,8 @@ class FlowmatchingActionHead(nn.Module):
         state: torch.Tensor = None,
         encoder_attention_mask=None,
         reduction: str = "mean",
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ):
         """
         vl_embs: shape (B, seq_length, feature_dim)
@@ -433,6 +435,13 @@ class FlowmatchingActionHead(nn.Module):
             encoder_attention_mask=encoder_attention_mask,
             timestep=t_discretized,
             return_all_hidden_states=False,  # NOTE (YL): not using flare now
+            # Shared-z: `extra_conditioning` concatenates z onto the AdaLN conditioning,
+            # `cross_attention_row_mask` drops the encoder memory for the rows it marks,
+            # which is what makes a "z-only" arm z-only. Both are implemented in the DiT
+            # (cross_attention_dit.py) and were already used by the PI head; this wrapper
+            # just never forwarded them. Passing None keeps the previous behaviour exactly.
+            extra_conditioning=z_conditioning,
+            cross_attention_row_mask=encoder_memory_keep,
         )
         pred = self.action_decoder(model_output)
         pred_actions = pred[:, -actions.shape[1] :]
@@ -452,6 +461,8 @@ class FlowmatchingActionHead(nn.Module):
         state: torch.Tensor = None,
         encoder_attention_mask: torch.Tensor = None,
         noise_seeds: list[int] | None = None,
+        z_conditioning: torch.Tensor = None,
+        encoder_memory_keep: torch.Tensor = None,
     ) -> torch.Tensor:
         # Set initial actions as the sampled noise.
         batch_size = vl_embs.shape[0]
@@ -517,6 +528,8 @@ class FlowmatchingActionHead(nn.Module):
                     encoder_hidden_states=vl_embs,
                     encoder_attention_mask=encoder_attention_mask,
                     timestep=timesteps_tensor,
+                    extra_conditioning=z_conditioning,
+                    cross_attention_row_mask=encoder_memory_keep,
                 )
                 late_hidden = None
             else:
@@ -526,6 +539,8 @@ class FlowmatchingActionHead(nn.Module):
                     encoder_attention_mask=encoder_attention_mask,
                     timestep=timesteps_tensor,
                     return_all_hidden_states=True,
+                    extra_conditioning=z_conditioning,
+                    cross_attention_row_mask=encoder_memory_keep,
                 )
                 late_hidden = hidden_states[-1][:, -self.action_horizon :]
             pred = self.action_decoder(model_output)
