@@ -59,6 +59,24 @@ if grep -qE "^\s*video_backend:\s*torchcodec" "${YAML_A}" "${YAML_B}" 2>/dev/nul
   echo "torchcodec requested -> FFmpeg shim exported (${FFMPEG_SHIM})"
 fi
 
+# ── fla/triton preflight ──────────────────────────────────────────────────────
+# Qwen3.5 backbones run their linear-attention layers through `fla`, which picks its
+# device at import from triton's active driver. When that probe fails on a node, fla
+# binds to torch.cpu and training dies ~3 min later inside the DeltaNet kernel with
+#   AttributeError: module 'torch.cpu' has no attribute 'device'
+# (torch 2.12 dropped it). It is node-dependent -- a probe on another node was fine --
+# so fail fast here instead of burning a slot. Only matters for Qwen3.5 configs.
+if grep -qiE "^\s*base_vlm:.*qwen3\.5" "${YAML_A}" "${YAML_B}" 2>/dev/null; then
+  if ! /e/project1/m3/blank4/containers/envs/run_in_env.sh starVLA python -c "
+import sys, fla.utils as u
+sys.exit(0 if u.device == 'cuda' else 1)" 2>/dev/null; then
+    echo "[ERROR] fla bound to a non-CUDA device on $(hostname) (triton probe failed);"
+    echo "        Qwen3.5 training would crash in the DeltaNet kernel. Resubmit."
+    exit 1
+  fi
+  echo "fla/triton preflight OK"
+fi
+
 echo "=========================================="
 echo " config pair -- seed ${SEED}"
 echo " Job ${SLURM_JOB_ID:-local} on $(hostname)"
