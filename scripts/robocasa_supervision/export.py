@@ -4,6 +4,7 @@ Default refuses missing episodes. Full dense paths remain in each targets.npz;
 five-point CoT records are views over those paths, not their replacement.
 """
 import argparse,csv,json
+from contextlib import ExitStack
 from pathlib import Path
 import numpy as np
 
@@ -19,8 +20,13 @@ def main():
     missing=[int(r['episode_index']) for r in expected if not (a.labels/f"episode_{int(r['episode_index']):06d}"/'COMPLETE.json').exists()]
     if missing and not a.allow_partial:raise ValueError(f'{len(missing)} episodes missing; use audit, not zeros')
     a.output.mkdir(parents=True,exist_ok=True)
-    counts={'frames':0,'object_rows':0,'gripper_rows':0,'z_rows':0,'unreviewed_frames':0,'missing_episodes':missing}
-    with (a.output/'object_trace.jsonl').open('w') as obj,(a.output/'gripper_trace.jsonl').open('w') as grip,(a.output/'shared_z_targets.jsonl').open('w') as z:
+    counts={'frames':0,'object_rows':0,'gripper_rows':0,'z_rows':0,'object_full_rows':0,'gripper_full_rows':0,'unreviewed_frames':0,'missing_episodes':missing}
+    with ExitStack() as stack:
+        obj=stack.enter_context((a.output/'object_trace.jsonl').open('w'))
+        grip=stack.enter_context((a.output/'gripper_trace.jsonl').open('w'))
+        objfull=stack.enter_context((a.output/'object_trace_full_subtask.jsonl').open('w'))
+        gripfull=stack.enter_context((a.output/'gripper_trace_full_subtask.jsonl').open('w'))
+        z=stack.enter_context((a.output/'shared_z_targets.jsonl').open('w'))
         for row in expected:
             eid=int(row['episode_index']);root=a.labels/f'episode_{eid:06d}'
             if not (root/'COMPLETE.json').exists():continue
@@ -36,6 +42,13 @@ def main():
                         points=np.rint(data[key+'_trace_remaining_2d'][t,0]*1000).astype(int).tolist()
                         answer='<|trace|>'+json.dumps({'trace_2d':points},separators=(',',':'))+'<|/trace|>'
                         prompt=f'Your task is {{instruction}}. Generate the 2D trajectory the {subject} should follow to complete the current subtask. Output exactly 5 points.'
+                        write_row(stream,name,t,prompt,answer,sid);counts[counter]+=1
+                for key,stream,counter,subject in [('object',objfull,'object_full_rows','object'),('gripper',gripfull,'gripper_full_rows','gripper')]:
+                    first=sub['start']
+                    if data[key+'_trace_valid'][first,0]:
+                        points=np.rint(data[key+'_trace_remaining_2d'][first,0]*1000).astype(int).tolist()
+                        answer='<|trace|>'+json.dumps({'trace_2d':points},separators=(',',':'))+'<|/trace|>'
+                        prompt=f'Your task is {{instruction}}. Generate the full 2D trajectory of the {subject} for the current subtask, from its beginning to its end. Output exactly 5 points.'
                         write_row(stream,name,t,prompt,answer,sid);counts[counter]+=1
                 targets={'trajectory3d':data['trajectory3d_chunk'][t].reshape(-1).tolist(),'phase':int(data['phase'][t])}
                 masks={'trajectory3d':bool(data['trajectory3d_chunk_valid'][t]),'phase':True,'target_point':bool(data['target_point_valid'][t,0]),'object_box':bool(j>=0 and data['object_visible'][t,j,0]),'ground_relation':bool(data['ground_relation_valid'][t,0]),'ground_visibility':data['ground_visibility_valid'][t,0].tolist()}
