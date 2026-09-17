@@ -22,7 +22,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 |---|---|---|---|
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | PENDING (Dependency) |
 | 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | PENDING (Dependency) |
-| 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token shared-z, one paired4-GPU node per seed,20k,batch64/arm | SUBMITTED — smokes1864642/43 passed |
+| 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token shared-z, one paired4-GPU node per seed,20k,batch64/arm | RUNNING — smokes1864642/43 passed |
 | 1864672 / 1864673 | ep_tl0a_42 / 43 | Exact4k LIBERO-plus after matched two-pass null-trace seeds1864670/71 | PENDING (Dependency) |
 | 1864670 / 1864671 | tr_tl0a_42 / 43 | Full same-compute two-pass null-trace GR00T, one seed per4-GPU node,16/device, global64 | SUBMITTED — smokes1864418/19 passed |
 | 1864642 / 1864643 | sm_cz42 / sm_cz43 | Matched causal full-memory GR00T no-z vs fixed four-token shared-z; paired arms on2GPUs each, seeds42/43,20 updates + eval10/20 | SUBMITTED |
