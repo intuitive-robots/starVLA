@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import torch
+from omegaconf import OmegaConf
 
 try:
     from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader_v4 import (
@@ -10,6 +12,8 @@ try:
     from starVLA.model.modules.action_model.flow_matching_head.cross_attention_dit_v4 import (
         QwenPIv4DiT,
     )
+    from starVLA.model.framework.VLM4A.QwenPI_v3 import Qwen_PI_v3
+    from starVLA.model.framework.VLM4A.QwenPI_v4 import Qwen_PI_v4
 except ModuleNotFoundError as error:
     raise unittest.SkipTest(str(error)) from error
 
@@ -30,6 +34,18 @@ def _tiny_dit(num_layers=2):
 
 
 class QwenPIv4AttentionTest(unittest.TestCase):
+    def test_framework_reuses_complete_v3_constructor(self):
+        with patch.object(Qwen_PI_v3, "__init__", autospec=True) as parent_init:
+            Qwen_PI_v4(OmegaConf.create({"framework": {}}))
+
+        parent_init.assert_called_once()
+        merged_config = parent_init.call_args.kwargs["config"]
+        self.assertEqual(merged_config.framework.name, "QwenPI_v4")
+        self.assertEqual(
+            merged_config.framework.action_model.action_model_type,
+            "LayerwiseFM_v4",
+        )
+
     def test_action_positions_exchange_information(self):
         torch.manual_seed(0)
         model = _tiny_dit(num_layers=1)

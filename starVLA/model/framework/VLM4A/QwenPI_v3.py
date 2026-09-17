@@ -270,7 +270,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
             num_dit_layers=num_vl_layers,
         )
 
-        self.action_model: LayerwiseFlowmatchingActionHead = get_action_model(config=self.config)
+        self.action_model: LayerwiseFlowmatchingActionHead = self._build_action_model()
         self.num_action_dit_layers = len(self.action_model.model.transformer_blocks)
 
         # Layer-wise projector: map each selected VL hidden to Action DiT hidden space.
@@ -620,6 +620,10 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
             from starVLA.model.modules.mlm_numeric_intervention import maybe_erase_numeric_slots
             projected = maybe_erase_numeric_slots(self, projected)
         return projected
+
+    def _build_action_model(self):
+        """Construct the action head; subclasses may replace only its topology."""
+        return get_action_model(config=self.config)
 
     def _encode_vl_hidden_states(
         self,
