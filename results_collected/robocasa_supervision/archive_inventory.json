@@ -1,0 +1,13 @@
+{
+  "source": "/e/scratch/m3/blank4/rc365_supervision/source_archives/CloseBlenderLid_20250822.tar",
+  "bytes": 691466240,
+  "members": 4035,
+  "extras": 2009,
+  "pilot_files": [
+    "lerobot/data/chunk-000/episode_000000.parquet",
+    "lerobot/extras/dataset_meta.json",
+    "lerobot/extras/episode_000000/ep_meta.json",
+    "lerobot/extras/episode_000000/model.xml.gz",
+    "lerobot/extras/episode_000000/states.npz"
+  ]
+}

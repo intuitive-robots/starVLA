@@ -1,0 +1,76 @@
+{
+  "source_rows": 361,
+  "local_rows": 361,
+  "source": "/e/scratch/m3/blank4/rc365_supervision/pilot/CloseBlenderLid/lerobot",
+  "comparison": {
+    "action": {
+      "source_shape": [
+        361,
+        12
+      ],
+      "local_shape": [
+        361,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "observation.state": {
+      "source_shape": [
+        361,
+        16
+      ],
+      "local_shape": [
+        361,
+        16
+      ],
+      "max_abs_diff": 0.0
+    },
+    "frame_index": {
+      "source_shape": [
+        361
+      ],
+      "local_shape": [
+        361
+      ],
+      "max_abs_diff": 0.0
+    },
+    "timestamp": {
+      "source_shape": [
+        361
+      ],
+      "local_shape": [
+        361
+      ],
+      "max_abs_diff": 0.0
+    }
+  },
+  "replay_arrays": {
+    "states": [
+      361,
+      217
+    ]
+  },
+  "environment_meta_keys": [
+    "date",
+    "env",
+    "env_args",
+    "env_info",
+    "mujoco_version",
+    "robocasa_version",
+    "robosuite_version",
+    "time",
+    "total"
+  ],
+  "episode_meta_keys": [
+    "layout_id",
+    "style_id",
+    "object_cfgs",
+    "fixtures",
+    "gen_textures",
+    "lang",
+    "fixture_refs",
+    "cam_configs",
+    "init_robot_base_pos",
+    "init_robot_base_ori"
+  ]
+}

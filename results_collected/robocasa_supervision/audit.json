@@ -1,0 +1,171 @@
+{
+  "dataset": "/e/scratch/m3/datasets/lerobot_3_0/robocasa365_target_atomic",
+  "episodes": 9126,
+  "frames": 2231347,
+  "task_source_counts": {
+    "target/atomic/CloseBlenderLid/20250822": 502,
+    "target/atomic/CloseFridge/20250816": 513,
+    "target/atomic/CloseToasterOvenDoor/20250818": 505,
+    "target/atomic/CoffeeSetupMug/20250813": 502,
+    "target/atomic/NavigateKitchen/20250821": 500,
+    "target/atomic/OpenCabinet/20250813": 500,
+    "target/atomic/OpenDrawer/20250816": 514,
+    "target/atomic/OpenStandMixerHead/20250818": 502,
+    "target/atomic/PickPlaceCounterToCabinet/20250811": 502,
+    "target/atomic/PickPlaceCounterToStove/20250818": 501,
+    "target/atomic/PickPlaceDrawerToCounter/20250820": 501,
+    "target/atomic/PickPlaceSinkToCounter/20250813": 501,
+    "target/atomic/PickPlaceToasterToCounter/20250817": 512,
+    "target/atomic/SlideDishwasherRack/20250820": 502,
+    "target/atomic/TurnOffStove/20250812": 500,
+    "target/atomic/TurnOnElectricKettle/20250817": 520,
+    "target/atomic/TurnOnMicrowave/20250813": 543,
+    "target/atomic/TurnOnSinkFaucet/20250812": 506
+  },
+  "unique_source_episode_keys": 9126,
+  "episodes_with_registry_match": 9126,
+  "local_extras_present": false,
+  "features": {
+    "observation.images.robot0_eye_in_hand": {
+      "dtype": "video",
+      "shape": [
+        256,
+        256,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "video_info": {
+        "video.fps": 20.0,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "observation.images.robot0_agentview_left": {
+      "dtype": "video",
+      "shape": [
+        256,
+        256,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "video_info": {
+        "video.fps": 20.0,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "observation.images.robot0_agentview_right": {
+      "dtype": "video",
+      "shape": [
+        256,
+        256,
+        3
+      ],
+      "names": [
+        "height",
+        "width",
+        "channel"
+      ],
+      "video_info": {
+        "video.fps": 20.0,
+        "video.codec": "h264",
+        "video.pix_fmt": "yuv420p",
+        "video.is_depth_map": false,
+        "has_audio": false
+      }
+    },
+    "annotation.human.task_description": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "annotation.human.task_name": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "observation.state": {
+      "dtype": "float64",
+      "shape": [
+        16
+      ],
+      "fps": 20
+    },
+    "action": {
+      "dtype": "float64",
+      "shape": [
+        12
+      ],
+      "fps": 20
+    },
+    "next.reward": {
+      "dtype": "float32",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "next.done": {
+      "dtype": "bool",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "timestamp": {
+      "dtype": "float32",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "frame_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ]
+    },
+    "episode_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    },
+    "task_index": {
+      "dtype": "int64",
+      "shape": [
+        1
+      ],
+      "fps": 20
+    }
+  },
+  "metadata_sources": [
+    "/e/scratch/m3/datasets/lerobot_3_0/robocasa365_target_atomic/meta/episodes/chunk-000/file-000.parquet"
+  ],
+  "registry_sha256": "c0f0e598b32383bf145108232909b1967b73e00666648a6dce4a29f6c73a5496",
+  "status": "Provenance only; replay and supervision alignment not validated"
+}

@@ -1,0 +1,12 @@
+{
+  "source": "/e/project1/m3/blank4/code/encdec-vlm/train/encoder_decoder_training/enc_dec_cot/mappings/cot_d_cam3d.jsonl",
+  "rows": 273062,
+  "field_counts": {
+    "target_point": 249321,
+    "ground_visibility": 273062,
+    "trajectory2d": 271318,
+    "trajectory3d": 271372,
+    "phase": 273062,
+    "object_box": 229040
+  }
+}
