@@ -85,7 +85,8 @@ def select_bodies(model, states, meta, task):
             raise ValueError('Expected manipulated obj_main; refusing distractor fallback')
         return [names.index('obj_main')]
     if task == 'TurnOnMicrowave':
-        targets = [g for g in range(model.ngeom) if model.geom(g).name.endswith('_start_button')]
+        prefixes = fixture_names(meta, {'Microwave'})
+        targets = [g for g in range(model.ngeom) if any(model.geom(g).name == prefix + '_start_button' for prefix in prefixes)]
         if len(targets) != 1:
             raise ValueError('Ambiguous microwave start button')
         return [int(model.geom_bodyid[targets[0]])]
@@ -129,7 +130,10 @@ def select_bodies(model, states, meta, task):
 def representative_point(model, data, body, task=None):
     """A rigid point at a visible handle, otherwise visual-geometry centroid."""
     if task == 'TurnOnMicrowave':
-        gid = next(g for g in range(model.ngeom) if model.geom(g).name.endswith('_start_button'))
+        gids = [g for g in range(model.ngeom) if model.geom(g).name.endswith('_start_button') and model.geom_bodyid[g] == body]
+        if len(gids) != 1:
+            raise ValueError('Ambiguous start button within selected microwave body')
+        gid = gids[0]
         local = (data.geom_xpos[gid] - data.xpos[body]) @ data.xmat[body].reshape(3,3)
         return local, np.array([gid]), 'static_button_interaction_region'
     gids = np.flatnonzero(np.isin(model.geom_bodyid, descendants(model, body)))

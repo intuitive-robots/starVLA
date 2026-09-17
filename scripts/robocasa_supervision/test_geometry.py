@@ -30,6 +30,15 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual([(x['start'],x['end'],x['entity_index']) for x in s],[(0,15,0),(15,30,1)])
         self.assertTrue(all(x['boundary_needs_review'] for x in s))
 
+    def test_tiny_contact_bump_does_not_merge_two_door_subtasks(self):
+        m=SimpleNamespace(body_jntadr=np.array([0,1]),body_jntnum=np.array([1,1]),jnt_qposadr=np.array([0,1]))
+        states=np.zeros((100,3));states[:,1]=np.interp(np.arange(100),[0,10,30,99],[0,0,1,1]);states[:,2]=np.interp(np.arange(100),[0,60,80,99],[0,0,1,1])
+        states[90,1]+=.01
+        obj=np.zeros((100,2,3));obj[:,1,0]=1;grip=np.zeros((100,3));grip[45:,0]=1
+        sub=segment_subtasks(m,states,[0,1],obj,grip)
+        self.assertEqual([(s['start'],s['end']) for s in sub],[(0,45),(45,100)])
+        self.assertIn('central90pct',sub[0]['boundary_source'])
+
     def test_simultaneous_entities_are_not_given_invented_boundaries(self):
         m=SimpleNamespace(body_jntadr=np.array([0,1]),body_jntnum=np.array([1,1]),jnt_qposadr=np.array([0,1]))
         states=np.c_[np.zeros(30),np.linspace(0,1,30),np.linspace(0,1,30)]

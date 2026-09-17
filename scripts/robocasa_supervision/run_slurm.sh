@@ -25,7 +25,8 @@ for ((rank=0; rank<WORKERS; rank++)); do
     global_rank=$(( ${SHARD_GROUP:-${SLURM_ARRAY_TASK_ID:-0}} * WORKERS + rank ))
     total_shards=$(( ${SHARD_GROUPS:-1} * WORKERS ))
     extra=()
-    if [[ "$MODE" == pilot ]]; then extra+=(--pilot --overlays); fi
+    if [[ "$MODE" == pilot ]]; then extra+=(--pilot); fi
+    if [[ "$MODE" == pilot || "$MODE" == review ]]; then extra+=(--overlays); fi
     if [[ -n ${EPISODE_IDS:-} ]]; then extra+=(--episode-ids "$EPISODE_IDS"); fi
     (
       export MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=$gpu PYOPENGL_PLATFORM=egl OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1

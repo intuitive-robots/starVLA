@@ -73,7 +73,7 @@ Task metadata identifies manipulated entities, excluding distractors. For multip
 moving parts (e.g. left/right fridge doors), joint-motion order and the gripper's
 nearest-entity transition propose separate subtask boundaries. Those boundaries
 are marked `boundary_needs_review`; they are not human-ground-truth annotations.
-Overlapping manipulation intervals raise rather than inventing a boundary. The
+If small contact bumps or settling cause apparent overlap, a recorded fallback uses the central90% of accumulated joint motion to identify deliberate manipulation intervals. Those intervals must still be disjoint; genuine overlap raises rather than inventing a boundary. The
 single-entity atomic tasks use their entire episode as the semantic interaction.
 Composite tasks are not present in the current18-task training set and require
 additional semantic rules before use.

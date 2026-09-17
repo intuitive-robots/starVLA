@@ -26,6 +26,7 @@ def main():
         grip=stack.enter_context((a.output/'gripper_trace.jsonl').open('w'))
         objfull=stack.enter_context((a.output/'object_trace_full_subtask.jsonl').open('w'))
         gripfull=stack.enter_context((a.output/'gripper_trace_full_subtask.jsonl').open('w'))
+        subtasks_file=stack.enter_context((a.output/'subtasks.jsonl').open('w'))
         z=stack.enter_context((a.output/'shared_z_targets.jsonl').open('w'))
         for row in expected:
             eid=int(row['episode_index']);root=a.labels/f'episode_{eid:06d}'
@@ -33,6 +34,14 @@ def main():
             meta=json.loads((root/'COMPLETE.json').read_text());data=np.load(root/'targets.npz')
             # Same logical episode convention used by LeRobot v3; chunk=episode//1000.
             name=f'robocasa365_target_atomic/{eid//1000}/{eid%1000}'
+            for sub in meta['subtasks']:
+                first=sub['start'];j=sub['entity_index']
+                record=dict(sub,trajectory_name=name,episode_index=eid,cameras=meta['cameras'],dense_source=str(root/'targets.npz'),
+                    gripper_five_points_full_2d=data['gripper_trace_remaining_2d'][first].tolist(),
+                    gripper_five_points_valid=data['gripper_trace_valid'][first].tolist(),
+                    object_five_points_full_2d=data['object_trace_remaining_2d'][first].tolist() if j>=0 else None,
+                    object_five_points_valid=data['object_trace_valid'][first].tolist())
+                subtasks_file.write(json.dumps(record,separators=(',',':'))+'\n')
             for t in range(meta['n_frames']):
                 counts['frames']+=1;sid=int(data['subtask_id'][t]);sub=meta['subtasks'][sid];j=sub['entity_index']
                 if sub['boundary_needs_review'] and not a.include_unreviewed_boundaries:

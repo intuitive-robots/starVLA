@@ -1,5 +1,5 @@
 """Audit entity selection on every saved XML without loading meshes or rendering."""
-import csv,gzip,json
+import argparse,csv,gzip,json
 from pathlib import Path
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
@@ -8,6 +8,10 @@ from geometry import select_bodies
 
 root=Path('/e/scratch/m3/blank4/rc365_supervision')
 rows=list(csv.DictReader(open('/e/project1/m3/blank4/code/starVLA/results_collected/robocasa_supervision/episode_sources.csv')))
+parser=argparse.ArgumentParser();parser.add_argument('--retry-report',type=Path);parser.add_argument('--output',type=Path);args=parser.parse_args()
+if args.retry_report:
+    ids={r['episode_index'] for r in json.loads(args.retry_report.read_text()) if 'error' in r}
+    rows=[r for r in rows if int(r['episode_index']) in ids]
 report=[]
 for row in rows:
     eid=int(row['episode_index']);sid=int(row['source_episode_index']);task=row['source_prefix'].split('/')[2]
@@ -30,7 +34,7 @@ for row in rows:
     except Exception as e:result={'episode_index':eid,'task':task,'error':str(e)}
     report.append(result)
     if len(report)%1000==0:print(len(report),'failures',sum('error'in x for x in report),flush=True)
-(root/'entity_preflight.json').write_text(json.dumps(report,indent=2)+'\n')
+(args.output or root/'entity_preflight.json').write_text(json.dumps(report,indent=2)+'\n')
 print('TOTAL',len(report),'FAIL',sum('error'in x for x in report),flush=True)
 for r in report:
     if 'error'in r:print(json.dumps(r),flush=True)

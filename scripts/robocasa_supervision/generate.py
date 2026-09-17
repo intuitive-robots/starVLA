@@ -43,6 +43,7 @@ def segment_subtasks(model, states, bodies, object_world, gripper_world):
     # Derive interaction centers from joint motion. Split at nearest-entity
     # hand transitions in the gap between consecutive manipulation intervals.
     intervals = []
+    activity = []
     for k, b in enumerate(bodies):
         js = range(model.body_jntadr[b], model.body_jntadr[b] + model.body_jntnum[b])
         velocity = np.zeros(n)
@@ -53,7 +54,20 @@ def segment_subtasks(model, states, bodies, object_world, gripper_world):
             raise ValueError('Multiple objects but no reliable interaction ordering')
         active = np.flatnonzero(velocity > max(1e-5, velocity.max() * .08))
         intervals.append((int(active[0]), int(active[-1]), k))
+        activity.append(velocity)
     intervals.sort()
+    method = 'joint_motion_order_and_gripper_nearest_entity'
+    if any(x[1] >= y[0] for x,y in zip(intervals,intervals[1:])):
+        # Small contact bumps / post-release settling can precede or outlast
+        # deliberate motion. Require non-overlapping central90% motion windows.
+        intervals=[]
+        for k,velocity in enumerate(activity):
+            cumulative=np.cumsum(velocity)
+            first=int(np.searchsorted(cumulative,.05*cumulative[-1]))
+            last=int(np.searchsorted(cumulative,.95*cumulative[-1]))
+            intervals.append((first,last,k))
+        intervals.sort()
+        method = 'central90pct_joint_motion_and_gripper_nearest_entity'
     bounds = [0]
     for previous, current in zip(intervals, intervals[1:]):
         lo, hi = previous[1], current[0]
@@ -66,7 +80,7 @@ def segment_subtasks(model, states, bodies, object_world, gripper_world):
         bounds.append(int(transition[0]) if len(transition) else (lo + hi) // 2)
     bounds.append(n)
     return [{'start': bounds[i], 'end': bounds[i+1], 'entity_index': item[2],
-             'boundary_source': 'joint_motion_order_and_gripper_nearest_entity',
+             'boundary_source': method,
              'boundary_needs_review': True} for i, item in enumerate(intervals)]
 
 
