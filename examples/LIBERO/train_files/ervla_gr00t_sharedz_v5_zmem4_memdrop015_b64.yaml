@@ -1,5 +1,5 @@
 # Fixed shared-z cross-memory arm; two GPUs/run,32/device, global action batch64.
-# Four always-visible tokens decode the same 128D z; dropout masks only readout memory.
+# Four always-visible tokens decode the same 128D z; dropout masks full encoder memory.
 run_id: ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64_s42
 run_root_dir: playground/Checkpoints
 seed: 42
@@ -53,7 +53,7 @@ framework:
     location: encoder
     num_choices: 5
   readout_tokens:
-    enabled: true
+    enabled: false
     num_tokens: 32
     num_layers: 2
     num_heads: 8

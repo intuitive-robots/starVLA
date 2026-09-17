@@ -20,8 +20,10 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1863684 | sm_gz4_015 | Fixed GR00T+z-memory4 dropout0.15, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
-| 1863683 | sm_gz4_100 | Fixed GR00T+z-memory4 dropout1, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
+| 1863773 | sm_gz4f_015 | Fixed GR00T+z-memory4 + full encoder memory dropout0.15, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
+| 1863772 | sm_gz4f_100 | Fixed GR00T+z-memory4 + full encoder memory dropout1, seeds42/43; 20 updates, trainer eval10/20, batch64/run | SUBMITTED |
+| 1863684 | sm_gz4_015 | **PASSED but superseded** — used 32 learned readout tokens; not promoted because GR00T retained-memory test should use full hidden sequence |
+| 1863683 | sm_gz4_100 | **PASSED but superseded** — same readout config; z-only input itself was unaffected, but paired design was replaced |
 | 1861663 | ep_gz_015_43 | Exact4k LIBERO-plus; afterok:1861661, seed43 | SUBMITTED |
 | 1861662 | ep_gz_015_42 | Exact4k LIBERO-plus; afterok:1861661, seed42 | SUBMITTED |
 | 1861661 | tr_gz_015_b64 | LIBERO GR00T+z dropout015, seeds42/43,20k updates,batch64; smoke1861586 passed | RUNNING — all four runs passed20 updates |
@@ -81,15 +83,18 @@ Run training/eval launchers from the tree that owns them. **RoboCasa365 lives in
 worktree** `/e/project1/m3/blank4/code/starVLA-upstream-merge` (branch `merge_upstream_2026_09`);
 everything else from `/e/project1/m3/blank4/code/starVLA`.
 
-### Fixed GR00T shared-z cross-memory smokes 1863683 / 1863684
+### Fixed GR00T shared-z cross-memory smokes 1863772 / 1863773
 
 The four projected memory tokens are decoded from the same 128D z bottleneck. They are
-always visible to cross-attention; dropout masks only the 32 encoder readout tokens.
+always visible to cross-attention; dropout masks the full final encoder hidden sequence.
 Each job runs seeds42/43 concurrently, two GPUs/run and batch32/device (global64/run).
+Smokes1863683/84 completed but used the 32-token learned readout projector; they were
+superseded before full training because no prior GR00T retained-memory result motivates
+that local fork component.
 
 ```bash
-sbatch --parsable -t 02:00:00 --job-name=sm_gz4_100 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
-sbatch --parsable -t 02:00:00 --job-name=sm_gz4_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+sbatch --parsable -t 02:00:00 --job-name=sm_gz4f_100 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop100_b64.yaml ervla_gr00t_sharedz_v5_zmem4_fullmem_memdrop100_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+sbatch --parsable -t 02:00:00 --job-name=sm_gz4f_015 train_seed_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_memdrop015_b64.yaml ervla_gr00t_sharedz_v5_zmem4_fullmem_memdrop015_b64_smoke 42 43 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 ```
 
 ```bash
