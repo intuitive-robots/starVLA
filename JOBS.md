@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 16:01 CEST.
+Last refreshed: 2026-09-17 16:13 CEST.
 
 ## Running / queued
 
@@ -21,6 +21,7 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 | Job | Name | What | State |
 |---|---|---|---|
 | 1857317 | sm_v5_piv4 | QwenPI_v4 seeds42/43; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING |
+| 1857332 | sm_rc365_piv4 | RoboCasa QwenPI_v4 seeds4/42; 20 optimizer updates at 2GPUs/run, batch32/GPU; in-training eval at steps10/20 | PENDING |
 | 1851382 | tr_zonly_gr00t | zonly + GR00T head, seeds 42/43 — the two biggest effects combined | CONFIGURING  |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus eval, zonly+GR00T s43 @1000 eps (dep 1851382) | PENDING  |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus eval, zonly+GR00T s42 @1000 eps (dep 1851382) | PENDING  |
@@ -60,6 +61,14 @@ everything else from `/e/project1/m3/blank4/code/starVLA`.
 ```bash
 # --- RoboCasa365 training (worktree!) -------------------------------------------------
 cd /e/project1/m3/blank4/code/starVLA-upstream-merge
+# QwenPI_v4 smoke; inspect train/eval losses and steps_20 before full training.
+sbatch --parsable --job-name=sm_rc365_piv4 train_robocasa365_seed_pair_slurm.sh \
+  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4.yaml \
+  ervla_robocasa365_piv4_smoke 4 42 \
+  --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
+  --trainer.eval_interval 10 --trainer.save_interval 20 \
+  --trainer.logging_frequency 1  # 1857332
+
 sbatch --parsable --job-name=tr_rc365_s42_rs --export=ALL,\
 CAUSAL_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_causal.yaml,\
 V5_YAML=./examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_pi_v5.yaml,\
