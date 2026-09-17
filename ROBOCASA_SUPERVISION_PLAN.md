@@ -1,6 +1,6 @@
 # RoboCasa supervision — September 17, 2026
 
-LIBERO supervision is available; equivalent RoboCasa labels are not yet generated. Reuse the target interface and derive labels from simulator replay before spending training time on the supervised transfer. Free-form reasoning prose is not required by shared-z. The two-pass experiment specifically requires a predicted five-point trace that becomes an action input.
+LIBERO supervision is available; equivalent RoboCasa labels are not yet generated. Reuse the target interface and derive labels from simulator replay before spending training time on the supervised transfer. Free-form reasoning prose is not required by shared-z. The two-pass experiment specifically requires a predicted five-point trace that becomes an action input. To test the winning causal mechanism faithfully, use its remaining-motion **object** trace; a chunk-local gripper trace is a different target and must be a named ablation.
 
 ## Verified inputs
 
@@ -25,7 +25,8 @@ Official [dataset documentation](https://raw.githubusercontent.com/robocasa/robo
 
 | target | derivation and required check |
 |---|---|
-| Five-point2D gripper trace | Replay/projection or matching gripper masks; match LIBERO's chosen convention, horizon16 and boundary handling. Explicitly distinguish geometric end-effector projection from visible-mask centroid. Used by the two-pass trace path. |
+| Five-point2D object trace for causal-matched two-pass | Selected manipulated-object track from the current frame to the end of its annotated subtask/window, simplified and sampled along spatial arc length. Preserve the causal target semantics; do not substitute a16-step gripper trace. Validate target-box endpoint snapping separately. |
+| Optional five-point2D gripper trace | Replay/projection or matching gripper masks; horizon16 and boundary handling as in the shared-z label generator. Explicitly distinguish end-effector projection from visible-mask centroid. This is a target ablation, not the causal-matched reasoning target. |
 | Five-point3D gripper displacement | Replay world gripper poses, transformed into the **current** wrist-camera frame; signed cm, current gripper as origin. Do not sum commanded actions or use a different future camera frame for each point. |
 | Object box, target point, relation | Instance masks plus task/fixture references. Articulated fixtures need handle/knob/door semantics, not an arbitrary whole-appliance box. Navigation needs a defined goal representation or an explicit masked target. |
 | Gripper phase | Validate raw gripper command and measured qpos/contact convention. This is gripper state, not a complete subtask label for appliance operation. |
@@ -42,3 +43,5 @@ Recompute transforms for RoboCasa: mobile base, wrist extrinsics, image orientat
 4. **Day3–4 if gates pass:** train independent matched pairs and chain the declared task-set evaluations; reserve roughly20h/pair from previous RoboCasa logs plus1.5–2h evaluation, but GR00T+z throughput remains unmeasured. Label/replay time is also unmeasured. No guaranteed completion date follows from archive availability alone.
 
 Keep the existing LIBERO memory and reasoning tracks running independently. The critical path here is trustworthy labels and data integration, not another auxiliary-head sweep. RoboCasa remains a conditional supporting benchmark until matched rollout evidence lands; the Sep21 scientific decision and Sep24 headline freeze do not move.
+
+Causal trace audit: saved `playground/Checkpoints/libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01/config.full.yaml` selects `data/cot_mappings/libero_plus_full_ours_trace.jsonl`, with action horizon8. `scripts/create_cot_mapping.py` takes the remaining object track (`trace[start_idx:]`), applies simplification and five-point arc-length sampling, and can snap the endpoint to the selected target box. It does not truncate to the action chunk. The first raw trajectory has126 per-frame entries, with changing starts/interior points and the same target endpoint in inspected samples. The scope is the annotation window/subtask, not necessarily the entire multi-subtask episode.
