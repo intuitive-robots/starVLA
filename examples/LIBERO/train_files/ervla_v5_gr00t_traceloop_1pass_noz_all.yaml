@@ -1,8 +1,8 @@
 # PROPOSED TRACE-LOOP ARM. Requires the QwenGR00T_TraceLoop framework path;
 # do not submit until the 20-update smoke validates the implementation.
 # Two GPUs/run, per-device batch32, global action batch64. Seed/run_id are launcher-overridden.
-# Match the encoder QwenGR00T topology used by the completed v5/shared-z runs:
-# alternating cross-only and action-self-only DiT blocks.
+# Match upstream StarVLA/NVIDIA GR00T: full final-layer VLM token sequence,
+# alternating cross-only and action-self-only DiT blocks, no local query compressor.
 run_id: ervla_v5_gr00t_traceloop_1pass_noz_all_s42
 run_root_dir: playground/Checkpoints
 seed: 42
