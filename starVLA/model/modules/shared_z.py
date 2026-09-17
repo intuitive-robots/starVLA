@@ -3,8 +3,10 @@
 Lifted verbatim out of ``QwenPI_v3`` so both action-head frameworks can use it. The
 bottleneck pools the encoder into a single ``dim``-d vector z, supervises it against
 structured targets (ground relations, trajectory, phase, ...), and hands z to the DiT as
-``extra_conditioning``; with ``memory_dropout_rate: 1`` the encoder memory is dropped
-entirely and the head sees ONLY z, which is what the "zonly" arms do.
+``extra_conditioning``. The legacy ``memory_dropout_rate: 1`` path drops the entire
+cross-attention result, so z directly conditions only self-attention blocks in an
+alternating DiT. ``cross_memory_tokens`` fixes that by decoding the same z into
+always-visible cross-attention memory tokens while masking only encoder/readout tokens.
 
 Nothing here is PI-specific. The mixin needs its host to provide:
 
@@ -109,6 +111,15 @@ class SharedZMixin:
         self.shared_z_future_offset = int(temporal_cfg.get("future_offset", 8))
         self.shared_z_temporal_weight = float(temporal_cfg.get("weight", 1.0))
         self.shared_z_decoder_memory = bool(shared_z_cfg.get("decoder_memory", False))
+        self.shared_z_cross_memory_tokens = int(
+            shared_z_cfg.get("cross_memory_tokens", 0)
+        )
+        if self.shared_z_cross_memory_tokens < 0:
+            raise ValueError("framework.shared_z.cross_memory_tokens must be >= 0")
+        if self.shared_z_cross_memory_tokens and not self.shared_z_enabled:
+            raise ValueError(
+                "framework.shared_z.cross_memory_tokens requires shared_z.enabled=true"
+            )
         diffusion_model_cfg["extra_conditioning_dim"] = (
             self.shared_z_dim if self.shared_z_enabled else 0
         )
@@ -121,6 +132,7 @@ class SharedZMixin:
         self.shared_z_future_predictor = None
         self.shared_z_difference_decoder = None
         self.shared_z_decoder_up = None
+        self.shared_z_memory_projector = None
         self._shared_z_from_decoder = None
         if not self.shared_z_enabled:
             return
@@ -131,6 +143,17 @@ class SharedZMixin:
             query_dim=int(shared_z_cfg.get("query_dim", 512)),
             num_heads=int(shared_z_cfg.get("num_heads", 8)),
         )
+        if self.shared_z_cross_memory_tokens:
+            cross_attention_dim = int(
+                self.config.framework.action_model.diffusion_model_cfg.cross_attention_dim
+            )
+            self.shared_z_memory_projector = nn.Sequential(
+                nn.LayerNorm(self.shared_z_dim),
+                nn.Linear(
+                    self.shared_z_dim,
+                    self.shared_z_cross_memory_tokens * cross_attention_dim,
+                ),
+            )
         self.shared_z_heads = nn.ModuleDict({
             name: SharedZRegressionHead(self.shared_z_dim, int(spec["dim"]))
             for name, spec in self.shared_z_target_specs.items()
@@ -354,3 +377,52 @@ class SharedZMixin:
         if rate >= 1.0:
             return torch.zeros(batch, device=device, dtype=torch.bool)
         return torch.ones(batch, device=device, dtype=torch.bool)
+
+    def _augment_shared_z_cross_memory(
+        self,
+        encoder_memory: torch.Tensor,
+        encoder_valid: torch.Tensor,
+        z: torch.Tensor,
+        encoder_memory_keep: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prepend always-visible z tokens and mask only optional encoder memory.
+
+        The legacy memory-dropout path masks the output of every cross-attention block.
+        That also removes attention to z-conditioned queries.  With cross-memory tokens,
+        z remains available to every cross block while dropout affects only the original
+        encoder/readout tokens.
+        """
+        if self.shared_z_memory_projector is None:
+            raise RuntimeError("shared-z cross-memory tokens are not configured")
+        if encoder_memory.ndim != 3 or encoder_valid.ndim != 2:
+            raise ValueError("encoder_memory must be [B,L,D] and encoder_valid [B,L]")
+        if encoder_memory.shape[:2] != encoder_valid.shape:
+            raise ValueError(
+                "encoder memory/mask mismatch: "
+                f"{tuple(encoder_memory.shape)} vs {tuple(encoder_valid.shape)}"
+            )
+        batch, _, width = encoder_memory.shape
+        if z.shape != (batch, self.shared_z_dim):
+            raise ValueError(
+                f"shared z must be {(batch, self.shared_z_dim)}, got {tuple(z.shape)}"
+            )
+        if encoder_memory_keep.shape != (batch,):
+            raise ValueError(
+                f"encoder_memory_keep must be {(batch,)}, got {tuple(encoder_memory_keep.shape)}"
+            )
+
+        z_memory = self.shared_z_memory_projector(z).reshape(
+            batch, self.shared_z_cross_memory_tokens, width
+        )
+        z_memory = z_memory.to(device=encoder_memory.device, dtype=encoder_memory.dtype)
+        z_valid = torch.ones(
+            batch,
+            self.shared_z_cross_memory_tokens,
+            device=encoder_valid.device,
+            dtype=torch.bool,
+        )
+        kept_encoder_valid = encoder_valid.bool() & encoder_memory_keep.bool()[:, None]
+        return (
+            torch.cat([z_memory, encoder_memory], dim=1),
+            torch.cat([z_valid, kept_encoder_valid], dim=1),
+        )

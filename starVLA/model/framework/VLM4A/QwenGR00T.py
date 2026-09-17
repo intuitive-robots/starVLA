@@ -609,11 +609,9 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         else:
             dit_context = last_hidden                          # [B, L, H]
         dit_valid_mask = self._dit_valid_mask(qwen_inputs, last_hidden)
-        dit_attention_bias = self._dit_attention_bias(dit_valid_mask, dit_context.dtype)
-
-        # Shared-z bottleneck: pool the encoder into one vector the DiT gets as
-        # extra_conditioning. With memory_dropout_rate 1 the readout context is masked out
-        # for every row, so the head sees ONLY z -- the GR00T counterpart of the zonly arms.
+        # Shared-z bottleneck: pool the encoder into one vector used as AdaLN conditioning.
+        # The optional cross-memory projection also exposes that same bottleneck to every
+        # cross-attention block, while memory dropout masks only the readout tokens.
         shared_z = None
         if self.shared_z_enabled:
             shared_z = self.shared_z_pooler(
@@ -663,8 +661,6 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 else 4
             )
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
-            dit_context_repeated    = dit_context.repeat(repeated_diffusion_steps, 1, 1)
-            dit_attention_bias_repeated = dit_attention_bias.repeat(repeated_diffusion_steps, 1, 1)
 
             state_repeated = None
             if state is not None:
@@ -678,9 +674,24 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 self._shared_z_memory_keep(actions_target.shape[0], dit_context.device)
                 if self.shared_z_enabled else None
             )
+            action_encoder_memory_keep = encoder_memory_keep
+            if self.shared_z_cross_memory_tokens:
+                dit_context, dit_valid_mask = self._augment_shared_z_cross_memory(
+                    dit_context, dit_valid_mask, shared_z, encoder_memory_keep
+                )
+                # Token-level masking above preserves z memory in every cross block.
+                # Do not also apply the legacy whole-cross-attention output mask.
+                action_encoder_memory_keep = None
+            dit_attention_bias = self._dit_attention_bias(
+                dit_valid_mask, dit_context.dtype
+            )
+            dit_context_repeated = dit_context.repeat(repeated_diffusion_steps, 1, 1)
+            dit_attention_bias_repeated = dit_attention_bias.repeat(
+                repeated_diffusion_steps, 1, 1
+            )
             encoder_memory_keep_repeated = (
-                encoder_memory_keep.repeat(repeated_diffusion_steps)
-                if encoder_memory_keep is not None else None
+                action_encoder_memory_keep.repeat(repeated_diffusion_steps)
+                if action_encoder_memory_keep is not None else None
             )
 
             action_loss = self.action_model(
@@ -765,8 +776,6 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         else:
             dit_context = last_hidden                          # [B, L, H]
         dit_valid_mask = self._dit_valid_mask(qwen_inputs, last_hidden)
-        dit_attention_bias = self._dit_attention_bias(dit_valid_mask, dit_context.dtype)
-
         shared_z = None
         encoder_memory_keep = None
         if self.shared_z_enabled:
@@ -778,6 +787,13 @@ class Qwen_GR00T(SharedZMixin, baseframework):
             encoder_memory_keep = self._shared_z_memory_keep(
                 last_hidden.shape[0], last_hidden.device
             )
+            if self.shared_z_cross_memory_tokens:
+                dit_context, dit_valid_mask = self._augment_shared_z_cross_memory(
+                    dit_context, dit_valid_mask, shared_z, encoder_memory_keep
+                )
+                encoder_memory_keep = None
+
+        dit_attention_bias = self._dit_attention_bias(dit_valid_mask, dit_context.dtype)
 
         state = (
             torch.from_numpy(np.array(state)).to(dit_context.device, dtype=dit_context.dtype)
