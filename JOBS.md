@@ -12,7 +12,7 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-17 17:24 CEST.
+Last refreshed: 2026-09-17 22:44 CEST.
 
 ## Running / queued
 
@@ -51,6 +51,10 @@ Refreshed 2026-09-17 09:56 from `squeue` (see `scripts/jobs_status.sh`).
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1863688 / 1863690 / 1863692 | tr_rc_gz_42 / tr_rc_gz_4 / tr_rc_gzm | **CANCELLED by user at57s** — RoboCasa GR00T full runs stopped after a flaw was found in z-only conditioning; no result may be used |
+| 1863689 / 1863691 / 1863693 | tr_rc_gz42_rs / tr_rc_gz4_rs / tr_rc_gzm_rs | **CANCELLED before start** — automatic resume dependencies for the stopped RoboCasa runs |
+| 1863697–1863702 | rc_gnoz / rc_gz / rc_gm015, seeds4/42 | **CANCELLED before start** — chained18-task evaluations for the stopped RoboCasa runs |
+| 1863647 / 1863648 | sm_rc_gz0 / sm_rc_gzm | **PASSED AS INTEGRATION TESTS ONLY** — four20-update runs,eval10/20,finite losses/gradients,all six z targets and complete checkpoints; architecture invalidated before full training |
 | 1857753 | ix_piv4_smoke | **COMPLETED / released early** — interactive node ran both corrected two-seed smoke pairs; both returned0 and the allocation was relinquished after10m |
 | 1857753 / LIBERO phase | ix_piv4_smoke | **PASSED** — both seeds completed20 updates and step10/20 eval; s42 loss1.675→0.904, MSE.01982→.01378; s43 loss1.049→0.846, MSE.01945→.01346; nonzero encoder gradients and complete step20 checkpoints |
 | 1857753 / RoboCasa phase | ix_piv4_smoke | **PASSED** — both seeds completed20 updates and step10/20 eval; s4 loss1.436→0.969, MSE.01424→.01165; s42 loss1.388→0.964, MSE.01342→.01193; state retained, nonzero encoder gradients and complete step20 checkpoints |
@@ -385,3 +389,7 @@ Submitted from `/e/project1/m3/blank4/code/starVLA-upstream-merge` with the same
 ```bash
 sbatch --parsable --time=02:00:00 --job-name=sm_rc_gzm --export=ALL,STARVLA_REPO=/e/project1/m3/blank4/code/starVLA-upstream-merge,YAML_A=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_sharedz_v5_zonly.yaml,RUN_A=ervla_rc365_gr00t_sharedz_v5_zonly_smoke_b,YAML_B=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_gr00t_sharedz_v5_mem015.yaml,RUN_B=ervla_rc365_gr00t_sharedz_v5_mem015_smoke /e/project1/m3/blank4/code/starVLA/train_config_pair_slurm.sh 42 --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
 ```
+
+Both smokes completed in7m07s with exit0, but they establish software/data-path health only. A z-only conditioning flaw was identified immediately afterward. Full jobs1863688/90/92 had run for57s and were cancelled; resume jobs1863689/91/93 and chained evals1863697–702 were cancelled before start. The older RoboCasa PI-v4 job1858730 and all LIBERO jobs were left untouched as requested. Do not resume or evaluate these GR00T RoboCasa run IDs.
+
+The cancelled full layout was no-z versus z-only at seed42 (1863688), no-z versus z-only at seed4 (1863690), and retained-memory seeds4/42 (1863692), each2GPUs/run and batch64, with12h resume dependencies and all18-task evals. Booster rejected an initial30h request before creating a job because the QOS maximum is12h.
