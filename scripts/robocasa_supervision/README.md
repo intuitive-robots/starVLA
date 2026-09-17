@@ -82,7 +82,7 @@ datasets:
     native_supervision:
       labels_root: /e/scratch/m3/blank4/rc365_supervision/labels_v1
       episode_cache_size: 8
-      include_unreviewed_boundaries: false
+      include_unreviewed_boundaries: true
       trace_subject: object
       trace_span: remaining
 ```
@@ -99,6 +99,13 @@ axes. A target cropped out of view remains out of range and invalid; it is never
 clipped to the image edge and presented as supervision. A partially cropped object
 box is conservatively masked because the dense label package cannot recover the
 post-crop visible segmentation box.
+
+The 465 multi-part episodes are included in the main training recipe. Their inferred
+boundaries remain attached to every record through `boundary_source` and
+`boundary_needs_review`, and targets remain strictly bounded to the selected part.
+Set `include_unreviewed_boundaries: false` only for the conservative boundary-quality
+ablation; doing so removes supervision from 210,283 frames rather than improving the
+remaining labels.
 
 `robocasa_joint_augmentation` is an explicit opt-in. Historical RoboCasa YAML files
 contained `augmentation: crop_photometric`, but their data config ignored it. Keeping

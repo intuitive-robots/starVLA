@@ -41,6 +41,21 @@ def _resolver(include_unreviewed=False):
 
 
 @requires_labels
+def test_inferred_boundaries_are_included_by_default():
+    resolver = RoboCasaSupervision(
+        {"labels_root": LABEL_ROOTS[0]},
+        "robocasa365_target_atomic",
+        VIDEO_KEYS,
+        horizon=16,
+        future_offset=8,
+    )
+    record = resolver.resolve(502, 221)
+    assert record["boundary_needs_review"]
+    assert record["boundary_accepted"]
+    assert record["valid"]["phase"]
+
+
+@requires_labels
 def test_two_door_boundary_keeps_targets_inside_each_subtask():
     resolver = _resolver(include_unreviewed=True)
     before = resolver.resolve(502, 221)

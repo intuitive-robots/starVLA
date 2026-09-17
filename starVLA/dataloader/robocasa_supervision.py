@@ -29,7 +29,10 @@ class RoboCasaSupervision:
             raise ValueError('Native camera-frame 3D targets require the wrist input')
         if horizon != 16 or future_offset not in (0, 8):
             raise ValueError('Native v1 chunk targets require horizon16 and future offset0 or8')
-        self.include_unreviewed = bool(config.get('include_unreviewed_boundaries', False))
+        # Multi-part boundaries are deterministic annotations from joint motion and
+        # hand proximity. Keep them by default; callers can request the conservative
+        # masked ablation explicitly without discarding 210k useful training frames.
+        self.include_unreviewed = bool(config.get('include_unreviewed_boundaries', True))
         self.cache_size = int(config.get('episode_cache_size', 8))
         if self.cache_size < 1:
             raise ValueError('episode_cache_size must be positive')
