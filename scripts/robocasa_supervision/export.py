@@ -21,6 +21,7 @@ def main():
     if missing and not a.allow_partial:raise ValueError(f'{len(missing)} episodes missing; use audit, not zeros')
     a.output.mkdir(parents=True,exist_ok=True)
     counts={'frames':0,'object_rows':0,'gripper_rows':0,'z_rows':0,'object_full_rows':0,'gripper_full_rows':0,'unreviewed_frames':0,'inferred_boundary_frames':0,'missing_episodes':missing}
+    counts['z_valid_counts']={key:0 for key in ('target_point','object_box','ground_relation','ground_visibility','trajectory3d','phase','future_frame')}
     with ExitStack() as stack:
         obj=stack.enter_context((a.output/'object_trace.jsonl').open('w'))
         grip=stack.enter_context((a.output/'gripper_trace.jsonl').open('w'))
@@ -63,6 +64,9 @@ def main():
                         write_row(stream,name,t,prompt,answer,sid);counts[counter]+=1
                 targets={'trajectory3d':data['trajectory3d_chunk'][t].reshape(-1).tolist(),'phase':int(data['phase'][t])}
                 masks={'trajectory3d':bool(data['trajectory3d_chunk_valid'][t]),'phase':True,'target_point':bool(data['target_point_valid'][t,0]),'object_box':bool(j>=0 and data['object_visible'][t,j,0]),'ground_relation':bool(data['ground_relation_valid'][t,0]),'ground_visibility':data['ground_visibility_valid'][t,0].tolist()}
+                for key,valid in masks.items():
+                    counts['z_valid_counts'][key]+=int(all(valid) if isinstance(valid,list) else valid)
+                counts['z_valid_counts']['future_frame']+=int(data['future_frame_valid'][t])
                 targets['target_point']=data['target_point'][t,0].tolist()
                 targets['object_box']=data['object_box'][t,j,0].tolist() if j>=0 else [0.]*4
                 targets['ground_relation']=data['ground_relation'][t,0].tolist();targets['ground_visibility']=data['ground_visibility'][t,0].tolist()
