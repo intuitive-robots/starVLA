@@ -16,6 +16,19 @@ Freeze audit: the encoder winner's configured `language_model.layers` path is th
 
 The closest internal action-only control on that same14k-data recipe is `libero_plus_qwen08b_gr00t_deeps` at77.175% (3,087/4,000),4.925pp below prompt-only CoT. It matches dataset, Qwen3.5-0.8B, horizon8,30k steps, global batch64 and full tuning, but changes GR00T topology (alternating cross/self versus legacy all-cross) and training seed (42 versus1234) together with the CoT objective. This comparison supports a real recipe difference, not an isolated reasoning effect.
 
+## September18 newly completed exact4k results
+
+| arm | seed42 | seed43 | mean ± seed SD | matched conclusion |
+|---|---:|---:|---:|---|
+| QwenPI_v4 fused attention | 76.125% (3,045/4,000; SE0.674pp) | 75.200% (3,008/4,000; SE0.683pp) | 75.663±0.654% | v5 PI is72.875/73.375%; paired gains+3.250/+1.825pp. |
+| legacy shared-z GR00T, memory dropout1 | 75.600% (3,024/4,000; SE0.679pp) | 78.150% (3,126/4,000; SE0.653pp) | 76.875±1.803% | Batch64/readout architecture; high seed spread. |
+| legacy shared-z GR00T, memory dropout0.15 | 76.850% (3,074/4,000; SE0.667pp) | 76.725% (3,069/4,000; SE0.668pp) | 76.788±0.088% | No retained-memory mean gain versus dropout1 (−0.0875pp). |
+| trace-loop predicted, no z | 74.475% (2,979/4,000; SE0.689pp) | pending | pending | Seed42 is+0.875pp over one-pass and+2.350pp over null. |
+| trace-loop one-pass, no z | 73.600% (2,944/4,000; SE0.697pp) | pending | pending | Required semantic-loop control. |
+| trace-loop null two-pass, no z | 72.125% (2,885/4,000; SE0.709pp) | 72.900% (2,916/4,000; SE0.703pp) | 72.513±0.548% | Same-compute control complete. |
+
+All listed completed rows contain exactly1,000 episodes per suite and no nonempty failed-shard sentinel. Wrong-trace job1864756 has n=0 after all suite retries failed; its written zero-count aggregates are operational artifacts and are excluded.
+
 `seed` now means training seed from config.full.yaml, falling back to run name. RC JSON seed42 is the environment/server seed even for training seed4. `is_full_protocol` for RC means all declared internal manifest tasks at 48 episodes; it does not mean the official 50-task protocol. A blank checkpoint_step in LIBERO means the raw aggregate does not identify it; do not infer a checkpoint from training max_steps.
 
 ## LIBERO-plus seed summaries (canonical full protocol only)
