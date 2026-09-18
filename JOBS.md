@@ -20,6 +20,7 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1873117 | ae-prepare | other workstream (not this session) — `AE_Data_SelectioN_Robotic/slurm/prepare.jupiter.sbatch`, submitted Sep18 11:14, 6h limit | PENDING (Priority); listed only so `jobs_status.sh` stops flagging it |
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | PENDING (Dependency) |
 | 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | PENDING (Dependency) |
 | 1864837 / 1864838 | tr_cz42 / tr_cz43 | Matched causal full-hidden/no-z vs fixed four-token z-only memory, one paired4-GPU node per seed,20k,batch64/arm | RUNNING — Sep18 00:10: no-z steps1,000/900, +z steps600/700, no hard errors; smokes1864642/43 passed |
@@ -75,6 +76,7 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 1.0 (z-only) | **COMPLETED, CLEAN** both seeds. s42 **0.7650** (0.657/0.797/0.830/0.776), s43 **0.7595** (0.609/0.783/0.845/0.801). Seed mean **0.762** — best of this batch, still below the zonly+GR00T 0.7847. |
 | 1863856 / 1863857 | ep_gz4f015_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 0.15 | **COMPLETED, CLEAN** both seeds. s42 **0.7598** (0.672/0.762/0.835/0.770), s43 **0.7568** (0.657/0.758/0.817/0.795). Seed mean **0.758** — best of this batch, still under the zonly+GR00T 0.7847. |
 | 1864841 / 1864842 | ep_cnoz_43 / ep_cz4_43 | Exact4k LIBERO-plus — causal full-memory no-z vs causal shared-z 4-token, seed43 | **COMPLETED, CLEAN** but **far behind**: no-z **0.6038**, z-4 **0.5695**. Both collapse on `libero_goal` (0.473 and 0.358 vs 0.758-0.797 for gz4f) while matching each other on `libero_10` (0.523/0.517) and `object` (0.713/0.725) — so the z bottleneck is not what separates them; something in the causal config hits `goal` specifically, and hits the z-4 arm about twice as hard. Seed42 pair 1864839/40 queued to confirm. |
 | 1864757 | ep_cot_prompt | Causal CoT prompt-only intervention, exact4k, identical weights, `generate_at_inference:false` | **COMPLETED** 01:05:55 (3,573 eps/h — action-head speed, no autoregressive pass). 4,000/4,000 eps, zero failed shards: `libero_10` 0.786, `libero_goal` 0.774, `libero_object` 0.867, `libero_spatial` 0.857 -> **mean 0.821** (3,284/4,000). `failed_suites.txt` in its output dir was stale debris from the cancelled 1864635 (names node jpbo-023-10; this job ran on jpbo-047-22) and is archived as `failed_suites.stale_from_1864635.txt`. |
