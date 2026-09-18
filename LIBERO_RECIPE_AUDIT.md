@@ -1,0 +1,43 @@
+# LIBERO and LIBERO-plus training-recipe audit — September 18, 2026
+
+This audit starts from the [VLA Evaluation Harness leaderboard](https://allenai.github.io/vla-evaluation-harness/leaderboard/) and checks every recipe against the cited paper or official repository. The harness snapshot in its [official repository](https://github.com/allenai/vla-evaluation-harness) was last updated August 10, 2026. Its LIBERO-plus `overall_score` is the arithmetic mean of the seven displayed perturbation axes. Several papers instead report an instance-weighted total, so both values are shown. None of the external scores below was recomputed from rollout files.
+
+## Cleanest comparisons without external embodied-policy pretraining
+
+“No embodied pretraining” still permits a web-pretrained VLM or image model. `global batch` is used only when the source makes the scope explicit; ambiguous values remain ambiguous.
+
+| method | LIBERO-plus score and scope | policy initialization and LIBERO training | batch | updates / schedule | LR | action chunk | source-quality caveat |
+|---|---:|---|---:|---|---|---:|---|
+| Anchor-Align VLA | harness 90.8; paper 90.3 | Prismatic-Qwen2.5-0.5B + VLA-Adapter, no robot-policy pretraining; LoRA r64; two cameras + state | **global 32** | 10k; image crop/jitter | 2e-4 | 8, inherited from released VLA-Adapter code | Main Table 1 is **LIBERO-Spatial only**, despite containing all seven axes. It is not comparable to our four-suite aggregate. Five-seed statistics are also Spatial-only. [paper](https://arxiv.org/abs/2607.13429), [VLA-Adapter code](https://github.com/OpenHelix-Team/VLA-Adapter) |
+| VLANeXt | harness 84.5; paper 83.9 full four-suite average | Qwen3-VL-2B-Instruct, full finetune, no external robot data; separate corresponding policy per suite | **global 256** | 10k; 500-step warmup; cosine | 1e-4 | 8 | Strong full-suite result, but it averages four suite-specific policies rather than one merged policy. [paper](https://arxiv.org/abs/2602.18532) |
+| ImageWAM FLUX.2 9B | harness 85.3; paper 85.2 full four-suite | generic pretrained image-editing/VLM weights; no embodied-policy pretraining; **one policy on merged four-suite data** | 12/GPU × 8 = **global 96** | 10 epochs; 5% warmup; cosine | 1e-4 | 16 | Closest high-scoring full-suite/data comparator, but its 9B image-editing prior and world-action architecture are much larger than ours. [paper](https://arxiv.org/abs/2606.19531) |
+| ImageWAM FLUX.2 4B | harness 82.9; paper 83.1 full four-suite | same protocol as above | 10/GPU × 8 = **global 80** | 10 epochs; 5% warmup; cosine | 1e-4 | 16 | Same merged-policy protocol and no embodied-policy pretraining; still initialized from a pretrained image editor. [paper](https://arxiv.org/abs/2606.19531) |
+| FoMoVLA | harness 81.8; paper 80.5 full four-suite | StarVLA-GR00T base, no additional robot-policy pretraining; future-feature + tracking objectives coupled by future-conditioned cross-attention | reported 12 on 8 H20s; **scope unspecified** | 30k | VLM 1e-5; auxiliary heads 1e-4 | 8 | Do not silently interpret 12 as global or per-GPU. This is the closest architecture family and supports coupling auxiliary predictions back into action conditioning. [paper](https://arxiv.org/abs/2607.14739) |
+| Qwen-RobotManip-scratch | harness 79.7; cited paper table 78.3 full four-suite | generic Qwen VLM/action model trained on LIBERO without robot pretraining | not reported for this scratch baseline | not reported | not reported | not reported | The result is a baseline in FoMoVLA; FoMoVLA’s own training recipe cannot be assigned to it. [Qwen-RobotManip report](https://arxiv.org/abs/2606.17846), [FoMoVLA table](https://arxiv.org/abs/2607.14739) |
+| ResVLA | harness 77.1; paper 76.9 full four-suite | Qwen3-2B VLM plus action model from scratch on merged LIBERO; no robot-policy pretraining | not reported | main table says 30k; appendix says 40k with 5k warmup | base 2.5e-5; VLM interface 1e-5; action 1e-4 | not reported | The 30k/40k inconsistency and missing batch/chunk prevent recipe-level comparison. [paper](https://arxiv.org/abs/2604.21391) |
+
+Our current shared-z recipe uses global batch 32, 20k updates, 2k warmup, VLM interface LR 1e-5, action/shared-z LR 1e-4, predicts 16 actions and executes 8. The batch-64 controls use the same update count and therefore twice the action-example presentations.
+
+## Strong leaderboard rows that inherit embodied-policy pretraining
+
+These results show useful objectives but do not answer what can be achieved from LIBERO-only policy training.
+
+| method | harness / paper LIBERO-plus | inherited policy | batch / updates / LR | chunk | useful idea |
+|---|---:|---|---|---:|---|
+| Hermite-VLAReg | 91.4 / 90.9 | open-source π0.5 base checkpoint | global 256; 30k; 1k warmup; peak 5e-5→3e-5 | 10 | Training-only K=2 Hermite trajectory regularizer; no inference overhead. [paper](https://arxiv.org/abs/2608.01265) |
+| QuoVLA zero-shot | 90.3 / 90.3 | π0.5 | batch not reported; about 10 epochs; 2.5e-5 | 50 | Quantized quotient bottleneck plus an unquantized stop-gradient action-reference branch. [paper](https://arxiv.org/abs/2605.24890) |
+| ACoT-VLA zero-shot | 87.5 arithmetic / 86.6 paper total | π0.5 | global 128; 40k; peak 5e-5 | 10 | Explicit coarse trajectory and implicit layerwise action priors are fed into the final action head. [paper](https://arxiv.org/abs/2601.11404) |
+| OpenVLA-OFT | 69.6 in the standard full-suite table | OpenVLA trained on OXE | 8/GPU × 8 = global 64; 150k; 5e-4 with decay at 100k | 8 | Shows global 64 itself is ordinary; its 9.6M sample presentations and robot pretraining make it a poor optimization comparator. [official LIBERO recipe](https://github.com/moojink/openvla-oft/blob/main/LIBERO.md) |
+
+## What the recipes imply for our next decisions
+
+1. **Do not blame global batch 64 by itself.** Competitive LIBERO-only-policy recipes span global 32, 80, 96 and 256; OpenVLA-OFT uses 64. FoMoVLA reports 12 without defining scope. Architecture, initialization, update count and suite mixing vary at the same time. Our matched 10k/20k checkpoint evaluation is stronger evidence for our model than cross-paper batch values.
+2. **Keep the current LR split.** Our VLM-interface 1e-5 and action-head 1e-4 exactly match FoMoVLA and the common StarVLA-style recipe. The larger 1e-4/2e-4 backbone rates belong to full-finetune or LoRA regimes and should not be transplanted without a controlled sweep.
+3. **Do not switch to chunk 8 before the existing execution-length screen.** VLANeXt and FoMoVLA use 8, while the strongest clean merged-policy comparator, ImageWAM 9B, uses 16. Our model predicts 16 and already executes 8, so a chunk-8 retrain would mix target horizon with execution horizon. First evaluate execution lengths 4/8/16 on the same checkpoint.
+4. **The best deadline-relevant literature intervention is representation anchoring, not another batch-only run.** Anchor-Align’s headline scope is only Spatial, but its controlled baseline improves from 85.1 to 90.3 with layerwise frozen-VLM feature anchoring plus a small language-action alignment loss. Our trainable bidirectional encoder is particularly exposed to representation drift. Implement only after the QwenPI_v4+shared-z smoke and causal attribution work; require a matched control and full four-suite evaluation.
+5. **The cheapest action-side follow-up is Hermite regularization.** It is an auxiliary loss on the predicted clean trajectory and leaves inference unchanged. Because its evidence comes from a π0.5-initialized model, start with a short one-seed continuation and calibrate its loss scale rather than copying λ=10. It cannot replace the encoder attribution experiments.
+6. **FoMoVLA reinforces the result of our failed trace loop:** independent auxiliary losses are weak unless their predictions condition action generation. Its gain comes from coupling predicted future appearance and point motion. A new loop should therefore use a low-dimensional differentiable latent interface or cross-attention, not another generated-language/two-pass trace.
+
+## Schedule consequence
+
+The current Day 2/3 order remains: finish the batch-64 10k exact-4k diagnostic, smoke QwenPI_v4+legacy-shared-z, and protect the matched causal attribution and corrected RoboCasa work. In parallel, prepare two nonblocking, smoke-first candidates: (a) layerwise pretrained-feature anchoring with a small alignment head; (b) K=2 Hermite trajectory regularization. Release a full run only if the 20-update trainer evaluation is finite, the intended gradient path is verified, and it does not delay the claim-critical controls. No broad batch-32 rerun and no chunk-8 retrain are justified by the leaderboard audit.
