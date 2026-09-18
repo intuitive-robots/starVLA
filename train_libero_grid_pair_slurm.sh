@@ -1,12 +1,12 @@
 #!/bin/bash
 # Resumable pair launcher for global-batch-32 cells: two GPUs/run,16/device.
-# The site disables Slurm requeue, so unfinished pairs submit a fresh segment.
+# The site disables Slurm requeue, so unfinished pairs submit a fresh 12-hour segment.
 #SBATCH --job-name=tr_grid_pair
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=288
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 #SBATCH --signal=B:USR1@300
 #SBATCH --open-mode=append
 #SBATCH --output=slurm_logs/train_grid_pair_%j.out
@@ -118,8 +118,8 @@ submit_available_evals "$RUN_B"
 final_a="playground/Checkpoints/${RUN_A}/checkpoints/steps_80000_pytorch_model.pt"
 final_b="playground/Checkpoints/${RUN_B}/checkpoints/steps_80000_pytorch_model.pt"
 if [[ "$status" -eq 0 && ( ! -f "$final_a" || ! -f "$final_b" ) && "$cancel_requested" -eq 0 ]]; then
-    echo "segment ended cleanly before both runs reached 80k; submitting a two-hour resume segment"
-    next_job=$(sbatch --parsable --time=02:00:00 --job-name="$SLURM_JOB_NAME" \
+    echo "segment ended cleanly before both runs reached 80k; submitting a 12-hour resume segment"
+    next_job=$(sbatch --parsable --time=12:00:00 --job-name="$SLURM_JOB_NAME" \
         "$STARVLA_REPO/train_libero_grid_pair_slurm.sh" \
         "$CONFIG_A" "$RUN_A" "$CONFIG_B" "$RUN_B" "$SEED" "${EXTRA_ARGS[@]}")
     record_job resume "$next_job" "$RUN_A,$RUN_B" "paired"

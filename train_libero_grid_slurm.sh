@@ -1,13 +1,13 @@
 #!/bin/bash
 # Resumable one-run LIBERO grid launcher. Override --nodes with sbatch for
 # global batch 128/256; every node contributes four GPUs. The site disables
-# Slurm requeue, so an unfinished segment submits a fresh two-hour successor.
+# Slurm requeue, so an unfinished segment submits a fresh 12-hour successor.
 #SBATCH --job-name=tr_grid
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=288
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 #SBATCH --signal=B:USR1@300
 #SBATCH --open-mode=append
 #SBATCH --output=slurm_logs/train_grid_%j.out
@@ -147,8 +147,8 @@ submit_available_evals
 
 final_checkpoint="playground/Checkpoints/${RUN_ID}/checkpoints/steps_80000_pytorch_model.pt"
 if [[ "$status" -eq 0 && ! -f "$final_checkpoint" && "$cancel_requested" -eq 0 ]]; then
-    echo "segment ended cleanly before 80k; submitting a two-hour resume segment"
-    next_job=$(sbatch --parsable --nodes="$NUM_MACHINES" --time=02:00:00 \
+    echo "segment ended cleanly before 80k; submitting a 12-hour resume segment"
+    next_job=$(sbatch --parsable --nodes="$NUM_MACHINES" --time=12:00:00 \
         --job-name="$SLURM_JOB_NAME" "$STARVLA_REPO/train_libero_grid_slurm.sh" \
         "$CONFIG_YAML" "$RUN_ID" "$SEED" "${EXTRA_ARGS[@]}")
     record_job resume "$next_job" "$RUN_ID" "nodes=$NUM_MACHINES"
