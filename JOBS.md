@@ -20,6 +20,7 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1873664 / 1873665 | ep_gz100_10k42 / 43 | Exact4k LIBERO-plus at **step 10,000** of `ervla_gr00t_sharedz_v5_memdrop100_b64` (intermediate-checkpoint comparison against the 20k result) | PENDING (Priority), 2h limit. Submitted 12:3x from another session — recorded here so `jobs_status.sh` stays clean. |
 | 1873117 | ae-prepare | other workstream (not this session) — `AE_Data_SelectioN_Robotic/slurm/prepare.jupiter.sbatch`, submitted Sep18 11:14, 6h limit | PENDING (Priority); listed only so `jobs_status.sh` stops flagging it |
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | PENDING (Dependency) |
 | 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | PENDING (Dependency) |
@@ -105,6 +106,20 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1826641 | tr_zonly_aug | COMPLETED — augmentation gives 0.763 vs 0.776 non-aug (n.s.) |
 
 ## Launch commands
+
+### Step-10k shared-z evals 1873664 / 1873665
+
+Run from `/e/project1/m3/blank4/code/starVLA`. Not submitted by this session;
+recovered with `sacct -j <id> -X -o SubmitLine%500`.
+
+```bash
+sbatch --parsable --time=02:00:00 --job-name=ep_gz100_10k42 \
+  --export=ALL,POLICY_SERVER_GPU=,output_dir=playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/results/libero-plus-step10000-exact4k-v1 \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/checkpoints/steps_10000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000   # 1873664  (s43 identical -> 1873665)
+```
+
 
 ### Bad-GPU recovery resumes 1871858 / 1871859
 
