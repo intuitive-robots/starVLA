@@ -20,6 +20,9 @@ Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1878217 | tr_rc365_piv4c | RoboCasa **causal backbone + LayerwiseFM_v4 head** (the missing 2x2 cell), seeds4/42, 50k | PENDING `afterok:1878149` — a failed smoke stops the whole chain |
+| 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 past the 12h wall | PENDING `afterany:1878217` (afterany, because segment 1 is *expected* to TIMEOUT) |
+| 1878223 / 1878224 | rc_piv4c_s4 / s42 | RoboCasa 17-task x48-ep evals at 50k, same harness/manifests as1858852/53 so results compare directly | PENDING `afterok:1878219` |
 | 1878149 | sm_rc_piv4c | **Smoke** for the missing 2x2 cell: QwenPI_v4 head on a **causal** backbone, RoboCasa, seeds4/42, 20 updates + eval10/20 | PENDING — gates the full run |
 | 1877726 / 1877727 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,2h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
 | 1877724 / 1877725 | tr_g128zc / tr_g128e | Seed42 global-batch128: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;8 GPUs/run,16/device,80k | **RUNNING**, two nodes each,2h segment; exact4k at20/40/60/80k auto-submits. |
@@ -489,116 +492,56 @@ Apply once 1871858/59, 1864841/42 have drained. The same wait applies to the
 
 ## Planned / not yet launched
 
-### Planned: RoboCasa PI-v4 head on causal backbone (full run), gated on smoke 1878149
+### RoboCasa PI-v4 head on causal backbone — LAUNCHED 1878149 -> 1878217 -> 1878219 -> 1878223/24
 
-Why: at step 50k the three existing RoboCasa arms are
+The missing cell of the 2x2. At step 50k:
 
 | backbone | head | mean |
 |---|---|---:|
 | causal | DiT-B | 0.354 |
 | v5 encoder | DiT-B | 0.379 |
 | v5 encoder | LayerwiseFM_v4 | **0.661 / 0.659** |
+| causal | LayerwiseFM_v4 | **this run** |
 
-The +0.28 is therefore confounded — it could be the layerwise head being better
-in general, or the head being what the encoder needed. The missing cell (causal
-backbone + LayerwiseFM_v4 head) separates the two, and is the only run that can.
+Near 0.66 means the layerwise head is simply better and the encoder claim
+collapses; near 0.35 means the encoder does the work and only this head can read
+it. No other single run separates those.
 
-Config `examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml`
-(commit 7831aab, **worktree only**). Verified diff against `ervla_robocasa365_piv4.yaml`
-is exactly the backbone swap that `pi_causal` makes against `pi_v5`: `enc_dec: false`,
-no `encdec_ckpt`/`skip_decoder`, none of the cross-attention adapter settings, and
-`freeze_modules: ''`. Data, optimizer, schedule, batch, horizon and head geometry
-are untouched.
-
-Submit from `/e/project1/m3/blank4/code/starVLA-upstream-merge` (RoboCasa is
-worktree-only; the live tree fails with `Unable to open file`).
+Submit from `/e/project1/m3/blank4/code/starVLA-upstream-merge` — RoboCasa is
+worktree-only and the live tree fails with `Unable to open file`.
 
 ```bash
-# Smoke (submitted as 1878149)
+Y=examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml
+
 sbatch --parsable --time=02:00:00 --job-name=sm_rc_piv4c \
-  train_robocasa365_seed_pair_slurm.sh \
-  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
-  ervla_robocasa365_piv4_causal_smoke 4 42 \
+  train_robocasa365_seed_pair_slurm.sh "$Y" ervla_robocasa365_piv4_causal_smoke 4 42 \
   --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
-  --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+  --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1   # 1878149
 
-# Full run — ONLY after the smoke passes. 50k needs ~21h, i.e. a 12h segment plus
-# an afterany continuation, exactly as 1858730 -> 1858851 did.
-sbatch --parsable --job-name=tr_rc365_piv4c \
-  train_robocasa365_seed_pair_slurm.sh \
-  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
-  ervla_robocasa365_piv4_causal 4 42
+sbatch --parsable --dependency=afterok:1878149 --job-name=tr_rc365_piv4c \
+  train_robocasa365_seed_pair_slurm.sh "$Y" ervla_robocasa365_piv4_causal 4 42          # 1878217
 
-sbatch --parsable --dependency=afterany:<train> --job-name=tr_rc365_piv4c_rs \
-  train_robocasa365_seed_pair_slurm.sh \
-  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
-  ervla_robocasa365_piv4_causal 4 42 --trainer.is_resume true
-
-# Evals: 17-task x 48-episode manifests at step 50k, same harness as 1858852/53,
-# so the result is directly comparable with all three existing arms.
+sbatch --parsable --dependency=afterany:1878217 --job-name=tr_rc365_piv4c_rs \
+  train_robocasa365_seed_pair_slurm.sh "$Y" ervla_robocasa365_piv4_causal 4 42 \
+  --trainer.is_resume true                                                              # 1878219
 ```
 
+Evals (from `/e/scratch/m3/blank4/rc365_smoke`), manifests generated from
+`manifest_piv4_s{4,42}.txt` by swapping only the run id — verified identical
+otherwise, so task list, n_envs=24 and 48 episodes/task all match the piv4 run:
 
-| What | Why | Blocked on |
-|---|---|---|
-| Qwen3.5 encoder in starVLA's QWen3_EncDec | the q35 enc-only arm cannot run without it (below) | implementation decision |
-| PickPlaceSinkToCounter rollouts | failed 3/3 attempts, every time in the renderer | needs the EGL abort handled, or the task skipped |
-| RoboCasa365 resolution A/B (native 256 vs 224), 50 eps/cell | training packs frames at native 256; the bridge resized to 224 | nothing — manifest_res.txt ready |
-| Multiple client processes per GPU (2-3 x n_envs=16) | load was only 63/288 at n_envs=24; our lockstep loop leaves CPU idle | needs `--max_batch_size` raised on the server |
-| Proper `eval_robocasa365_slurm.sh` in-repo | the manifest launcher lives in /e/scratch and duplicates work another agent is doing in-tree | coordinate with the agent rewriting the eval stack |
-
-## Known bug: one policy server, two concurrent clients
-
-The VLM interfaces keep per-request state on the module -- `_last_encoder_attention_mask`
-is set during the forward and read afterwards -- so a second in-flight request overwrites
-it in between. Two clients sharing a server produce, on the server side:
-
-```
-ValueError: Layer number mismatch: got 15 VL layers, but project_layers has 28 layers.
-RuntimeError: The expanded size of the tensor (284) must match the existing size (567) ...
+```bash
+sbatch --parsable -J rc_piv4c_s4 -t 03:00:00 --dependency=afterok:1878219 \
+  -o /e/scratch/m3/blank4/rc365_smoke/rc_piv4c_s4_%j.out \
+  -e /e/scratch/m3/blank4/rc365_smoke/rc_piv4c_s4_%j.out \
+  --export=ALL,MANIFEST=/e/scratch/m3/blank4/rc365_smoke/manifest_piv4_causal_s4.txt,OUTDIR=robocasa365_piv4_causal_50k,SEED=42,VIDEOS=0,CKPT_STEP=50000 \
+  /e/scratch/m3/blank4/rc365_smoke/rc365_units.sbatch   # 1878223  (s42 identical -> 1878224)
 ```
 
-and the client sees `KeyError: 'data'` because the reply carries an error instead. Observed
-2026-09-16 in the paired open-loop harness (job 1842457), which queried both servers from
-both directions at once.
-
-Consequences: run **one client per server** (our eval launchers already do). It also blocks
-the obvious throughput idea of pointing several sim worker processes at a shared server --
-the fix is to thread that state through the call instead of storing it on the module.
-
-## Operating notes
-
-- **RoboCasa365 rollouts**: `n_envs=24` without videos (~929 rollouts/h/GPU, ~15 GB VRAM).
-  With videos the recorder adds a second render context per env; 24 envs then peak ~60 GB
-  and a worker gets killed (parent sees `EOFError` on the worker pipe). Use **n_envs=12**
-  when `VIDEOS=1`. Episode counts snap up to a multiple of `n_envs`.
-- The eval enforces a **seed contract**: the policy server must be started with the same
-  `--seed` as the rollout, or the client aborts in ~12 s.
-- `CANCELLED by 0` means the admin/node killed it during CONFIGURING — not our code.
-  Just resubmit. `EGL_NOT_INITIALIZED` / `Aborted` in `mjr_readPixels` is a degraded render
-  node; resubmit and it lands elsewhere.
-
-## Blocked: Qwen3.5 encoder-only (q35) needs real work, not a config fix
-
-`tr_q35enc_pair` cannot be made to run by tweaking YAML. The Qwen3.5 enc-dec checkpoint
-(`train_downstream/.../q35_enc_dec_v5_tb18432`) stores its encoder as **318 top-level
-`encoder_layers.*` tensors**, while starVLA's loader expects them nested at
-`model.language_model.encoder_layers.*` (which is where the Qwen3-VL checkpoint puts its
-308). A prefix remap would load the weights — and would still be wrong, because that
-checkpoint also carries `bidir_gates`, `enc_norm.weight` and `enc_scale`, which
-`train_downstream/train/models/qwen35_enc_dec.py` uses in the encoder forward:
-
-* a **bidirectional scan** per DeltaNet layer, `mixed = fwd + bidir_gates[i] * bwd`
-* an output `enc_norm` (RMSNorm) followed by `* enc_scale`
-
-starVLA's `QWen3_EncDec` implements none of that — its encoder path was written for
-Qwen3-VL, where "bidirectional" is only an attention-mask change and full-attention layers
-have `self_attn`. Qwen3.5 is hybrid (`linear_attn` gated DeltaNet on most layers). Loading
-the weights without the matching forward would silently run a *different* encoder than the
-one that was trained.
-
-Decision needed: port the Qwen3.5 encoder forward into starVLA, or drop the q35 arm.
-
+Watch in the smoke: this arm sets `freeze_modules: ''` (matching `pi_causal`,
+since there is no enc-dec structure to freeze), so unlike piv4 it trains the
+whole backbone — heavier, and a different gradient path than any previous
+LayerwiseFM_v4 run.
 
 ### GR00T shared-z batch64 smoke 1861585
 
