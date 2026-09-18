@@ -100,7 +100,7 @@ Ground-truth plan tokens are an oracle/teacher only. If privileged traces enter 
 
 ### 8. Treat shared-z+GR00T as the encoder anchor; add causal controls — must have for the paper
 
-**Hypothesis/evidence:** readout quality limits use of the encoder representation. Shared-z+GR00T has completed at78.675%/78.275% (78.475% mean), versus74.625% for v5-GR00T and77.375% for shared-z PI. GR00T adds1.10pp on shared z and shared z adds3.85pp at fixed GR00T. **Change:** use these checkpoints as the encoder anchor and add equally trained causal-GR00T and causal-shared-z-GR00T for the interaction claim. Do not count a different head as evidence for directionality.
+**Observed attribution result:** shared-z+GR00T has completed at78.675%/78.275% (78.475% mean), versus74.625% for v5-GR00T and77.375% for shared-z PI. GR00T adds1.10pp on shared z and shared z adds3.85pp at fixed GR00T. The two-seed causal four-token replacement control is negative: full-memory/no-z66.200%/60.375% (63.288% mean) versus z-only57.275%/56.950% (57.113%), paired−8.925/−3.425pp. Its mean loss is−19.05pp on `libero_goal`. This proves z is not a sufficient causal memory bottleneck; it does not measure additive z or causal-versus-bidirectional directionality because it removes the full hidden sequence. Do not use a different head or this replacement result as evidence for directionality.
 
 **Observed/expected effect:** GR00T adds1.10pp over shared-z PI with low spread; retain it as the main encoder recipe. **Budget:** two causal+shared-z seeds40–45GPU-h including evaluation, roughly10h/node after the required smoke. **Kill:** if causal+shared-z comes within1pp and two combined SE of encoder+shared-z, drop the encoder-specific attribution and report a shared-interface result.
 

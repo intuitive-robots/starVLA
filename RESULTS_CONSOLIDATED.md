@@ -28,8 +28,8 @@ The closest internal action-only control on that same14k-data recipe is `libero_
 | trace-loop null two-pass, no z | 72.125% (2,885/4,000; SE0.709pp) | 72.900% (2,916/4,000; SE0.703pp) | 72.513±0.548% | Same-compute control complete. |
 | corrected z-memory tokens, dropout1 | 76.500% (3,060/4,000; SE0.670pp) | 75.950% (3,038/4,000; SE0.676pp) | 76.225±0.389% | Direct z cross-memory does not beat legacy batch64 dropout1 mean76.875%. |
 | corrected z-memory tokens, dropout0.15 | 75.975% (3,039/4,000; SE0.676pp) | 75.675% (3,027/4,000; SE0.678pp) | 75.825±0.212% | Full memory does not help;−0.400pp versus corrected z-only. |
-| causal GR00T full memory/no z | pending | 60.375% (2,415/4,000; SE0.773pp) | pending | Seed42 evaluation running. |
-| causal GR00T z-only memory | pending | 56.950% (2,278/4,000; SE0.783pp) | pending | Seed43 z-bottleneck effect−3.425pp; replacement-memory test, not additive z. |
+| causal GR00T full memory/no z | 66.200% (2,648/4,000; SE0.748pp) | 60.375% (2,415/4,000; SE0.773pp) | 63.288±4.119% | Four-suite causal reference for the bottleneck test. |
+| causal GR00T z-only memory | 57.275% (2,291/4,000; SE0.782pp) | 56.950% (2,278/4,000; SE0.783pp) | 57.113±0.230% | Paired loss−8.925/−3.425pp; mean−6.175pp. This replaces full memory, so it is not an additive-z test. |
 
 All listed completed rows contain exactly1,000 episodes per suite and no nonempty failed-shard sentinel. Wrong-trace job1864756 has n=0 after all suite retries failed; its written zero-count aggregates are operational artifacts and are excluded.
 

@@ -47,10 +47,12 @@ starVLA,libero-plus,ervla_pi_bidir_actiononly_pifix_nolatent_nodrop_2gpu_s42,enc
 starVLA,libero-plus,ervla_v5_pi_actiononly_pifix_aug_s43,encoder,43,libero-plus,,,4,4000,2881,0.72025000,0.00709736
 starVLA,libero-plus,ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s43,causal,43,libero-plus,,,4,4000,2860,0.71500000,0.00713749
 starVLA,libero-plus,ervla_pi_causal_actiononly_pifix_nolatent_nodrop_2gpu_s44,causal,44,libero-plus,,,4,4000,2839,0.70975000,0.00717644
+starVLA,libero-plus,ervla_causal_gr00t_fullmem_noz_b64_s42,causal,42,libero-plus,,,4,4000,2648,0.66200000,0.00747924
 starVLA,libero-plus,libero_plus_q35enc_deeps_s42,other,42,libero-plus,,,4,4000,2591,0.64775000,0.00755265
 starVLA,libero-plus,libero_plus_q35enc_deeps_aug_s42,other,42,libero-plus,,,4,4000,2483,0.62075000,0.00767169
 starVLA,libero-plus,ervla_causal_gr00t_fullmem_noz_b64_s43,causal,43,libero-plus,,,4,4000,2415,0.60375000,0.00773363
 starVLA,libero-plus,ervla_v5_pi_actiononly_pifix_vlmlr1e6_s42,encoder,42,libero-plus,,,4,4000,2328,0.58200000,0.00779865
+starVLA,libero-plus,ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_s42,shared-z/zonly,42,libero-plus,,,4,4000,2291,0.57275000,0.00782156
 starVLA,libero-plus,ervla_causal_gr00t_sharedz_zmem4_memdrop100_b64_s43,shared-z/zonly,43,libero-plus,,,4,4000,2278,0.56950000,0.00782895
 starVLA,libero-plus,ervla_v5_pi_actiononly_pifix_vlmlr1e6_s4,encoder,4,libero-plus,,,4,4000,2188,0.54700000,0.00787069
 starVLA,libero-plus-4k-exact-correctedpi-k32-v1,ervla_k2_pi_cam3d_cot05_pifix_latent32,CoT-trace,42,libero-plus-4k-exact-correctedpi-k32-v1,,,4,4000,2859,0.71475000,0.00713937
