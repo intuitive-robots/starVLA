@@ -4,6 +4,8 @@
 
 Prioritize an optimization-budget sweep, but run it on one fixed architecture first: the historical shared-z + GR00T/readout winner. Its two exact-4k seeds score 78.675% and 78.275% (mean 78.475%) at global batch 32 and 20k updates. The matched legacy batch-64 recipe scores 75.600% and 78.150% (mean 76.875%) at 20k updates. This 1.600-point mean change is large enough to affect the paper, but it does not identify a generic batch effect: batch, local batch composition and action-example exposure all changed.
 
+The existing batch-64 seed-42 checkpoint at 10k updates has now completed exact 4k at 2,776/4,000 = 69.400% (SE 0.729pp). It has the same 0.64M sampled examples as the batch-32/20k seed-42 winner, but is 9.275 points worse; its own batch-64/20k checkpoint is 75.600%, 6.200 points better. This makes the long batch-32 curve the primary performance run and batch 128 a boundary test. It does not isolate batch size because the 10k checkpoint is halfway through a 20k cosine schedule rather than the endpoint of a 10k schedule. Seed 43 is still pending and must be added from its raw JSON before using a two-seed mean.
+
 The released upstream PI recipe is not a reason to copy batch 128 and 100k updates directly. It combines Qwen3-VL-4B, the historical 36-layer all-cross action model, full tuning, horizon 8, global batch 128 and 100k updates (12.8M action samples). It reports 77.0%, below our current two-seed mean despite 20 times as many sampled examples as our batch-32 winner. The useful lesson is that our learning curve is under-measured, not that 12.8M samples is known to be optimal.
 
 ## Clean first sweep
@@ -57,4 +59,3 @@ The batch-32 80k trajectory should take about 23–25 hours per run at historica
 | Sep 23 | Exact-4k the matched directionality controls and promoted horizon/PI-v4 candidate. Release second seeds only for candidates within one point of the best recipe or needed for the headline comparison. |
 | Sep 24 | Last safe arrival for headline results. Freeze the main tables, recipe and claims. Later results go to the appendix unless they repair a correctness problem. |
 | Sep 25–26 | Recompute tables from raw files, finish writing, audit attribution/protocols and render the submission. No exploratory training. |
-
