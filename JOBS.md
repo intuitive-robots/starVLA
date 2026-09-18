@@ -653,3 +653,15 @@ sbatch --parsable --time=02:00:00 --job-name=sm_rc_gzm --export=ALL,STARVLA_REPO
 Both smokes completed in7m07s with exit0, but they establish software/data-path health only. A z-only conditioning flaw was identified immediately afterward. Full jobs1863688/90/92 had run for57s and were cancelled; resume jobs1863689/91/93 and chained evals1863697–702 were cancelled before start. The older RoboCasa PI-v4 job1858730 and all LIBERO jobs were left untouched as requested. Do not resume or evaluate these GR00T RoboCasa run IDs.
 
 The cancelled full layout was no-z versus z-only at seed42 (1863688), no-z versus z-only at seed4 (1863690), and retained-memory seeds4/42 (1863692), each2GPUs/run and batch64, with12h resume dependencies and all18-task evals. Booster rejected an initial30h request before creating a job because the QOS maximum is12h.
+
+### Batch64 shared-z 10k equal-example checkpoint evaluations 1873637 / 1873639
+
+Submitted from `/e/project1/m3/blank4/code/starVLA`. These evaluate the intermediate10k checkpoints of the legacy batch64/dropout1 shared-z+GR00T control. At10k updates, each batch64 run has seen640,000 sampled examples, matching the historical batch32 run at20k updates. This diagnoses whether the batch64 final checkpoint degraded after equal example exposure, but it is not a fully matched training-budget result because the checkpoint is halfway through the20k cosine schedule. Each job uses the same exact4k task count and pinned evaluation layout as the corresponding20k control; output is isolated from existing results.
+
+```bash
+sbatch --parsable --time=05:00:00 --job-name=ep_gz100_10k42 --export=ALL,POLICY_SERVER_GPU=,output_dir=/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/results/libero-plus-step10000-exact4k-v1 eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s42/checkpoints/steps_10000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0
+
+sbatch --parsable --time=05:00:00 --job-name=ep_gz100_10k43 --export=ALL,POLICY_SERVER_GPU=,output_dir=/e/project1/m3/blank4/code/starVLA/playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s43/results/libero-plus-step10000-exact4k-v1 eval_libero_plus_slurm.sh --ckpt playground/Checkpoints/ervla_gr00t_sharedz_v5_memdrop100_b64_s43/checkpoints/steps_10000_pytorch_model.pt --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4 --max_wait_time 0.0
+```
+
+Submitted September18. Both jobs are pending for priority at the initial queue check.

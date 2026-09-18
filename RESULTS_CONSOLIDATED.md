@@ -33,6 +33,8 @@ The closest internal action-only control on that same14k-data recipe is `libero_
 
 All listed completed rows contain exactly1,000 episodes per suite and no nonempty failed-shard sentinel. Wrong-trace job1864756 has n=0 after all suite retries failed; its written zero-count aggregates are operational artifacts and are excluded.
 
+Pending batch diagnostic: exact4k jobs1873637/1873639 evaluate the10k checkpoints of the legacy batch64 dropout1 shared-z+GR00T seeds42/43 in isolated `libero-plus-step10000-exact4k-v1` directories. At10k updates these have640k sampled-example presentations, matching the historical batch32/20k winner, but the learning-rate schedule phase is not matched. No score is recorded until each raw aggregate reaches4,000 episodes with empty failure sentinels.
+
 Predicted trace changes success by−0.625pp versus one-pass and+0.988pp versus the same-compute null. It fails the promotion gate.
 
 `seed` now means training seed from config.full.yaml, falling back to run name. RC JSON seed42 is the environment/server seed even for training seed4. `is_full_protocol` for RC means all declared internal manifest tasks at 48 episodes; it does not mean the official 50-task protocol. A blank checkpoint_step in LIBERO means the raw aggregate does not identify it; do not infer a checkpoint from training max_steps.
