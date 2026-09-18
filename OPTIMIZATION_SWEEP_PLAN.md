@@ -1,72 +1,74 @@
-# LIBERO optimization sweep — September 18, 2026
+# LIBERO optimization and architecture sweep — September 18, 2026
 
-## Decision
+## Anchor and decision
 
-Prioritize an optimization-budget sweep, but run it on one fixed architecture first: the historical shared-z + GR00T/readout winner. Its two exact-4k seeds score 78.675% and 78.275% (mean 78.475%) at global batch 32 and 20k updates. The matched legacy batch-64 recipe scores 75.600% and 78.150% (mean 76.875%) at 20k updates. This 1.600-point mean change is large enough to affect the paper, but it does not identify a generic batch effect: batch, local batch composition and action-example exposure all changed.
+The best eligible zero-shot LIBERO-plus model is the legacy shared-z+GR00T encoder:78.675% and78.275% over exact4k seeds42/43, mean78.475%±0.283pp seed SD. The83.075% causal CoT model is numerically higher but trained on LIBERO-plus and is excluded from the zero-shot comparison.
 
-The existing batch-64 checkpoints at 10k updates have now completed exact 4k at 2,776/4,000 = 69.400% (seed 42, SE 0.729pp) and 2,797/4,000 = 69.925% (seed 43, SE 0.725pp), mean 69.663% and seed SD 0.371pp. Their mean is 8.812 points below the batch-32/20k mean at the same 0.64M sampled examples and 7.212 points below their own batch-64/20k endpoints. This makes the long batch-32 curve the primary performance run and motivates adding batch16, where the same sample budget supplies still more optimizer updates. It does not isolate batch size because each 10k checkpoint is halfway through a 20k cosine schedule rather than the endpoint of a 10k schedule.
+Do not train batch16 and do not spend new runs on the legacy z pathway. Keep the78.475% result as a fixed performance anchor. The new sweep uses corrected, interpretable memory paths and changes batch and architecture in parallel. Start seed42 for every cell; confirm only the best cells and claim-critical controls with seed43.
 
-The released upstream PI recipe is not a reason to copy batch 128 and 100k updates directly. It combines Qwen3-VL-4B, the historical 36-layer all-cross action model, full tuning, horizon 8, global batch 128 and 100k updates (12.8M action samples). It reports 77.0%, below our current two-seed mean despite 20 times as many sampled examples as our batch-32 winner. The useful lesson is that our learning curve is under-measured, not that 12.8M samples is known to be optimal.
+## Training schedule
 
-## Clean first sweep
+Each run trains for80k updates with checkpoints at20k,40k,60k and80k. Use8k warmup and one80k cosine schedule. These checkpoints form a practical learning trajectory; they are not equivalent to independently scheduled20k/40k endpoints. The completed batch32/20k result remains the properly decayed short-schedule anchor.
 
-Use the same legacy shared-z + GR00T/readout architecture, data, augmentation, loss weights and learning rates in every cell. Each scored endpoint gets its own complete cosine schedule and10% warmup. An intermediate checkpoint from an80k schedule is not a substitute for a separately scheduled20k or40k run.
+| global batch | mapping | samples at20k / 40k / 60k / 80k |
+|---:|---|---|
+|32|2 GPUs ×16/device|0.64M /1.28M /1.92M /2.56M|
+|64|4 GPUs ×16/device|1.28M /2.56M /3.84M /5.12M|
+|128|8 GPUs ×16/device|2.56M /5.12M /7.68M /10.24M|
+|256|16 GPUs ×16/device|5.12M /10.24M /15.36M /20.48M|
 
-Launch the most promising cells immediately:
+Keeping16 examples/GPU preserves the shared-z local pair distribution for batches32–256. Batch64 must therefore use4 GPUs rather than the historical2×32 mapping. Batch128/256 use two/four nodes per run. If multi-node throughput loses more than30% against the one-node projection, test gradient accumulation separately; do not silently treat a microbatch-64 z regularizer as identical to a true batch128/256 regularizer.
 
-| global batch | mapping | action samples | updates | warmup | seeds | purpose |
-|---:|---|---:|---:|---:|---|---|
-| 16 | 2 GPUs × 8/device | 0.64M | 40k | 4k | 42,43 | small-batch endpoint |
-| 16 | 2 GPUs × 8/device | 1.28M | 80k | 8k | 42,43 | longer small-batch candidate |
-| 16 | 2 GPUs × 8/device | 2.56M | 160k | 16k | 42,43 | maximum deadline budget |
-| 32 | 2 GPUs × 16/device | 0.64M | 20k | 2k | reuse completed42,43 | current78.475% anchor |
-| 32 | 2 GPUs × 16/device | 1.28M | 40k | 4k | 42,43 | primary longer-training candidate |
-| 32 | 2 GPUs × 16/device | 2.56M | 80k | 8k | 42,43 | primary maximum-budget candidate |
-| 64 | 4 GPUs × 16/device | 0.64M | 10k | 1k | 42,43 | properly decayed large-batch endpoint |
-| 128 | 8 GPUs × 16/device | 0.64M | 5k | 500 | 42,43 | properly decayed upstream-scale endpoint |
+Hold the current LR split fixed for the first grid: VLM interface1e-5, action/shared-z1e-4. If batch128/256 clearly underfit at20k while smaller batches do not, branch a square-root-scaled action-head LR from the same initialization. Do not scale the trainable VLM LR automatically.
 
-The old batch64/10k69.663% pair cannot fill the fresh10k cell because it is halfway through a20k schedule. Promote batch64 or128 to separately scheduled1.28M and2.56M endpoints only if its two-seed0.64M mean is within1pp of batch32 or improves both seeds over the completed batch64/20k mean76.875%. This successive-halving rule preserves calendar time and evaluation attention even when GPU supply is ample.
+Every cell first runs20 optimizer updates, ordinary in-training evaluation and a complete step20 checkpoint on its intended GPU mapping. Use the next100–200 production-style updates to measure throughput. This is not a simulator rollout smoke.
 
-Keeping 16 examples per GPU matters for this model. The distribution loss gathers z over the distributed batch, while the target-separation loss forms same-language pairs only inside each rank's local batch. The existing batch-64 control used 2 GPUs × 32/device and therefore changed the local pair distribution as well as global batch. The table holds16/device for batches32–128; batch16 necessarily uses8/device and is a performance candidate rather than a pure global-batch control. If two-node DDP is unstable or more than30% slower per sample, use4 GPUs ×16/device with two-step gradient accumulation for batch128 and record that the z distribution loss still sees microbatches of64.
+Run exact4k at20k/40k/60k/80k for seed42. Selection across many checkpoints is exploratory; the chosen architecture×batch×step and the clean encoder/causal comparison require seed43 confirmation on the same exact task list.
 
-Do not change learning rate in this sweep. The current VLM/action split of 1e-5/1e-4 is already a competitive StarVLA-style recipe, and adding LR would make the first matrix uninterpretable. Only test a square-root-scaled action-head LR after the batch-128 curve shows clear optimization underfitting at matched samples.
+## Architecture rows
 
-Every new configuration first runs 20 optimizer updates with ordinary in-training evaluation and writes a complete step-20 checkpoint. After that passes, use the first 100–200 production-style updates to measure throughput. This is a training/integration gate, not a simulator rollout smoke.
+Run four core GR00T rows at every batch. They use the same12-layer alternating cross/self action head, full final encoder memory representation where applicable, horizon16, data, augmentation and optimizer.
 
-Run exact4k for every independently scheduled endpoint above; the score differences of interest are too small for a1,000-episode selector. Intermediate checkpoints may receive deterministic1,000-episode screens but remain explicitly partial. Both seeds start in every listed cell; do not select a batch or step budget from one seed.
+| row | action cross-memory | purpose |
+|---|---|---|
+| corrected encoder z-only | four always-visible projected z tokens; ordinary encoder memory masked (`memory_dropout_rate:1`) | clean shared-latent bottleneck |
+| corrected encoder z+memory | four always-visible z tokens; full encoder memory retained on85% of training rows and all evaluation rows (`memory_dropout_rate:0.15`) | test whether detailed encoder memory complements z |
+| encoder full-memory/no-z | full bidirectional encoder sequence, no z, no learned readout compressor | normal encoder control with the identical GR00T head |
+| causal full-memory/no-z | full causal sequence, no z, identical GR00T head | causal control |
 
-If success improves by at least one point from1.28M to2.56M samples, extend only the winning batch to a separately scheduled5.12M endpoint. Do not jump directly to12.8M. Stop scaling when the exact4k mean fails to improve by one point, either seed regresses by more than two points, or training loss improves while rollout success falls.
+The causal row must match language-stack trainability. The completed causal control froze its causal language stack while the encoder's action-producing stack was trainable, so it is not sufficient for this matrix. Record that causal and encoder pretraining remain different unless a same-weight mask-only control is implemented.
 
-## Architecture order
+Do not use PI-v4 instead of the GR00T controls: that would change the action head and destroy the directionality comparison. Add QwenPI-v4 action-only as a fifth performance row across the four batches if capacity is available. It is scientifically separate: QwenPI-v4 currently rejects `shared_z.enabled`, so it cannot represent the corrected-z rows until that path is implemented. Existing PI-v4 exact4k at batch64/20k is76.125%/75.200%, mean75.663%.
 
-1. **Recipe selection:** run the batch/sample sweep only on the completed shared-z + GR00T/readout winner. It has the highest behavior score and existing batch-32/64 evidence.
-   The sweep therefore uses the legacy AdaLN/self-attention z path, not the four-token corrected z-memory path. At matched batch64/20k, legacy dropout1 scores75.600%/78.150% (mean76.875%) and corrected z-memory dropout1 scores76.500%/75.950% (mean76.225%), a paired change of+0.900/−2.200pp and mean−0.650pp. The retained-memory variants are76.788% legacy versus75.825% corrected, mean−0.963pp, although that comparison also changes readout memory to the full hidden sequence. Do not run the full optimization grid on the lower-scoring corrected path.
-   Run one bounded architectural diagnostic in parallel: corrected z-memory at global batch32,20k updates,2k warmup, seeds42/43. This matches the historical winner's batch and schedule and tests whether the corrected path was specifically hurt by batch64. Promote it to the long curve only if its two-seed mean is within1pp of legacy and neither seed regresses by more than2pp.
-2. **Encoder claim:** apply the selected batch, sample budget and execution length to a plain full-memory bidirectional encoder + GR00T and a genuinely matched causal full-memory + GR00T control. Match language-stack trainability as well as data, initialization family, head and optimizer. This comparison, rather than PI-v4 versus an unlike causal head, tests directionality.
-3. **Performance candidate:** combine shared z with QwenPI_v4 only after its information path is implemented and passes the 20-update gate. QwenPI_v4 action-only improved its matched v5 PI control by 2.538 points but is still 2.812 points below the shared-z winner. Do not run the full optimization grid again; use the selected recipe and two seeds.
-4. **Causal confirmation:** run only the final selected recipe, not a causal hyperparameter sweep. Sweeping the causal baseline separately would give unequal tuning budgets and consume evaluation time without resolving the encoder mechanism.
+No new legacy-z rows are needed. Its batch32/20k two-seed result remains the score to beat.
+
+## Resources and gates
+
+The four-row core matrix has16 seed42 training runs. At16 examples/GPU it occupies30 four-GPU nodes if fully concurrent: two nodes for four batch32 runs, four for batch64, eight for batch128 and16 for batch256. PI-v4 adds approximately eight node equivalents. Queue supply, rather than GPU-hour budget, may limit concurrency.
+
+At historical speed,80k batch32 is roughly23–25h. The larger distributed runs have the same update count and should be budgeted24–30h until the100–200-update profiles land. Use short resumable allocations with checkpoint validation instead of requesting speculative multi-day wall times.
+
+Kill a cell for non-finite loss, missing gradients/information path, repeated resume failure, or throughput below70% of its nearest mapping. Do not kill from open-loop loss alone. Promote seed43 for the best two performance cells and all four rows at the selected batch/step needed for the paper's architecture comparison.
 
 ## Chunk length
 
-Raw policy-server metadata verifies that the shared-z winner predicts and executes 16 actions. First add a validated evaluation override and compare executing 4, 8 and 16 actions from the same horizon-16 checkpoint. This isolates replanning frequency and makes the 8-action comparison to upstream useful without retraining.
+The78.475% winner predicts and executes16 actions. Evaluate execute4/8/16 on that same checkpoint first. Horizon8 training remains one separate batch32 row after the inference screen; do not multiply the full batch×architecture matrix by horizon.
 
-If execute-8 gains at least one point on the 1,000-episode screen, confirm it at exact 4k. Only after the optimization recipe is selected should one seed be retrained with prediction horizon 8 and execution length 8. Replicate horizon 8 only if it beats the horizon-16 model with execute-8 by at least one point. Changing prediction horizon inside the batch sweep would confound target length with optimization.
+## RoboCasa parallel track
 
-## Throughput and allocation
+The existing QwenPI-v4 RoboCasa training job1858851 completed in9:00:18; its seed4/42 evaluation jobs1858852/53 are pending. Do not duplicate it.
 
-Measured production logs give about 1.05 s/update for the historical 2-GPU batch-32 run, or 30.5 action samples/s. The 2-GPU batch-64 controls take about 1.70–1.94 s/update, or 33–38 samples/s. Doubling the local batch therefore improved sample throughput by only roughly 10–25%, not 2×.
-
-The batch16 160k trajectory is expected to take roughly30–45 hours and must use short resumable allocations; measure before projecting. Batch32 40k/80k should take roughly12/23–25 hours per run at historical throughput; two seeds of one endpoint fit on one4-GPU node. Fresh batch64/10k should take roughly3–4 hours on4 GPUs. Batch128/5k should take roughly2–3 hours on8 GPUs if cross-node communication is healthy. Use additional nodes for independent cells rather than enlarging local batch merely to occupy GPUs. The immediate scheduled grid uses eleven4-GPU nodes: three for the six batch16 runs, two for the four new batch32 runs, two for batch64 and four for batch128. The corrected-z pair and horizon screen use separate capacity.
+The RoboCasa worktree has the older shared-z dropout path but does not yet contain `cross_memory_tokens` or `_augment_shared_z_cross_memory`. Port the verified corrected-z implementation, add an explicit mask/information-flow test, and run20-update in-training-eval smokes before any full job. After that gate, run one training seed at the native global batch64/50k recipe for the same four GR00T rows above. Chain the declared17-task×48-episode evaluation and promote seed4 only after valid seed42 results. This work is parallel and must not reuse the cancelled flawed-z jobs1863688/90/92.
 
 ## Daily schedule
 
-| date | work and gate |
-|---|---|
-| Sep 18 | Finish the running batch-64/10k exact-4k diagnostic. Correct the execute-length record. Prepare sample-based configs and launcher diffs; do not submit new training without an explicit launch instruction. |
-| Sep 19 | Run20-update + trainer-eval smokes for batch16/32/64/128 mappings, then100–200-update throughput probes. Launch the eleven-node independently scheduled grid: batch16 at0.64/1.28/2.56M, batch32 at1.28/2.56M, and batch64/128 at0.64M, all with seeds42/43. In parallel, smoke and launch the bounded corrected-z batch32/20k pair. Start the horizon16 execute4/8/16 rollout screen independently. |
-| Sep 20 | Exact4k the completed independently scheduled endpoints while long batch16/32 trajectories continue. Promote batch64/128 to1.28/2.56M only if their two-seed0.64M endpoints meet the predeclared gate. Do not select from open-loop loss alone. |
-| Sep 21 | Complete the batch16/32 maximum-budget curves and promoted large-batch endpoints. Select batch, budget and execution length from exact4k two-seed means. |
-| Sep 22 | Start the matched plain-encoder versus causal full-memory control at the selected recipe. Run one horizon-8 training seed only if execute-8 passed. Smoke QwenPI_v4 + shared z if its path is ready. |
-| Sep 23 | Exact-4k the matched directionality controls and promoted horizon/PI-v4 candidate. Release second seeds only for candidates within one point of the best recipe or needed for the headline comparison. |
-| Sep 24 | Last safe arrival for headline results. Freeze the main tables, recipe and claims. Later results go to the appendix unless they repair a correctness problem. |
-| Sep 25–26 | Recompute tables from raw files, finish writing, audit attribution/protocols and render the submission. No exploratory training. |
+| date | LIBERO-plus | parallel RoboCasa and paper work |
+|---|---|---|
+| Sep18 | Generate the four-batch × four-core-architecture seed42 configs plus optional PI-v4 row. Prepare resumable20/40/60/80 checkpoints and exact4k chains. No training submission without an explicit launch instruction. | Let PI-v4 eval jobs1858852/53 run. Port corrected z-memory tokens into the RoboCasa worktree and add the information-flow test. |
+| Sep19 | Run all intended-mapping20-update/in-training-eval smokes and100–200-update throughput probes. Release healthy seed42 cells in parallel. Start execute4/8/16 screen. | Smoke the four corrected GR00T RoboCasa rows at global64. Release one training seed only after the port and state-conditioning tests pass. |
+| Sep20 | Exact4k completed20k checkpoints while training continues. Do not compare the new mid-schedule20k checkpoints as if they used the historical20k cosine endpoint. | Evaluate completed RoboCasa PI-v4 and corrected-GR00T checkpoints; reconcile failed-unit manifests. |
+| Sep21 | Exact4k40k/60k arrivals; select provisional top cells and prepare seed43 confirmations without stopping healthy80k runs. | Decide whether the cross-benchmark encoder result is positive, neutral or negative. |
+| Sep22 | Finish80k and exact4k. Select architecture×batch×step from seed42, then launch seed43 for the top two and claim-critical encoder/causal controls. | Freeze RoboCasa architecture and task protocol; second training seed only for promoted rows. |
+| Sep23 | Complete seed43 confirmations and final execution-length result. | Freeze main claims, tables and figures. |
+| Sep24 | Last safe headline-result arrival. | Recompute all tables from raw JSON and audit provenance. |
+| Sep25–26 | No exploratory training; writing, reproducibility, anonymization and final rendering. | Appendix-only corrections. |
