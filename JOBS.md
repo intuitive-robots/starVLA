@@ -56,9 +56,9 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1858835 / 1858836 | ep_piv4_s42 / s43 | Exact4k LIBERO-plus evals after successful full QwenPI_v4 training1858694 | **RUNNING** since Sep18 00:07, ~3,000 eps/h, on `libero_object`. s42: `libero_10` 0.657, `libero_goal` 0.759, object 750/1,000. s43: `libero_10` 0.688, `libero_goal` 0.717, object 611/1,000. ETA ~01:45. |
 | 1863830 | tr_q35enc_resume | Resume of the 12h-timed-out Qwen3.5 encoder-only pair (`deeps` + `deeps_aug`, seed42) to 30k; arm a resumed from 25,908, arm b from 20,916 | **RUNNING** since Sep17 22:33 |
 | 1863831 / 1863832 | ep_q35_s42 / ep_q35_aug_s42 | Exact4k LIBERO-plus evals of the two q35 encoder-only arms at 30k, gated on1863830 | PENDING (Dependency) |
-| 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | RUNNING |
-| 1858851 | tr_rcpiv4_rs | Automatic RoboCasa continuation from latest checkpoint after first12h segment1858730 | PENDING (Dependency) |
-| 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa17-task ×48-episode evals at step50k after continuation1858851 | PENDING (Dependency) |
+| 1858730 | tr_rc365_piv4 | Full QwenPI_v4 RoboCasa seeds4/42 at50k after passed smoke | **TIMEOUT** 12:01:02, ended Sep18 05:18 at step 30,000/50,000 — expected, the 12h QOS wall; `afterany` continuation1858851 picked it up |
+| 1858851 | tr_rcpiv4_rs | Automatic RoboCasa continuation from latest checkpoint after first12h segment1858730 | **RUNNING** on jpbo-022-42, 4:14 elapsed / 7:46 left. Resumed at 30,000; now s4 39,415 and s42 39,637 of 50,000 at ~37 steps/min -> 50k in ~4.7h, ~3h of wall to spare. |
+| 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa17-task ×48-episode evals at step50k after continuation1858851 | **PENDING (Dependency)** — gated `afterok:1858851`, so they only fire if the continuation *completes*; another TIMEOUT would cancel both and they would need resubmitting with the parent. |
 | 1851384 | ep_zonly_gr00t_s43 | LIBERO-plus exact4k, zonly+GR00T s43 | **COMPLETED** — 3131/4000 = 78.275% |
 | 1851383 | ep_zonly_gr00t_s42 | LIBERO-plus exact4k, zonly+GR00T s42 | **COMPLETED** — 3147/4000 = 78.675% |
 | 1850693 | enc_dec_2b_v5_final_action_tracetime_w001 | other workstream (not this session) | RUNNING 21:52 |
