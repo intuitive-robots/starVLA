@@ -92,6 +92,16 @@ class SharedZMixin:
         )
         if not 0.0 <= self.shared_z_memory_dropout_rate <= 1.0:
             raise ValueError("framework.shared_z.memory_dropout_rate must be in [0,1]")
+        self.shared_z_memory_dropout_mode = str(
+            shared_z_cfg.get("memory_dropout_mode", "row")
+        ).lower()
+        if self.shared_z_memory_dropout_mode not in {"row", "camera"}:
+            raise ValueError(
+                "framework.shared_z.memory_dropout_mode must be 'row' or 'camera'"
+            )
+        self.shared_z_adaln_conditioning = bool(
+            shared_z_cfg.get("adaln_conditioning", True)
+        )
         self.shared_z_shuffle_targets = bool(shared_z_cfg.get("shuffle_targets", False))
         self.shared_z_distribution_weight = float(
             shared_z_cfg.get("distribution_weight", 0.01)
@@ -121,7 +131,9 @@ class SharedZMixin:
                 "framework.shared_z.cross_memory_tokens requires shared_z.enabled=true"
             )
         diffusion_model_cfg["extra_conditioning_dim"] = (
-            self.shared_z_dim if self.shared_z_enabled else 0
+            self.shared_z_dim
+            if self.shared_z_enabled and self.shared_z_adaln_conditioning
+            else 0
         )
         return shared_z_cfg
 
@@ -378,6 +390,61 @@ class SharedZMixin:
             return torch.zeros(batch, device=device, dtype=torch.bool)
         return torch.ones(batch, device=device, dtype=torch.bool)
 
+    def _shared_z_action_conditioning(
+        self, z: Optional[torch.Tensor]
+    ) -> Optional[torch.Tensor]:
+        """Return z for AdaLN only when that independently configurable path is on."""
+        return z if self.shared_z_adaln_conditioning else None
+
+    def _shared_z_encoder_memory_keep(
+        self,
+        encoder_valid: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Build a row- or camera-structured keep mask for ordinary encoder memory.
+
+        Camera dropout operates after z has pooled the complete encoder sequence. It masks
+        exactly one contiguous image-token span on selected training rows, while language,
+        the other camera, and the always-visible z memory remain available. Evaluation is
+        deterministic and retains all valid encoder tokens.
+        """
+        if encoder_valid.ndim != 2:
+            raise ValueError("encoder_valid must be [B,L]")
+        batch, length = encoder_valid.shape
+        if self.shared_z_memory_dropout_mode == "row":
+            return self._shared_z_memory_keep(batch, encoder_valid.device)
+
+        keep = torch.ones_like(encoder_valid, dtype=torch.bool)
+        if not self.training or self.shared_z_memory_dropout_rate <= 0.0:
+            return keep
+        if input_ids is None or input_ids.ndim != 2 or input_ids.shape[0] != batch:
+            raise ValueError("camera memory dropout requires input_ids shaped [B,L]")
+        if input_ids.shape[1] < length:
+            raise ValueError(
+                "camera memory dropout input_ids are shorter than encoder memory: "
+                f"{tuple(input_ids.shape)} vs {tuple(encoder_valid.shape)}"
+            )
+
+        model_config = getattr(getattr(self, "qwen_vl_interface", None), "model", None)
+        model_config = getattr(model_config, "config", None)
+        image_token_id = getattr(model_config, "image_token_id", None)
+        if image_token_id is None:
+            raise ValueError("camera memory dropout requires model.config.image_token_id")
+
+        image_positions = input_ids[:, :length].eq(int(image_token_id)) & encoder_valid.bool()
+        drop_rows = torch.rand(batch, device=encoder_valid.device) < self.shared_z_memory_dropout_rate
+        for row in torch.where(drop_rows)[0].tolist():
+            positions = torch.where(image_positions[row])[0]
+            if positions.numel() == 0:
+                raise RuntimeError(
+                    f"camera memory dropout found no image tokens in training row {row}"
+                )
+            split_after = torch.where(positions[1:] != positions[:-1] + 1)[0] + 1
+            spans = torch.tensor_split(positions, split_after.cpu().tolist())
+            span_index = int(torch.randint(len(spans), (), device=encoder_valid.device))
+            keep[row, spans[span_index]] = False
+        return keep
+
     def _augment_shared_z_cross_memory(
         self,
         encoder_memory: torch.Tensor,
@@ -406,9 +473,10 @@ class SharedZMixin:
             raise ValueError(
                 f"shared z must be {(batch, self.shared_z_dim)}, got {tuple(z.shape)}"
             )
-        if encoder_memory_keep.shape != (batch,):
+        if encoder_memory_keep.shape not in {(batch,), encoder_valid.shape}:
             raise ValueError(
-                f"encoder_memory_keep must be {(batch,)}, got {tuple(encoder_memory_keep.shape)}"
+                "encoder_memory_keep must be [B] or [B,L], got "
+                f"{tuple(encoder_memory_keep.shape)}"
             )
 
         z_memory = self.shared_z_memory_projector(z).reshape(
@@ -421,7 +489,10 @@ class SharedZMixin:
             device=encoder_valid.device,
             dtype=torch.bool,
         )
-        kept_encoder_valid = encoder_valid.bool() & encoder_memory_keep.bool()[:, None]
+        keep = encoder_memory_keep.bool()
+        if keep.ndim == 1:
+            keep = keep[:, None]
+        kept_encoder_valid = encoder_valid.bool() & keep
         return (
             torch.cat([z_memory, encoder_memory], dim=1),
             torch.cat([z_valid, kept_encoder_valid], dim=1),

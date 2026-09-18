@@ -671,9 +671,20 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 shared_z.repeat(repeated_diffusion_steps, 1) if shared_z is not None else None
             )
             encoder_memory_keep = (
-                self._shared_z_memory_keep(actions_target.shape[0], dit_context.device)
+                self._shared_z_encoder_memory_keep(
+                    dit_valid_mask, qwen_inputs.get("input_ids")
+                )
                 if self.shared_z_enabled else None
             )
+            encoder_memory_keep_rate = None
+            if encoder_memory_keep is not None:
+                if encoder_memory_keep.ndim == 1:
+                    encoder_memory_keep_rate = encoder_memory_keep.float().mean()
+                else:
+                    encoder_memory_keep_rate = (
+                        (dit_valid_mask.bool() & encoder_memory_keep.bool()).float().sum()
+                        / dit_valid_mask.float().sum().clamp_min(1.0)
+                    )
             action_encoder_memory_keep = encoder_memory_keep
             if self.shared_z_cross_memory_tokens:
                 dit_context, dit_valid_mask = self._augment_shared_z_cross_memory(
@@ -699,7 +710,7 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 actions_target_repeated,
                 state_repeated,
                 encoder_attention_mask=dit_attention_bias_repeated,
-                z_conditioning=shared_z_repeated,
+                z_conditioning=self._shared_z_action_conditioning(shared_z_repeated),
                 encoder_memory_keep=encoder_memory_keep_repeated,
             )  # (B, chunk_len, action_dim)
 
@@ -717,7 +728,7 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 )
             result["structured_aux_loss"] = shared_z_loss
             result.update(shared_z_metrics)
-            result["shared_z_memory_keep_rate"] = encoder_memory_keep.float().mean()
+            result["shared_z_memory_keep_rate"] = encoder_memory_keep_rate
         if cot_loss is not None:
             result["cot_loss"] = cot_loss
         if structured_aux_loss is not None:
@@ -784,8 +795,8 @@ class Qwen_GR00T(SharedZMixin, baseframework):
             )
             # _shared_z_memory_keep is deterministic outside training: all-False when the
             # rate is 1 (z only), all-True otherwise. Matching PI, eval never samples.
-            encoder_memory_keep = self._shared_z_memory_keep(
-                last_hidden.shape[0], last_hidden.device
+            encoder_memory_keep = self._shared_z_encoder_memory_keep(
+                dit_valid_mask, qwen_inputs.get("input_ids")
             )
             if self.shared_z_cross_memory_tokens:
                 dit_context, dit_valid_mask = self._augment_shared_z_cross_memory(
@@ -815,7 +826,7 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 state,
                 encoder_attention_mask=dit_attention_bias,
                 noise_seeds=flow_seeds,
-                z_conditioning=shared_z,
+                z_conditioning=self._shared_z_action_conditioning(shared_z),
                 encoder_memory_keep=encoder_memory_keep,
             )
 

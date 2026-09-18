@@ -1107,7 +1107,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
                 state_repeated,
                 encoder_attention_mask=encoder_attention_bias_repeated,
                 return_clean_actions=self.tied_dynamics_enabled,
-                z_conditioning=shared_z_repeated,
+                z_conditioning=self._shared_z_action_conditioning(shared_z_repeated),
                 encoder_memory_keep=encoder_memory_keep_repeated,
             )
             if self.tied_dynamics_enabled:
@@ -1246,7 +1246,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
                 vl_embs_list,
                 state,
                 encoder_attention_mask=encoder_attention_bias,
-                z_conditioning=shared_z,
+                z_conditioning=self._shared_z_action_conditioning(shared_z),
                 encoder_memory_keep=encoder_memory_keep,
             )  # (B, action_horizon, action_dim)
 
