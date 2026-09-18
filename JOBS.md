@@ -412,6 +412,38 @@ Note this did **not** get nodes sooner: with the scheduler holding nodes,
 01:30:00, 02:30:00 and 05:00:00 alike. The value is for later, when the
 constraint is a backfill gap rather than a hold.
 
+### BUG (not yet fixed): `--resume` never skips anything in shard mode
+
+`eval_libero_in_one.sh:407` probes for a completed shard at
+
+    ${output_dir}/logs/${suite}/${start}_to_${end}${result_tag}.json
+
+but `eval_libero_model.py` writes that file with the shard suffix appended to
+`sample_tag` whenever `num_shards > 1`:
+
+    0_to_2519_exact1000_shard16of32.json    <- actually written
+    0_to_2519_exact1000.json                <- what the resume probe looks for
+
+So `-s "${shard_result}"` is never true and every shard re-runs. Two consequences:
+
+1. `--resume` is a no-op for any sharded run, i.e. every LIBERO-plus eval with
+   `workers_per_gpu > 1`. The recovery jobs 1871858/59 were submitted with
+   `--resume` and are redoing all 32 shards instead of the 8 that were missing.
+2. The per-suite retry loop sets `STARVLA_RESUME_EVAL=1` on attempts 2 and 3, so
+   **the retries have never resumed either** — each attempt re-ran all 32 shards.
+   That is the direct cause of 1864075 rolling 2,257 episodes against a
+   1,000-episode budget.
+
+Correctness is unaffected: a re-run overwrites its own shard json and the
+filename carries the shard id, so aggregation cannot double-count.
+
+Fix prepared but **not applied** — four evals are executing this script right now
+and bash reads a script lazily by byte offset, so editing it mid-run corrupts
+them. Patch:
+`/tmp/claude-32646/-e-project1-m3-blank4-code-starVLA/96b45084-f7dd-4983-ba47-d90a3fae375c/scratchpad/resume_shard_path.patch`
+Apply once 1871858/59, 1864841/42 have drained. The same wait applies to the
+`failed_suites.txt` truncation fix noted above.
+
 ## Planned / not yet launched
 
 | What | Why | Blocked on |
