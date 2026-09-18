@@ -12,11 +12,11 @@ bash scripts/jobs_status.sh --since 2026-09-16   # also finished / failed
 When a job finishes, move its row to **Finished** with the outcome. Recover a lost launch
 command with `sacct -j <id> -X -o SubmitLine%400`.
 
-Last refreshed: 2026-09-18 17:44 CEST.
+Last refreshed: 2026-09-18 17:59 CEST.
 
 ## Running / queued
 
-Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and raw rollout JSONs (see `scripts/jobs_status.sh`).
+Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and raw rollout JSONs (see `scripts/jobs_status.sh`).
 
 | Job | Name | What | State |
 |---|---|---|---|
@@ -24,11 +24,12 @@ Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 past the 12h wall | PENDING `afterany:1878217` (afterany, because segment 1 is *expected* to TIMEOUT) |
 | 1878223 / 1878224 | rc_piv4c_s4 / s42 | RoboCasa 17-task x48-ep evals at 50k, same harness/manifests as1858852/53 so results compare directly | PENDING `afterok:1878219` |
 | 1878149 | sm_rc_piv4c | **Smoke** for the missing 2x2 cell: QwenPI_v4 head on a **causal** backbone, RoboCasa, seeds4/42, 20 updates + eval10/20 | PENDING — gates the full run |
-| 1877726 / 1877727 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,2h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
-| 1877724 / 1877725 | tr_g128zc / tr_g128e | Seed42 global-batch128: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;8 GPUs/run,16/device,80k | **RUNNING**, two nodes each,2h segment; exact4k at20/40/60/80k auto-submits. |
-| 1877722 / 1877723 | tr_g64zf / tr_g64zc | Seed42 global-batch64 new token-only shared-z variants: all encoder memory versus30% structured one-camera dropout; z-AdaLN disabled | **RUNNING**, one4-GPU node each,2h segment. Existing encoder/causal batch64 controls are reused. |
-| 1877720 | tr_g32zt | Seed42 global-batch32 token-only pair: full encoder memory versus structured camera dropout; two GPUs/run,16/device | **RUNNING**, one4-GPU node,2h segment. |
-| 1877721 | tr_g32ct | Seed42 global-batch32 control pair: encoder full-memory/no-z versus causal full-memory/no-z; two GPUs/run,16/device | **RUNNING**, one4-GPU node,2h segment. |
+| 1878156 / 1878157 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,12h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
+| 1878154 / 1878155 | tr_g128zc / tr_g128e | Seed42 global-batch128: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;8 GPUs/run,16/device,80k | **RUNNING**, two nodes each,12h segment; exact4k at20/40/60/80k auto-submits. |
+| 1878152 / 1878153 | tr_g64zf / tr_g64zc | Seed42 global-batch64 new token-only shared-z variants: all encoder memory versus30% structured one-camera dropout; z-AdaLN disabled | **RUNNING**, one4-GPU node each,12h segment. Existing encoder/causal batch64 controls are reused. |
+| 1878150 | tr_g32zt | Seed42 global-batch32 token-only pair: full encoder memory versus structured camera dropout; two GPUs/run,16/device | **RUNNING**, one4-GPU node,12h segment. |
+| 1878151 | tr_g32ct | Seed42 global-batch32 control pair: encoder full-memory/no-z versus causal full-memory/no-z; two GPUs/run,16/device | **RUNNING**, one4-GPU node,12h segment. |
+| 1878254 | tr_g32zp | Added seed42 batch32 pair: token-only z bottleneck (all ordinary encoder memory masked) and QwenPI-v4 encoder; two GPUs/run,16/device | **PENDING**,12h. Both20-step/in-training-eval smokes passed in interactive allocation1873548. |
 | 1873664 / 1873665 | ep_gz100_10k42 / 43 | Exact4k LIBERO-plus at **step 10,000** of `ervla_gr00t_sharedz_v5_memdrop100_b64` (intermediate-checkpoint comparison against the 20k result) | PENDING (Priority), 2h limit. Submitted 12:3x from another session — recorded here so `jobs_status.sh` stays clean. |
 | 1873117 | ae-prepare | other workstream (not this session) — `AE_Data_SelectioN_Robotic/slurm/prepare.jupiter.sbatch`, submitted Sep18 11:14, 6h limit | PENDING (Priority); listed only so `jobs_status.sh` stops flagging it |
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | COMPLETED, CLEAN:66.200% /60.375%; mean63.288%. |
@@ -86,6 +87,7 @@ Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1877720–1877727 | initial tr_g* grid segments | **CANCELLED intentionally after100–300 warmup steps** when the training allocation was corrected from2h to12h. No complete checkpoint was written; replacements are1878150–57. |
 | 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa 17-task x48-episode eval at step50k, QwenPI_v4 (encoder-only, `skip_decoder`, dense layer-wise conditioning) | **RUNNING, 16/17 tasks, zero retries.** s4 **0.661** (508/768), s42 **0.659** (506/768). Directly comparable with 1842871 (same `rc365_units.sbatch`, same CKPT_STEP=50000, same 48 eps/task): on the 16 common tasks **piv4 0.661/0.659 vs pi_v5 enc-dec 0.379 and pi_causal 0.354** — a +0.28 absolute, ~+75% relative jump, the largest RoboCasa gain recorded so far. Biggest per-task movers: OpenCabinet 0.02/0.06 -> 0.67, NavigateKitchen 0.15/0.10 -> 0.77, PickPlaceToasterToCounter 0.17/0.08 -> 0.81, CloseFridge 0.17/0.21 -> 0.77. PickPlace tasks barely move (PickPlaceCounterToStove 0.65 -> 0.60, i.e. slightly down) and CloseBlenderLid stays near the floor (0.04/0.06 -> 0.15/0.33). |
 | 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 1.0 (z-only) | **COMPLETED, CLEAN** both seeds. s42 **0.7650** (0.657/0.797/0.830/0.776), s43 **0.7595** (0.609/0.783/0.845/0.801). Seed mean **0.762** — best of this batch, still below the zonly+GR00T 0.7847. |
 | 1863856 / 1863857 | ep_gz4f015_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 0.15 | **COMPLETED, CLEAN** both seeds. s42 **0.7598** (0.672/0.762/0.835/0.770), s43 **0.7568** (0.657/0.758/0.817/0.795). Seed mean **0.758** — best of this batch, still under the zonly+GR00T 0.7847. |
@@ -117,21 +119,22 @@ Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and ra
 
 ## Launch commands
 
-### Deduplicated architecture × batch grid 1877720–1877727
+### Architecture × batch grid replacements1878150–1878157 and added pair1878254
 
-All six intended configurations first passed20 optimizer updates, trainer eval at10/20 and checkpoint save inside interactive allocation1873548. These initial jobs have2h limits. The wrapper safely checkpoints at the five-minute warning, submits a fresh resume segment if80k is incomplete, and submits exact4k evaluations whenever20k/40k/60k/80k appears. Generated IDs and parents are recorded in `slurm_logs/libero_grid_job_ledger.tsv`.
+All eight one-node smokes passed20 optimizer updates, trainer eval at10/20 and checkpoint save inside interactive allocation1873548. Training jobs use12h limits. The wrapper safely checkpoints the actual step plus full optimizer/scheduler/RNG state at the five-minute warning, submits a fresh12h resume segment if80k is incomplete, and submits2h exact4k evaluations whenever20k/40k/60k/80k appears. Generated IDs and parents are recorded in `slurm_logs/libero_grid_job_ledger.tsv`.
 
 ```bash
-sbatch --parsable --job-name=tr_g32zt --time=02:00:00 train_libero_grid_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_full.yaml ervla_grid_tokfull_b32_s42 examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b32_s42 42  # 1877720
+sbatch --parsable --job-name=tr_g32zt --time=12:00:00 train_libero_grid_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_full.yaml ervla_grid_tokfull_b32_s42 examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b32_s42 42  # 1878150
 
-sbatch --parsable --job-name=tr_g32ct --time=02:00:00 train_libero_grid_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b32_s42 examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml ervla_grid_causal_b32_s42 42 --datasets.vla_data.per_device_batch_size 16 --trainer.max_train_steps 80000 --trainer.num_warmup_steps 8000 --trainer.save_interval 20000 --trainer.eval_interval 1000 --trainer.save_full_training_state true --trainer.save_total_limit 32 --trainer.full_state_save_total_limit 2  # 1877721
+sbatch --parsable --job-name=tr_g32ct --time=12:00:00 train_libero_grid_pair_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b32_s42 examples/LIBERO/train_files/ervla_causal_gr00t_fullmem_noz_b64.yaml ervla_grid_causal_b32_s42 42 --datasets.vla_data.per_device_batch_size 16 --trainer.max_train_steps 80000 --trainer.num_warmup_steps 8000 --trainer.save_interval 20000 --trainer.eval_interval 1000 --trainer.save_full_training_state true --trainer.save_total_limit 32 --trainer.full_state_save_total_limit 2  # 1878151
 
-sbatch --parsable --job-name=tr_g64zf --nodes=1 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_full.yaml ervla_grid_tokfull_b64_s42 42  # 1877722
-sbatch --parsable --job-name=tr_g64zc --nodes=1 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b64_s42 42  # 1877723
-sbatch --parsable --job-name=tr_g128zc --nodes=2 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b128_s42 42  # 1877724
-sbatch --parsable --job-name=tr_g128e --nodes=2 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b128_s42 42  # 1877725
-sbatch --parsable --job-name=tr_g256zc --nodes=4 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b256_s42 42  # 1877726
-sbatch --parsable --job-name=tr_g256e --nodes=4 --time=02:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b256_s42 42  # 1877727
+sbatch --parsable --job-name=tr_g64zf --nodes=1 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_full.yaml ervla_grid_tokfull_b64_s42 42  # 1878152
+sbatch --parsable --job-name=tr_g64zc --nodes=1 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b64_s42 42  # 1878153
+sbatch --parsable --job-name=tr_g128zc --nodes=2 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b128_s42 42  # 1878154
+sbatch --parsable --job-name=tr_g128e --nodes=2 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b128_s42 42  # 1878155
+sbatch --parsable --job-name=tr_g256zc --nodes=4 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_camdrop030.yaml ervla_grid_tokcam_b256_s42 42  # 1878156
+sbatch --parsable --job-name=tr_g256e --nodes=4 --time=12:00:00 train_libero_grid_slurm.sh examples/LIBERO/train_files/ervla_v5_gr00t_fullmem_noz.yaml ervla_grid_encfull_b256_s42 42  # 1878157
+sbatch --parsable --job-name=tr_g32zp --time=12:00:00 train_libero_grid_pair_slurm.sh examples/LIBERO/train_files/ervla_gr00t_sharedz_v5_zmem4_tokenonly_zonly.yaml ervla_grid_zonly_b32_s42 examples/LIBERO/train_files/ervla_v5_piv4_actiononly_grid_b32.yaml ervla_grid_piv4_b32_s42 42  # 1878254
 ```
 
 ### Step-10k shared-z evals 1873664 / 1873665

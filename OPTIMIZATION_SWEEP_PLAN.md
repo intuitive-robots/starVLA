@@ -44,18 +44,18 @@ The submitted grid is deliberately sparse. It avoids rerunning completed batch64
 
 | global batch | fresh seed42 rows | GPUs/run | initial job |
 |---:|---|---:|---|
-|32|token-only z+full memory; token-only z+camera dropout; encoder full-memory/no-z; causal full-memory/no-z|2 (two runs/node)|1877720,1877721|
-|64|token-only z+full memory; token-only z+camera dropout|4|1877722,1877723|
-|128|token-only z+camera dropout; encoder full-memory/no-z|8|1877724,1877725|
-|256|token-only z+camera dropout; encoder full-memory/no-z|16|1877726,1877727|
+|32|token-only z bottleneck; token-only z+full memory; token-only z+camera dropout; encoder full-memory/no-z; causal full-memory/no-z; QwenPI-v4 encoder|2 (two runs/node)|1878150,1878151,1878254|
+|64|token-only z+full memory; token-only z+camera dropout|4|1878152,1878153|
+|128|token-only z+camera dropout; encoder full-memory/no-z|8|1878154,1878155|
+|256|token-only z+camera dropout; encoder full-memory/no-z|16|1878156,1878157|
 
 “Token-only z” means four z-derived prefix tokens are concatenated before ordinary encoder memory for GR00T cross-attention, while z-AdaLN is disabled. This removes the previous double conditioning. The full-memory arm retains the complete encoder sequence. The structured dropout arm selects30% of training rows, masks exactly one verified image-token span per selected row, and preserves language, the other camera and all four z tokens. Since the two cameras have similar token counts, the observed memory keep rate is about0.86. Evaluation keeps both cameras. The four z queries still pool the joint encoder sequence; camera-specific z queries remain a later ablation if structured dropout is positive.
 
-All six one-node smoke runs completed20 steps with trainer eval at10/20, finite losses, nonzero gradients and complete checkpoints. The batch128/256 jobs reuse those tested configs, but their multi-node startup and throughput remain a production gate. The camera-dropout smokes logged partial keep rates, establishing that the camera mask is active. No simulator rollout was used as a smoke.
+All eight one-node smoke runs completed20 steps with trainer eval at10/20, finite losses, nonzero gradients and complete checkpoints. The batch128/256 jobs reuse those tested configs, but their multi-node startup and throughput remain a production gate. The camera-dropout smokes logged partial keep rates, establishing that the camera mask is active. No simulator rollout was used as a smoke.
 
 The completed batch64 encoder full-memory/no-z reference is `ervla_v5_gr00t_traceloop_1pass_noz_all` (exact4k mean74.125%). It has no readout compressor and no z, but does include the trace auxiliary head; record that caveat instead of treating it as a pure no-aux control. The completed causal batch64 full-memory/no-z reference is63.288% over two seeds. These rows are reused because the user explicitly ruled out duplicate batch64 training.
 
-Each initial job has a2h limit. This site rejects `--requeue` and reports `Requeue=0`, so a clean time-limit checkpoint submits a new2h resume job. Each training segment scans for20k/40k/60k/80k checkpoints and submits the optimized exact4k evaluator immediately:32 workers/GPU, one policy server/GPU, dynamic client-count batch ceiling, zero batching wait and resume enabled. Every generated successor/eval ID is appended to `slurm_logs/libero_grid_job_ledger.tsv`.
+Training jobs use the12h QOS maximum. This site rejects `--requeue` and reports `Requeue=0`, so a clean time-limit checkpoint submits a fresh12h resume job. Five minutes before the limit, the trainer saves the actual-step model plus complete DeepSpeed optimizer/scheduler/RNG state atomically; resume selects the latest complete model checkpoint. Exact4k eval jobs retain2h limits. Each training segment scans for20k/40k/60k/80k checkpoints and submits the optimized exact4k evaluator immediately:32 workers/GPU, one policy server/GPU, dynamic client-count batch ceiling, zero batching wait and resume enabled. Every generated successor/eval ID is appended to `slurm_logs/libero_grid_job_ledger.tsv`.
 
 Kill a cell for non-finite loss, missing gradients/information path, repeated resume failure, or multi-node throughput below70% of the one-node projection. Do not select from training MSE: historical loss ordering failed to predict rollout ordering. Promote seed43 for the best two rollout cells and the matched encoder/causal comparison at the selected batch/step.
 
@@ -73,7 +73,7 @@ The RoboCasa worktree has the older shared-z dropout path but does not yet conta
 
 | date | LIBERO-plus | parallel benchmark and paper work |
 |---|---|---|
-| Sep18 | **Done:** implement token-only z and structured camera dropout; pass six20-step/in-training-eval smokes; submit jobs1877720–1877727. Monitor allocation/startup and verify first production losses plus throughput. | Record final RoboCasa PI-v4 result (seed4/42:66.30/65.44% over816 episodes each) and update the cross-benchmark framing. |
+| Sep18 | **Done:** implement token-only z and structured camera dropout; pass eight20-step/in-training-eval smokes; replace the short jobs with12h jobs1878150–1878157 and submit added batch32 pair1878254. Monitor allocation/startup and verify first production losses plus throughput. | Record final RoboCasa PI-v4 result (seed4/42:66.30/65.44% over816 episodes each) and update the cross-benchmark framing. |
 | Sep19 | Monitor auto-resume ledger. Validate multi-node batch128/256 scaling. Run execute4/8/16 inference screen on the78.475% anchor without retraining. Do not add PI-v4+z until at least the20k token-only rollout result. | Recompute readiness/result tables from raw files; freeze exact task lists and config hashes. |
 | Sep20 | Analyze the first exact4k20k results as mid-schedule checkpoints. Continue healthy runs toward40k; kill only on rollout failure plus no learning-curve evidence, or operational criteria above. | Prepare seed43 configs, but launch only for promoted cells. No new RoboCasa shared-z branch before the LIBERO token/camera decision. |
 | Sep21 | Compare token-full versus camera-dropout versus encoder control at matched available batches. Choose provisional batch/architecture and launch seed43 confirmations. | Scientific gate: decide whether the paper supports an encoder win, an encoder-head win, or only a recipe result. |
