@@ -20,6 +20,7 @@ Refreshed 2026-09-18 17:44 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1878149 | sm_rc_piv4c | **Smoke** for the missing 2x2 cell: QwenPI_v4 head on a **causal** backbone, RoboCasa, seeds4/42, 20 updates + eval10/20 | PENDING — gates the full run |
 | 1877726 / 1877727 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,2h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
 | 1877724 / 1877725 | tr_g128zc / tr_g128e | Seed42 global-batch128: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;8 GPUs/run,16/device,80k | **RUNNING**, two nodes each,2h segment; exact4k at20/40/60/80k auto-submits. |
 | 1877722 / 1877723 | tr_g64zf / tr_g64zc | Seed42 global-batch64 new token-only shared-z variants: all encoder memory versus30% structured one-camera dropout; z-AdaLN disabled | **RUNNING**, one4-GPU node each,2h segment. Existing encoder/causal batch64 controls are reused. |
@@ -487,6 +488,56 @@ Apply once 1871858/59, 1864841/42 have drained. The same wait applies to the
 `failed_suites.txt` truncation fix noted above.
 
 ## Planned / not yet launched
+
+### Planned: RoboCasa PI-v4 head on causal backbone (full run), gated on smoke 1878149
+
+Why: at step 50k the three existing RoboCasa arms are
+
+| backbone | head | mean |
+|---|---|---:|
+| causal | DiT-B | 0.354 |
+| v5 encoder | DiT-B | 0.379 |
+| v5 encoder | LayerwiseFM_v4 | **0.661 / 0.659** |
+
+The +0.28 is therefore confounded — it could be the layerwise head being better
+in general, or the head being what the encoder needed. The missing cell (causal
+backbone + LayerwiseFM_v4 head) separates the two, and is the only run that can.
+
+Config `examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml`
+(commit 7831aab, **worktree only**). Verified diff against `ervla_robocasa365_piv4.yaml`
+is exactly the backbone swap that `pi_causal` makes against `pi_v5`: `enc_dec: false`,
+no `encdec_ckpt`/`skip_decoder`, none of the cross-attention adapter settings, and
+`freeze_modules: ''`. Data, optimizer, schedule, batch, horizon and head geometry
+are untouched.
+
+Submit from `/e/project1/m3/blank4/code/starVLA-upstream-merge` (RoboCasa is
+worktree-only; the live tree fails with `Unable to open file`).
+
+```bash
+# Smoke (submitted as 1878149)
+sbatch --parsable --time=02:00:00 --job-name=sm_rc_piv4c \
+  train_robocasa365_seed_pair_slurm.sh \
+  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
+  ervla_robocasa365_piv4_causal_smoke 4 42 \
+  --trainer.max_train_steps 20 --trainer.num_warmup_steps 2 \
+  --trainer.eval_interval 10 --trainer.save_interval 20 --trainer.logging_frequency 1
+
+# Full run — ONLY after the smoke passes. 50k needs ~21h, i.e. a 12h segment plus
+# an afterany continuation, exactly as 1858730 -> 1858851 did.
+sbatch --parsable --job-name=tr_rc365_piv4c \
+  train_robocasa365_seed_pair_slurm.sh \
+  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
+  ervla_robocasa365_piv4_causal 4 42
+
+sbatch --parsable --dependency=afterany:<train> --job-name=tr_rc365_piv4c_rs \
+  train_robocasa365_seed_pair_slurm.sh \
+  examples/simBenchmarks/Robocasa_365/train_files/ervla_robocasa365_piv4_causal.yaml \
+  ervla_robocasa365_piv4_causal 4 42 --trainer.is_resume true
+
+# Evals: 17-task x 48-episode manifests at step 50k, same harness as 1858852/53,
+# so the result is directly comparable with all three existing arms.
+```
+
 
 | What | Why | Blocked on |
 |---|---|---|
