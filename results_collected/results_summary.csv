@@ -87,5 +87,7 @@ starVLA,libero-plus-4k-exact-v1,ervla_a_causal,causal,42,libero-plus-4k-exact-v1
 starVLA,libero-plus-4k-exact-v1,ervla_d_cam3d_8gpu,other,42,libero-plus-4k-exact-v1,,,4,4000,2736,0.68400000,0.00735092
 starVLA,libero-plus-4k-exact-v1,ervla_j_dec_choice_staged_cam3d,other,42,libero-plus-4k-exact-v1,,,4,4000,2728,0.68200000,0.00736336
 starVLA,libero-plus-promptonly-exact4k-v1,libero_plus_qwen08b_gr00t_cot_trace_ours_v3_cotw01_promptonly_eval,CoT-trace,1234,libero-plus-promptonly-exact4k-v1,,,4,4000,3284,0.82100000,0.00606133
+starVLA,libero-plus-step10000-exact4k-v1,ervla_gr00t_sharedz_v5_memdrop100_b64_s43,shared-z/zonly,43,libero-plus-step10000-exact4k-v1,,10000,4,4000,2797,0.69925000,0.00725085
+starVLA,libero-plus-step10000-exact4k-v1,ervla_gr00t_sharedz_v5_memdrop100_b64_s42,shared-z/zonly,42,libero-plus-step10000-exact4k-v1,,10000,4,4000,2776,0.69400000,0.00728636
 starVLA,mlm-numeric-paired-v1,ervla_mlm_pi_encoder_cam3d_slotdrop15_nolabeldrop_noditdrop,encoder/mlm,42,mlm-numeric-paired-v1/plus/numeric,,,4,4000,2795,0.69875000,0.00725428
 starVLA,mlm-numeric-paired-v1,ervla_mlm_pi_encoder_cam3d_slotdrop15_nolabeldrop_noditdrop,encoder/mlm,42,mlm-numeric-paired-v1/plus/baseline,,,4,4000,2777,0.69425000,0.00728469

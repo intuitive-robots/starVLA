@@ -6,7 +6,7 @@ Computed from raw JSON snapshots, not from the status documents. Scores below ar
 
 ## Audit and canonical rule
 
-Read 1112 unique raw JSON artifacts, producing 1976 rows; all row counts and rates independently checked. 0 stored-rate mismatches. Snapshot: [raw_results_snapshot.json](results_collected/raw_results_snapshot.json); source hashes: [source_manifest.json](results_collected/source_manifest.json). Master CSV retains root and suite-local artifacts as different result_dir variants. Never sum those variants.
+The latest collector pass produces 1,403 canonical unit rows after removing duplicate root/suite copies; a duplicate-key audit found zero repeated `(tree, run, benchmark, result_dir, suite/task, tag, checkpoint)` rows. When a root aggregate is stale and the matching suite-local JSON has a larger denominator, the collector keeps the suite-local counts under the root result directory and records that file as the source. Five rows were independently rechecked against raw JSON, including plain LIBERO and RoboCasa. Snapshot: [raw_results_snapshot.json](results_collected/raw_results_snapshot.json); source hashes: [source_manifest.json](results_collected/source_manifest.json).
 
 Canonical LIBERO-plus: require four suites, ≥4,000 episodes and no nonempty failed_shards file at the root; prefer exactly 1,000 per suite, then an explicit 4k-exact directory, then lexical directory order. Never select by success rate or file modification time. This is the user-requested **internal full protocol**; the official benchmark evaluates all perturbation tasks, so 4,000 is not automatically an official leaderboard protocol. Root/suite-local disagreement excludes a result from an unqualified claim until explained. Identical copies are not replications.
 
@@ -30,10 +30,11 @@ The closest internal action-only control on that same14k-data recipe is `libero_
 | corrected z-memory tokens, dropout0.15 | 75.975% (3,039/4,000; SE0.676pp) | 75.675% (3,027/4,000; SE0.678pp) | 75.825±0.212% | Full memory does not help;−0.400pp versus corrected z-only. |
 | causal GR00T full memory/no z | 66.200% (2,648/4,000; SE0.748pp) | 60.375% (2,415/4,000; SE0.773pp) | 63.288±4.119% | Four-suite causal reference for the bottleneck test. |
 | causal GR00T z-only memory | 57.275% (2,291/4,000; SE0.782pp) | 56.950% (2,278/4,000; SE0.783pp) | 57.113±0.230% | Paired loss−8.925/−3.425pp; mean−6.175pp. This replaces full memory, so it is not an additive-z test. |
+| legacy shared-z GR00T, batch64 step10k | 69.400% (2,776/4,000; SE0.729pp) | 69.925% (2,797/4,000; SE0.725pp) | 69.663±0.371% | Same0.64M examples as batch32/20k, but halfway through a20k cosine schedule; isolates neither batch nor schedule. |
 
 All listed completed rows contain exactly1,000 episodes per suite and no nonempty failed-shard sentinel. Wrong-trace job1864756 has n=0 after all suite retries failed; its written zero-count aggregates are operational artifacts and are excluded.
 
-Pending batch diagnostic: exact4k jobs1873664/1873665 evaluate the10k checkpoints of the legacy batch64 dropout1 shared-z+GR00T seeds42/43 in isolated `libero-plus-step10000-exact4k-v1` directories, using2h allocations, optimized32-worker/1-server defaults and resumable shards. Initial pending jobs1873637/39 were cancelled before allocation. At10k updates these checkpoints have640k sampled-example presentations, matching the historical batch32/20k winner, but the learning-rate schedule phase is not matched. No score is recorded until each raw aggregate reaches4,000 episodes with empty failure sentinels.
+Batch diagnostic jobs1873664/1873665 completed in1:17:05/1:20:51 with empty failure sentinels. Their10k checkpoints have640k sampled-example presentations, matching the historical batch32/20k winner, but remain halfway through a20k cosine schedule. The two-seed mean69.663% is8.812pp below batch32/20k and7.212pp below the same batch64 runs at20k. This is strong evidence that10k optimizer updates are insufficient under the inherited schedule, not an isolated batch-size effect.
 
 Predicted trace changes success by−0.625pp versus one-pass and+0.988pp versus the same-compute null. It fails the promotion gate.
 

@@ -72,7 +72,8 @@ def rate_se(successes: int, episodes: int) -> tuple[float, float]:
 
 def collect_libero(tree: pathlib.Path) -> list[dict]:
     rows: list[dict] = []
-    # rglob is intentional: suite-local JSONs are independent evidence artifacts.
+    # Scan recursively because some evaluations have only suite-local JSONs.
+    # When a complete root aggregate exists, the duplicate suite file is skipped.
     for path in sorted((tree / "playground/Checkpoints").glob("*/results/**/overall_results.json")):
         rel = path.relative_to(tree / "playground/Checkpoints")
         run, _, benchmark, *tail = rel.parts
@@ -87,9 +88,47 @@ def collect_libero(tree: pathlib.Path) -> list[dict]:
         # ``overall`` result plus perturbation categories; those categories
         # must not become extra pseudo-suites in the master table.
         direct = counts(blob)
+        if direct is not None and len(tail) > 1:
+            # Most LIBERO-plus evaluators write the same suite once inside the
+            # result-root aggregate and once in ``<suite>/overall_results.json``.
+            # Prefer the aggregate so the master CSV has exactly one row per
+            # (run, result directory, suite). Keep the suite-local artifact only
+            # when the aggregate is absent/incomplete.
+            suite = tail[-2]
+            aggregate_path = path.parent.parent / "overall_results.json"
+            if aggregate_path.is_file():
+                try:
+                    aggregate_blob = json.loads(aggregate_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    aggregate_blob = {}
+                aggregate_counts = counts(aggregate_blob.get(suite))
+                if aggregate_counts is not None:
+                    # The aggregate-file pass below selects the larger-denominator
+                    # suite artifact if the root copy is stale.
+                    continue
         units = [(tail[-2], blob)] if direct is not None and len(tail) > 1 else blob.items()
+        step = re.search(r"(?:^|[-_])steps?[-_]?([0-9]+)(?:$|[-_/])", result_dir, re.I)
         for suite, node in units:
             found = counts(node)
+            source_path = path
+            if direct is None:
+                suite_path = path.parent / str(suite) / "overall_results.json"
+                if suite_path.is_file():
+                    try:
+                        suite_blob = json.loads(suite_path.read_text())
+                    except (json.JSONDecodeError, OSError):
+                        suite_blob = {}
+                    suite_counts = counts(suite_blob)
+                    if (suite_counts is not None
+                            and (found is None or suite_counts[1] > found[1])):
+                        if found is not None:
+                            print(
+                                f"! stale root suite; using {suite_path}: "
+                                f"{suite} root={found} suite={suite_counts}",
+                                file=sys.stderr,
+                            )
+                        found = suite_counts
+                        source_path = suite_path
             if found is None:
                 continue
             successes, episodes = found
@@ -107,7 +146,8 @@ def collect_libero(tree: pathlib.Path) -> list[dict]:
                               "result_dir": result_dir, "suite_or_task": suite, "tag": "",
                               "n_episodes": episodes, "successes": successes,
                               "success_rate": f"{rate:.8f}", "se": f"{se:.8f}",
-                              "checkpoint_step": "", "source_path": str(path),
+                              "checkpoint_step": step.group(1) if step else "",
+                              "source_path": str(source_path),
                               "is_full_protocol": "False"})
         failures = list(path.parent.glob("failed_shards_*.txt"))
         full = (sum(int(r["n_episodes"]) for r in file_rows) >= 4000
