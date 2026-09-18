@@ -4,27 +4,28 @@
 
 Prioritize an optimization-budget sweep, but run it on one fixed architecture first: the historical shared-z + GR00T/readout winner. Its two exact-4k seeds score 78.675% and 78.275% (mean 78.475%) at global batch 32 and 20k updates. The matched legacy batch-64 recipe scores 75.600% and 78.150% (mean 76.875%) at 20k updates. This 1.600-point mean change is large enough to affect the paper, but it does not identify a generic batch effect: batch, local batch composition and action-example exposure all changed.
 
-The existing batch-64 checkpoints at 10k updates have now completed exact 4k at 2,776/4,000 = 69.400% (seed 42, SE 0.729pp) and 2,797/4,000 = 69.925% (seed 43, SE 0.725pp), mean 69.663% and seed SD 0.371pp. Their mean is 8.812 points below the batch-32/20k mean at the same 0.64M sampled examples and 7.212 points below their own batch-64/20k endpoints. This makes the long batch-32 curve the primary performance run and batch 128 a boundary test. It does not isolate batch size because each 10k checkpoint is halfway through a 20k cosine schedule rather than the endpoint of a 10k schedule.
+The existing batch-64 checkpoints at 10k updates have now completed exact 4k at 2,776/4,000 = 69.400% (seed 42, SE 0.729pp) and 2,797/4,000 = 69.925% (seed 43, SE 0.725pp), mean 69.663% and seed SD 0.371pp. Their mean is 8.812 points below the batch-32/20k mean at the same 0.64M sampled examples and 7.212 points below their own batch-64/20k endpoints. This makes the long batch-32 curve the primary performance run and motivates adding batch16, where the same sample budget supplies still more optimizer updates. It does not isolate batch size because each 10k checkpoint is halfway through a 20k cosine schedule rather than the endpoint of a 10k schedule.
 
 The released upstream PI recipe is not a reason to copy batch 128 and 100k updates directly. It combines Qwen3-VL-4B, the historical 36-layer all-cross action model, full tuning, horizon 8, global batch 128 and 100k updates (12.8M action samples). It reports 77.0%, below our current two-seed mean despite 20 times as many sampled examples as our batch-32 winner. The useful lesson is that our learning curve is under-measured, not that 12.8M samples is known to be optimal.
 
 ## Clean first sweep
 
-Use the same legacy shared-z + GR00T/readout architecture, data, augmentation, loss weights and learning rates in every cell. Parameterize warmup and cosine decay by processed action samples. Train every trajectory to 2.56M samples, with 5% warmup (128k samples), and save equal-sample checkpoints:
+Use the same legacy shared-z + GR00T/readout architecture, data, augmentation, loss weights and learning rates in every cell. Parameterize warmup and cosine decay by processed action samples. Train every trajectory to 2.56M samples, with 10% warmup (256k samples, matching the historical winner's warmup fraction), and save equal-sample checkpoints:
 
 | global batch | preferred mapping | updates | warmup | checkpoints at 0.64M / 1.28M / 2.56M samples | first wave |
 |---:|---|---:|---:|---|---|
-| 32 | 2 GPUs × 16/device | 80k | 4k | 20k / 40k / 80k | seeds 42 and 43; two runs on one node |
-| 64 | 4 GPUs × 16/device | 40k | 2k | 10k / 20k / 40k | seeds 42 and 43; one node per seed |
-| 128 | 8 GPUs × 16/device | 20k | 1k | 5k / 10k / 20k | seed 42; two-node DDP boundary test |
+| 16 | 2 GPUs × 8/device | 160k | 16k | 40k / 80k / 160k | seeds 42 and 43; two runs on one node |
+| 32 | 2 GPUs × 16/device | 80k | 8k | 20k / 40k / 80k | seeds 42 and 43; two runs on one node |
+| 64 | 4 GPUs × 16/device | 40k | 4k | 10k / 20k / 40k | seeds 42 and 43; one node per seed |
+| 128 | 8 GPUs × 16/device | 20k | 2k | 5k / 10k / 20k | seeds 42 and 43; two nodes per seed |
 
-Keeping 16 examples per GPU matters for this model. The distribution loss gathers z over the distributed batch, while the target-separation loss forms same-language pairs only inside each rank's local batch. The existing batch-64 control used 2 GPUs × 32/device and therefore changed the local pair distribution as well as global batch. The table above holds local composition fixed. If two-node DDP is unstable or more than 30% slower per sample, use 4 GPUs × 16/device with two-step gradient accumulation for the batch-128 boundary test and record that the z distribution loss still sees microbatches of 64.
+Keeping 16 examples per GPU matters for this model. The distribution loss gathers z over the distributed batch, while the target-separation loss forms same-language pairs only inside each rank's local batch. The existing batch-64 control used 2 GPUs × 32/device and therefore changed the local pair distribution as well as global batch. The table holds16/device for batches32–128; batch16 necessarily uses8/device and is a performance candidate rather than a pure global-batch control. If two-node DDP is unstable or more than30% slower per sample, use4 GPUs ×16/device with two-step gradient accumulation for batch128 and record that the z distribution loss still sees microbatches of64.
 
 Do not change learning rate in this sweep. The current VLM/action split of 1e-5/1e-4 is already a competitive StarVLA-style recipe, and adding LR would make the first matrix uninterpretable. Only test a square-root-scaled action-head LR after the batch-128 curve shows clear optimization underfitting at matched samples.
 
 Every new configuration first runs 20 optimizer updates with ordinary in-training evaluation and writes a complete step-20 checkpoint. After that passes, use the first 100–200 production-style updates to measure throughput. This is a training/integration gate, not a simulator rollout smoke.
 
-Run a deterministic 1,000-episode LIBERO-plus screen at each equal-sample checkpoint. Keep these rows explicitly partial. Run exact 4k on the best checkpoint from each batch trajectory and on any checkpoint within one point of the best screen. Replicate batch 128 at seed 43 only if seed 42 beats the best batch-32/64 screen by at least one point or remains within one point while being materially faster.
+Run a deterministic 1,000-episode LIBERO-plus screen at each equal-sample checkpoint. Keep these rows explicitly partial. Run exact4k on the best checkpoint from each batch trajectory and on any checkpoint within one point of the best screen. Both seeds start for all four batches because compute is available; do not select a batch from one seed.
 
 If success improves by at least one point from 1.28M to 2.56M samples, extend only the winning batch to 5.12M samples with the same sample-based schedule. Do not jump directly to 12.8M. Stop scaling when the exact-4k mean fails to improve by one point, either seed regresses by more than two points, or training loss improves while rollout success falls.
 
@@ -47,14 +48,14 @@ If execute-8 gains at least one point on the 1,000-episode screen, confirm it at
 
 Measured production logs give about 1.05 s/update for the historical 2-GPU batch-32 run, or 30.5 action samples/s. The 2-GPU batch-64 controls take about 1.70–1.94 s/update, or 33–38 samples/s. Doubling the local batch therefore improved sample throughput by only roughly 10–25%, not 2×.
 
-The batch-32 80k trajectory should take about 23–25 hours per run at historical throughput; two seeds fit on one 4-GPU node. A 4-GPU × 16 batch-64 trajectory should finish in roughly 12–15 hours if scaling is healthy, but this must be measured. An 8-GPU batch-128 trajectory should take roughly 6–9 hours if cross-node communication is healthy. Use additional nodes for independent seeds and configurations rather than enlarging local batch merely to occupy GPUs. The first wave requires five 4-GPU nodes: one for two batch-32 seeds, two for the batch-64 seeds, and two for the single batch-128 two-node run.
+The batch16 160k trajectory is expected to take roughly30–45 hours and must use short resumable allocations; measure before projecting. The batch32 80k trajectory should take about23–25 hours per run at historical throughput; two seeds fit on one4-GPU node. A4-GPU ×16 batch64 trajectory should finish in roughly12–15 hours if scaling is healthy. An8-GPU batch128 trajectory should take roughly6–9 hours if cross-node communication is healthy. Use additional nodes for independent seeds and configurations rather than enlarging local batch merely to occupy GPUs. The long first wave requires eight4-GPU nodes: one each for the paired batch16 and batch32 runs, two for batch64, and four for the two batch128 runs.
 
 ## Daily schedule
 
 | date | work and gate |
 |---|---|
 | Sep 18 | Finish the running batch-64/10k exact-4k diagnostic. Correct the execute-length record. Prepare sample-based configs and launcher diffs; do not submit new training without an explicit launch instruction. |
-| Sep 19 | Run 20-update + trainer-eval smokes for batch 32/64/128 mappings, then 100–200-update throughput probes. Launch the five-node first wave after the gates pass. In parallel, smoke and launch the bounded corrected-z batch32/20k seed pair; do not sweep corrected z unless it meets its promotion gate. Start the horizon-16 execute-4/8/16 rollout screen independently. |
+| Sep 19 | Run20-update + trainer-eval smokes for batch16/32/64/128 mappings, then100–200-update throughput probes. Launch the eight-node, two-seed long wave after the gates pass. In parallel, smoke and launch the bounded corrected-z batch32/20k seed pair; do not sweep corrected z unless it meets its promotion gate. Start the horizon16 execute4/8/16 rollout screen independently. |
 | Sep 20 | Read 0.64M and 1.28M checkpoint screens while long trajectories continue. Kill only on integration failure or a predeclared severe regression; do not select from open-loop loss alone. |
 | Sep 21 | Complete the 2.56M curves and exact-4k evaluations for the best checkpoints. Select batch, budget and execution length. Replicate batch 128 only if it meets its gate. |
 | Sep 22 | Start the matched plain-encoder versus causal full-memory control at the selected recipe. Run one horizon-8 training seed only if execute-8 passed. Smoke QwenPI_v4 + shared z if its path is ready. |
