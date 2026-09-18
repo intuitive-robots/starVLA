@@ -38,32 +38,26 @@ Every cell first runs20 optimizer updates, ordinary in-training evaluation and a
 
 Run exact4k at20k/40k/60k/80k for seed42. Selection across many checkpoints is exploratory; the chosen architecture×batch×step and the clean encoder/causal comparison require seed43 confirmation on the same exact task list.
 
-## Architecture rows
+## Executed architecture rows
 
-Run four core GR00T rows at every batch. They use the same12-layer alternating cross/self action head, full final encoder memory representation where applicable, horizon16, data, augmentation and optimizer.
+The submitted grid is deliberately sparse. It avoids rerunning completed batch64 controls and spends the large-batch cells on the two most informative encoder variants.
 
-| row | action cross-memory | purpose |
-|---|---|---|
-| corrected encoder z-only | four always-visible projected z tokens; ordinary encoder memory masked (`memory_dropout_rate:1`) | clean shared-latent bottleneck |
-| corrected encoder z+memory | four always-visible z tokens; full encoder memory retained on85% of training rows and all evaluation rows (`memory_dropout_rate:0.15`) | test whether detailed encoder memory complements z |
-| encoder full-memory/no-z | full bidirectional encoder sequence, no z, no learned readout compressor | normal encoder control with the identical GR00T head |
-| causal full-memory/no-z | full causal sequence, no z, identical GR00T head | causal control |
+| global batch | fresh seed42 rows | GPUs/run | initial job |
+|---:|---|---:|---|
+|32|token-only z+full memory; token-only z+camera dropout; encoder full-memory/no-z; causal full-memory/no-z|2 (two runs/node)|1877720,1877721|
+|64|token-only z+full memory; token-only z+camera dropout|4|1877722,1877723|
+|128|token-only z+camera dropout; encoder full-memory/no-z|8|1877724,1877725|
+|256|token-only z+camera dropout; encoder full-memory/no-z|16|1877726,1877727|
 
-The corrected implementation already places z at the front of the GR00T cross-memory: `[z_1, z_2, z_3, z_4, h_1, ..., h_L]` in `starVLA/model/modules/shared_z.py::_augment_shared_z_cross_memory`. These tokens are produced after the encoder has run. GR00T cross-attention has no causal mask over its key/value memory and applies no new position-dependent encoding to these projected z tokens, so moving them between the front and end would not make the path more bidirectional. Making z participate in the encoder's bidirectional self-attention would require a distinct architecture: learned latent queries in the encoder, or a second encoder pass after z is computed. Do not conflate that loopback arm with the corrected cross-memory sweep.
+“Token-only z” means four z-derived prefix tokens are concatenated before ordinary encoder memory for GR00T cross-attention, while z-AdaLN is disabled. This removes the previous double conditioning. The full-memory arm retains the complete encoder sequence. The structured dropout arm selects30% of training rows, masks exactly one verified image-token span per selected row, and preserves language, the other camera and all four z tokens. Since the two cameras have similar token counts, the observed memory keep rate is about0.86. Evaluation keeps both cameras. The four z queries still pool the joint encoder sequence; camera-specific z queries remain a later ablation if structured dropout is positive.
 
-The causal row must match language-stack trainability. The completed causal control froze its causal language stack while the encoder's action-producing stack was trainable, so it is not sufficient for this matrix. Record that causal and encoder pretraining remain different unless a same-weight mask-only control is implemented.
+All six one-node smoke runs completed20 steps with trainer eval at10/20, finite losses, nonzero gradients and complete checkpoints. The batch128/256 jobs reuse those tested configs, but their multi-node startup and throughput remain a production gate. The camera-dropout smokes logged partial keep rates, establishing that the camera mask is active. No simulator rollout was used as a smoke.
 
-Do not use PI-v4 instead of the GR00T controls: that would change the action head and destroy the directionality comparison. Add QwenPI-v4 action-only as a fifth performance row across the four batches if capacity is available. It is scientifically separate: QwenPI-v4 currently rejects `shared_z.enabled`, so it cannot represent the corrected-z rows until that path is implemented. Existing PI-v4 exact4k at batch64/20k is76.125%/75.200%, mean75.663%.
+The completed batch64 encoder full-memory/no-z reference is `ervla_v5_gr00t_traceloop_1pass_noz_all` (exact4k mean74.125%). It has no readout compressor and no z, but does include the trace auxiliary head; record that caveat instead of treating it as a pure no-aux control. The completed causal batch64 full-memory/no-z reference is63.288% over two seeds. These rows are reused because the user explicitly ruled out duplicate batch64 training.
 
-No new legacy-z rows are needed. Its batch32/20k two-seed result remains the score to beat.
+Each initial job has a2h limit. This site rejects `--requeue` and reports `Requeue=0`, so a clean time-limit checkpoint submits a new2h resume job. Each training segment scans for20k/40k/60k/80k checkpoints and submits the optimized exact4k evaluator immediately:32 workers/GPU, one policy server/GPU, dynamic client-count batch ceiling, zero batching wait and resume enabled. Every generated successor/eval ID is appended to `slurm_logs/libero_grid_job_ledger.tsv`.
 
-## Resources and gates
-
-The four-row core matrix has16 seed42 training runs. At16 examples/GPU it occupies30 four-GPU nodes if fully concurrent: two nodes for four batch32 runs, four for batch64, eight for batch128 and16 for batch256. PI-v4 adds approximately eight node equivalents. Queue supply, rather than GPU-hour budget, may limit concurrency.
-
-At historical speed,80k batch32 is roughly23–25h. The larger distributed runs have the same update count and should be budgeted24–30h until the100–200-update profiles land. Use short resumable allocations with checkpoint validation instead of requesting speculative multi-day wall times.
-
-Kill a cell for non-finite loss, missing gradients/information path, repeated resume failure, or throughput below70% of its nearest mapping. Do not kill from open-loop loss alone. Promote seed43 for the best two performance cells and all four rows at the selected batch/step needed for the paper's architecture comparison.
+Kill a cell for non-finite loss, missing gradients/information path, repeated resume failure, or multi-node throughput below70% of the one-node projection. Do not select from training MSE: historical loss ordering failed to predict rollout ordering. Promote seed43 for the best two rollout cells and the matched encoder/causal comparison at the selected batch/step.
 
 ## Chunk length
 
@@ -77,13 +71,13 @@ The RoboCasa worktree has the older shared-z dropout path but does not yet conta
 
 ## Daily schedule
 
-| date | LIBERO-plus | parallel RoboCasa and paper work |
+| date | LIBERO-plus | parallel benchmark and paper work |
 |---|---|---|
-| Sep18 | Generate the four-batch × four-core-architecture seed42 configs plus optional PI-v4 row. Prepare resumable20/40/60/80 checkpoints and exact4k chains. No training submission without an explicit launch instruction. | Let PI-v4 eval jobs1858852/53 run. Port corrected z-memory tokens into the RoboCasa worktree and add the information-flow test. |
-| Sep19 | Run all16/device intended-mapping20-update/in-training-eval smokes and100–200-update throughput probes. Confirm the logged memory order is four z tokens followed by encoder memory. Release healthy seed42 cells in parallel. Start execute4/8/16 screen. Deprioritize batch256 rather than silently remapping it to32/device if nodes are unavailable. | Smoke the four corrected GR00T RoboCasa rows at global64. Release one training seed only after the port and state-conditioning tests pass. |
-| Sep20 | Exact4k completed20k checkpoints while training continues. Do not compare the new mid-schedule20k checkpoints as if they used the historical20k cosine endpoint. | Evaluate completed RoboCasa PI-v4 and corrected-GR00T checkpoints; reconcile failed-unit manifests. |
-| Sep21 | Exact4k40k/60k arrivals; select provisional top cells and prepare seed43 confirmations without stopping healthy80k runs. | Decide whether the cross-benchmark encoder result is positive, neutral or negative. |
-| Sep22 | Finish80k and exact4k. Select architecture×batch×step from seed42, then launch seed43 for the top two and claim-critical encoder/causal controls. | Freeze RoboCasa architecture and task protocol; second training seed only for promoted rows. |
-| Sep23 | Complete seed43 confirmations and final execution-length result. | Freeze main claims, tables and figures. |
-| Sep24 | Last safe headline-result arrival. | Recompute all tables from raw JSON and audit provenance. |
-| Sep25–26 | No exploratory training; writing, reproducibility, anonymization and final rendering. | Appendix-only corrections. |
+| Sep18 | **Done:** implement token-only z and structured camera dropout; pass six20-step/in-training-eval smokes; submit jobs1877720–1877727. Monitor allocation/startup and verify first production losses plus throughput. | Record final RoboCasa PI-v4 result (seed4/42:66.30/65.44% over816 episodes each) and update the cross-benchmark framing. |
+| Sep19 | Monitor auto-resume ledger. Validate multi-node batch128/256 scaling. Run execute4/8/16 inference screen on the78.475% anchor without retraining. Do not add PI-v4+z until at least the20k token-only rollout result. | Recompute readiness/result tables from raw files; freeze exact task lists and config hashes. |
+| Sep20 | Analyze the first exact4k20k results as mid-schedule checkpoints. Continue healthy runs toward40k; kill only on rollout failure plus no learning-curve evidence, or operational criteria above. | Prepare seed43 configs, but launch only for promoted cells. No new RoboCasa shared-z branch before the LIBERO token/camera decision. |
+| Sep21 | Compare token-full versus camera-dropout versus encoder control at matched available batches. Choose provisional batch/architecture and launch seed43 confirmations. | Scientific gate: decide whether the paper supports an encoder win, an encoder-head win, or only a recipe result. |
+| Sep22 | Continue40k/60k evaluations; stop dominated large-batch cells. | Freeze main ablation structure and claims. |
+| Sep23 | Land seed43 confirmation for the selected endpoint and matched control where feasible. | Draft final tables/figures with uncertainty and protocol caveats. |
+| Sep24 | Last safe headline-result arrival. Recompute every table from raw JSON. | Provenance/config audit and writing. |
+| Sep25–26 | No exploratory training; only failed-eval recovery and claim-critical confirmation. | Reproducibility, anonymization and final rendering. |
