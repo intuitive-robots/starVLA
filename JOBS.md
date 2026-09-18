@@ -29,9 +29,9 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1864756 | ep_cot_wrong | Causal CoT wrong-trace intervention, exact4k, foreign generated trace via `STARVLA_COT_CORRUPT=roll` | **CANCELLED by user** Sep18 01:24 after 01:39:04. 768/1,000 `libero_10` episodes rolled (partial 0.823 — note this is above the 0.80 read earlier in the run), **0 completed shards**, so nothing aggregatable is on disk; a rerun starts from scratch. Throughput was 504 eps/h, which was normal for its layout (mean episode 7.6 min vs 6.8 min for the clean CoT run; the gap is the intervention's extra full-horizon failures), not a misconfiguration. Submitted with the pre-tuning layout (16 workers/GPU, batch 16, servers co-located). Tuned relaunch ready at `/e/scratch/m3/blank4/starVLA_trace_eval/relaunch_wrongtrace_tuned.sh` (32 workers/GPU, servers on GPU0, `--nodes` via `NODES=`); it also archives the stale 64-shard debris and the zeroed `overall_results.json` left by cancelled 1864634. |
 | 1864634 / 1864635 | ep_cot_wrong / prompt | **CANCELLED before rollout** — detached worktree lacked generated policy-server Python wrapper; replaced with absolute-wrapper jobs1864756/57 |
 | 1864418 / 1864419 | sm_tl0_s42 / s43 | Matched two-pass null-trace GR00T control, one seed per4-GPU node,16/device, global64;20 updates + eval10/20 | SUBMITTED |
-| 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | 1864095 **RUNNING but degraded**, 3:18 elapsed / 1:42 left. GPU1's shards 8-15 abort with rc=134 (SIGABRT in the sim; the two policy servers on GPU1 are healthy and listening). `libero_10` and `libero_goal` have each **exhausted all 3 attempts and will not aggregate**; 24/32 shards banked per suite. On `libero_object` now, `libero_spatial` not started -> **will TIMEOUT at 5h**. |
+| 1864094 / 1864095 | ep_tl2a_42 / 43 | Exact4k LIBERO-plus after tied two-pass predicted-trace seeds1864092/93 | **1864094 COMPLETED** 1:17:43: `libero_10` 0.651, `libero_goal` 0.736, `libero_object` 0.829, `libero_spatial` 0.763 -> **mean 0.7448** (n=4,000). 1864095 **CANCELLED** at 3:23 (GPU1 aborts, `libero_10`+`libero_goal` had exhausted their retries); resumed as **1871859** with 72 shards banked. |
 | 1864092 / 1864093 | tr_tl2a_42 / 43 | Tied two-pass predicted-trace GR00T, one seed per4-GPU node,16/device, global64,20k | SUBMITTED — smokes1864038/39 passed |
-| 1864074 / 1864075 | ep_tl1a_42 / 43 | Exact4k LIBERO-plus after matched alternating one-pass trace-head pair1864073 | 1864075 **RUNNING but degraded**, 1:49 elapsed / 3:11 left, on a different node (jpbo-007-38) with the *same* GPU1 shards 8-15 aborting rc=134. `libero_10` exhausted 3 attempts and will not aggregate (24/32 shards banked). 2,257 episodes rolled against a 1,000-episode budget — the rest is retry waste. |
+| 1864074 / 1864075 | ep_tl1a_42 / 43 | Exact4k LIBERO-plus after matched alternating one-pass trace-head pair1864073 | **1864074 COMPLETED** 1:21:39: `libero_10` 0.636, `libero_goal` 0.718, `libero_object` 0.818, `libero_spatial` 0.772 -> **mean 0.7360** (n=4,000). 1864075 **CANCELLED** at 1:54 (same GPU1 abort on a different node); resumed as **1871858** with 24 shards banked. |
 | 1864073 | tr_tl1_alt | Matched one-pass trace-head GR00T control, no readout/no z, alternating attention, seeds42/43,20k,batch64 | SUBMITTED — smoke1863878 passed |
 | 1864038 / 1864039 | sm_tl2_s42 / s43 | **PASSED** — one seed per4-GPU node,16/device, global64;20 updates,eval10/20,finite losses,positive pass delta,complete checkpoints |
 | 1863879 | sm_tl_2p | **FAILED smoke** — two simultaneous2-GPU runs at32/device exceeded95GB/GPU before update1; no result promoted |
@@ -101,6 +101,29 @@ Refreshed 2026-09-18 00:58 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1826641 | tr_zonly_aug | COMPLETED — augmentation gives 0.763 vs 0.776 non-aug (n.s.) |
 
 ## Launch commands
+
+### Bad-GPU recovery resumes 1871858 / 1871859
+
+Run from `/e/project1/m3/blank4/code/starVLA`. Identical to the original
+1864075 / 1864095 lines except the dependency is dropped (parents finished) and
+`--resume` is added, which skips shards whose result JSON is already on disk.
+The layout is deliberately unchanged: changing `workers_per_gpu` renumbers the
+shards and would discard every banked shard.
+
+```bash
+sbatch --parsable --time=05:00:00 --job-name=ep_tl1a_43r --export=ALL,POLICY_SERVER_GPU= \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_1pass_noz_all_s43/checkpoints/steps_20000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 \
+  --max_batch_size 4 --max_wait_time 0.0 --resume   # 1871858
+
+sbatch --parsable --time=05:00:00 --job-name=ep_tl2a_43r --export=ALL,POLICY_SERVER_GPU= \
+  eval_libero_plus_slurm.sh \
+  --ckpt playground/Checkpoints/ervla_v5_gr00t_traceloop_2pass_noz_pred_all_s43/checkpoints/steps_20000_pytorch_model.pt \
+  --exact_tasks_per_suite 1000 --workers_per_gpu 8 --servers_per_gpu 2 \
+  --max_batch_size 4 --max_wait_time 0.0 --resume   # 1871859
+```
+
 
 Run training/eval launchers from the tree that owns them. **RoboCasa365 lives in the
 worktree** `/e/project1/m3/blank4/code/starVLA-upstream-merge` (branch `merge_upstream_2026_09`);
@@ -345,29 +368,32 @@ sbatch --parsable --dependency=afterok:1863830 --job-name=ep_q35_aug_s42 \
   --exact_tasks_per_suite 1000   # 1863832
 ```
 
-### Eval layout: the queued evals carry a 4x-too-small layout
+### Eval layout 8/2/4 is fine — the s43 trace-loop evals were killed by a bad GPU
 
-Every eval submitted before the layout was tuned passes
-`--workers_per_gpu 8 --servers_per_gpu 2 --max_batch_size 4`, i.e. 32 sim shards
-and 4 clients per server. The measured-fastest LIBERO-plus layout, and the
-script's default since 1223f88, is `--workers_per_gpu 32 --servers_per_gpu 1`
-with a derived batch of 32 — 128 shards, 4x the concurrency. Affected and still
-PENDING as of Sep18 09:30: 1864672/73, 1864839/40/41/42, 1863854/55/56/57,
-1861659/60/62/63, 1864074, 1864094. The q35 evals 1863831/32 are clean (they
-pass no layout flags and inherit the defaults).
+An earlier note here claimed `--workers_per_gpu 8 --servers_per_gpu 2
+--max_batch_size 4` was 4x too small and that all queued evals needed
+resubmitting. **That was wrong and the pending evals were left alone.** The
+counter-evidence is direct: `ep_tl2a_42` (1864094) ran the identical layout and
+finished all 4,000 episodes in **1:17:43 = 3,088 eps/h**, zero failed suites,
+mean 0.7448; `ep_tl1a_42` (1864074) likewise, 1:21:39, mean 0.7360. The
+`ep_gz_*` and `ep_tl0a_*` evals also completed in ~1:20 on this layout.
 
-SLURM cannot rewrite a pending job's arguments, so fixing these means cancel +
-resubmit preserving each `--dependency=afterok:<train id>`.
+The 504 eps/h measured on the wrong-trace control is not comparable: that
+checkpoint *generates* its trace autoregressively at inference, while the
+trace-loop models predict it with a head.
 
-Two failure modes compound on top of it:
+What actually went wrong on the s43 pair: one GPU's block of shards (8-15 =
+GPU1) aborted with rc=134, SIGABRT in the sim — the documented degraded-render
+signature — on **two different nodes**, jpbo-007-38 and jpbo-012-20. The policy
+servers on that GPU stayed healthy and listening, so it is the EGL side. Each
+suite burned all 3 retries on those 8 shards and never aggregated, and the
+retries re-rolled episodes: 2,257 episodes for a 1,000-episode budget on
+1864075.
 
-- **One GPU's shard block aborts with rc=134** (SIGABRT in the sim, the
-  documented degraded-render signature; the policy servers on that GPU stay
-  healthy). Seen as shards 8-15 = GPU1 on *both* jpbo-007-38 and jpbo-012-20.
-  The suite retry then re-rolls those episodes and fails again, so 3 attempts
-  are spent for nothing and the suite never aggregates.
-- **`--time=05:00:00` is too short** for a 2-pass model at this layout.
-  1864095 spent 3:18 to finish 2.x suites of 4.
+Recovery: cancelled both and resubmitted with `--resume` and the same layout, so
+the 24/32 shards already on disk per suite are kept and only the missing 8 are
+re-run. Same layout also keeps the shard partitioning, so the results stay
+directly comparable with the s42 siblings.
 
 ## Planned / not yet launched
 
