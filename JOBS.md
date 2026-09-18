@@ -395,6 +395,23 @@ the 24/32 shards already on disk per suite are kept and only the missing 8 are
 re-run. Same layout also keeps the shard partitioning, so the results stay
 directly comparable with the s42 siblings.
 
+### Lower a pending job's walltime in place — never resubmit for it
+
+`scontrol update JobId=<id> TimeLimit=<hh:mm:ss>` works without admin rights as
+long as the limit goes *down*, and it keeps the job's queue age. Resubmitting
+resets age and pushes the job back, so it is the wrong tool for this.
+
+Applied Sep18 09:45 to the ten pending LIBERO-plus evals (1864839-42, 1863854-57,
+1871858/59): 05:00:00 -> 02:30:00. The measured runtime for a full exact4k eval
+on a healthy node is 1:17-1:23 (1864074, 1864094, the `ep_gz_*` and `ep_tl0a_*`
+jobs), so 5h was ~4x the real need. The two RoboCasa evals 1858852/53 were left
+at 03:00:00 — no measured runtime for the 17-task x 48-episode unit yet.
+
+Note this did **not** get nodes sooner: with the scheduler holding nodes,
+`sbatch --test-only` returned the same estimated start (15:07) for 00:30:00,
+01:30:00, 02:30:00 and 05:00:00 alike. The value is for later, when the
+constraint is a backfill gap rather than a hold.
+
 ## Planned / not yet launched
 
 | What | Why | Blocked on |
