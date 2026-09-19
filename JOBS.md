@@ -20,6 +20,7 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1893711 | ep_causal_b32_80k_resume | `--resume` top-up of the `causal_b32` **80k endpoint** eval into the same `output_dir` (`results/libero-plus-step80000-exact4k-v1`): skips the 36 shards already on disk, gives the 12 exhausted shards fresh attempts on a different node. Launched from the recovered submit line of 1892946 | SUBMITTED 2026-09-19 16:0x |
 | 1893392 | rc_piv4c_s42now | RoboCasa eval of the **finished** causal-arm seed42 at 50k, submitted directly instead of waiting on the chain | PENDING — gives half the 2x2 answer ~5h early |
 | 1888091 | v2_g32zt | Auto-resume segment of 1881737 (sweep v2 b32 pair tokfull + tokcam) via the grid launcher's self-resubmit; ids recorded in `slurm_logs/libero_grid_job_ledger.tsv` | RUNNING |
 | 1888096 | v2_g32zp | Auto-resume segment of 1881739 (sweep v2 b32 pair zonly + piv4) | RUNNING |
@@ -27,7 +28,7 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1889366 | v2_g256zc | Sweep v2 `ervla_gridv2_tokcam_b256_s42`, resumed onto the target-aware launcher, 30k target, 4 nodes | RUNNING |
 | 1889367 | v2_g256e | Sweep v2 `ervla_gridv2_encfull_b256_s42`, resumed onto the target-aware launcher, 30k target, 4 nodes | RUNNING |
 | 1892943 / 1892944 | ep_1888087_60000 / 80000 | Auto-submitted exact4k of `ervla_gridv2_encfull_b32_s42` at steps 60k and **80k (endpoint)**; inherited the new `workers_per_gpu` default of 12 — the fix propagates to auto-submitted evals | RUNNING |
-| 1892945 / 1892946 | ep_1888087_60000 / 80000 | Same for `ervla_gridv2_causal_b32_s42` at 60k and **80k (endpoint)** — first true b32 endpoint pair, and it includes the causal GR00T arm | RUNNING |
+| 1892945 / 1892946 | ep_1888087_60000 / 80000 | Same for `ervla_gridv2_causal_b32_s42` at 60k and **80k (endpoint)** — first true b32 endpoint pair, and it includes the causal GR00T arm | 60k RUNNING, healthy. **80k (1892946) CANCELLED at 57 min**: 1,054/4,000 episodes (siblings were at ~3,000), 12 shards permanently exhausted, i.e. a marginal render node — the same signature at 12 workers that 32 workers produced everywhere. Replaced by 1893711 with `--resume`; nothing completed was lost |
 | 1892334 / 1892335 / 1892561 / 1892562 | ae-fa3bisect / -rs / ae-aeseed7 / -rs | other workstream (not this session) — listed only so `jobs_status.sh` stops flagging them | RUNNING/PENDING |
 | 1891593 | tr_rc365_piv4c_rs2 | Third and final segment: s4 resumes from 40,000, needs 10,000 steps (~4.2h); s42 is already at 50,000 and should exit immediately | **PENDING, dependency cleared** — waiting only on scheduling |
 | 1891595 / 1891596 | rc_piv4c2_s4 / s42 | Replacement RoboCasa evals behind the second continuation | PENDING `afterok:1891593` |
@@ -142,6 +143,7 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | Outcome |
 |---|---|---|
+| 1893392 (+retry1894445) | rc_piv4c_s42now | RoboCasa eval, **causal backbone + LayerwiseFM_v4**, seed42 @50k — the missing 2x2 cell | **PARTIAL, 13/17 tasks: 0.638.** Matched against encoder+layerwise (1858853) on the same 13 tasks: **encoder 0.631 vs causal 0.638, delta +0.006 = 0.2 SE — statistically identical.** 3 units (CloseToasterOvenDoor, OpenDrawer, PickPlaceDrawerToCounter) died on **GPU2 of jpbo-063-01** with `Fatal Python error: Aborted` after 3 attempts each — the degraded-GPU signature, all on one device; resubmitted as1894445. **This falsifies the encoder attribution**: on RoboCasa the +0.28 belongs to the layerwise head, not to the bidirectional backbone. Seed4 still training (1891593). |
 | 1877720–1877727 | initial tr_g* grid segments | **CANCELLED intentionally after100–300 warmup steps** when the training allocation was corrected from2h to12h. No complete checkpoint was written; replacements are1878150–57. |
 | 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa 17-task x48-episode eval at step50k, QwenPI_v4 (encoder-only, `skip_decoder`, dense layer-wise conditioning) | **RUNNING, 16/17 tasks, zero retries.** s4 **0.661** (508/768), s42 **0.659** (506/768). Directly comparable with 1842871 (same `rc365_units.sbatch`, same CKPT_STEP=50000, same 48 eps/task): on the 16 common tasks **piv4 0.661/0.659 vs pi_v5 enc-dec 0.379 and pi_causal 0.354** — a +0.28 absolute, ~+75% relative jump, the largest RoboCasa gain recorded so far. Biggest per-task movers: OpenCabinet 0.02/0.06 -> 0.67, NavigateKitchen 0.15/0.10 -> 0.77, PickPlaceToasterToCounter 0.17/0.08 -> 0.81, CloseFridge 0.17/0.21 -> 0.77. PickPlace tasks barely move (PickPlaceCounterToStove 0.65 -> 0.60, i.e. slightly down) and CloseBlenderLid stays near the floor (0.04/0.06 -> 0.15/0.33). |
 | 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 1.0 (z-only) | **COMPLETED, CLEAN** both seeds. s42 **0.7650** (0.657/0.797/0.830/0.776), s43 **0.7595** (0.609/0.783/0.845/0.801). Seed mean **0.762** — best of this batch, still below the zonly+GR00T 0.7847. |
@@ -563,6 +565,33 @@ continuations with `afterany` up front rather than reacting to each timeout.
 A cheaper fix for future runs: `save_interval: 5000` halves the worst-case loss
 at the cost of more checkpoint space (these checkpoints are 5.84 GB each because
 `freeze_modules: ''` saves the whole backbone).
+
+### RESULT: the RoboCasa 2x2 closes against the encoder hypothesis
+
+Seed 42, 13 tasks evaluated on both arms with identical manifests:
+
+| backbone | head | mean |
+|---|---|---:|
+| causal | DiT-B | 0.354 |
+| v5 encoder | DiT-B | 0.379 |
+| v5 encoder | LayerwiseFM_v4 | 0.631 |
+| **causal** | **LayerwiseFM_v4** | **0.638** |
+
+The two layerwise arms differ by 0.006 against an SE of 0.027. So the large
+RoboCasa gain is a property of **how the action head reads the backbone**, not of
+bidirectional encoding. Any paper claim of the form "bidirectional backbones
+improve manipulation" is not supported by this benchmark and must be dropped.
+
+What survives: (a) the embodied-reasoning result, where the bidirectional 2B
+beats a matched causal 2B 0.690 vs 0.576 on 12 benchmarks and matches a 9B —
+that is a backbone claim and is untouched by this; (b) the control claim
+restated as an interface result, which is what the evidence actually supports.
+
+Caveats before this goes in a paper: single seed (s4 still training under
+1891593); 13 of 17 tasks, the other 4 lost to a bad GPU and being re-run as
+1894445; and the per-task profiles differ sharply even though the means agree
+(NavigateKitchen +0.31 for causal, CloseBlenderLid -0.21, PickPlaceCounterToStove
++0.25), which is worth a paragraph of its own.
 
 ## Planned / not yet launched
 
@@ -1463,3 +1492,32 @@ Reading: the encoder's advantage is concentrated on the GEOMETRIC axes (camera, 
 state, layout) — the three LIBERO-Plus names as where SOTA VLAs are most brittle. It is flat
 on background and loses on sensor noise. Adding state moved camera (+8.4) and light (+7.1)
 but not initial-state or layout, which the architecture alone already carried.
+
+**Operating note — a slow eval on a marginal node is not worth waiting out.** `--resume`
+skips every shard already on disk, so cancelling a crawling eval and resubmitting into the
+SAME `output_dir` loses no completed work and moves the remaining shards to a fresh node.
+Signature: episode count far below sibling jobs launched at the same time, plus a nonzero
+`exhausted 3 attempts` count. Recover the exact `output_dir` from
+`sacct -j <id> -X -o SubmitLine%600` — a different dir makes `--resume` a no-op restart.
+
+## Operating note: `--resume` silently re-runs every shard (found 2026-09-19)
+
+`eval_libero_in_one.sh:408` builds the resume probe as
+`${start}_to_${end}${result_tag}.json` where `result_tag` is only `_exact${N}`.
+`eval_libero_model.py:703` appends `_shard${i}of${M}` on top of that when `num_shards > 1`.
+So the probe looks for `0_to_2519_exact1000.json` while disk holds
+`0_to_2519_exact1000_shard43of48.json` — **the test never matches and `--resume` is a no-op.**
+
+Signature: a `--resume` job prints **zero** "already complete, skipping" lines despite a
+populated `logs/<suite>/` directory, and runs for the full wall time.
+
+Not a correctness bug as long as the re-run uses the **same worker count** as the files on
+disk: the shard names then collide exactly and get overwritten in place. It becomes a
+correctness bug the moment the worker count differs, because the old and new shards have
+different names, coexist, and `aggregate_results.py` globs `*.json` over both — the same
+merge trap that corrupted `state_s43` (65.6% JSON vs 77.7% log).
+
+Fix is staged but NOT applied — `1893711` is executing this script and bash lazy-reads it by
+byte offset. Apply after it drains:
+`scratchpad/resume_shard_tag.patch` (guard: a `--resume` over a complete dir must print 48
+skip lines and exit in <1 min).
