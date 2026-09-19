@@ -20,6 +20,15 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
+| 1893392 | rc_piv4c_s42now | RoboCasa eval of the **finished** causal-arm seed42 at 50k, submitted directly instead of waiting on the chain | PENDING — gives half the 2x2 answer ~5h early |
+| 1888091 | v2_g32zt | Auto-resume segment of 1881737 (sweep v2 b32 pair tokfull + tokcam) via the grid launcher's self-resubmit; ids recorded in `slurm_logs/libero_grid_job_ledger.tsv` | RUNNING |
+| 1888096 | v2_g32zp | Auto-resume segment of 1881739 (sweep v2 b32 pair zonly + piv4) | RUNNING |
+| 1889365 | v2_g128e | Sweep v2 `ervla_gridv2_encfull_b128_s42`, resumed onto the target-aware launcher, 30k target | RUNNING |
+| 1889366 | v2_g256zc | Sweep v2 `ervla_gridv2_tokcam_b256_s42`, resumed onto the target-aware launcher, 30k target, 4 nodes | RUNNING |
+| 1889367 | v2_g256e | Sweep v2 `ervla_gridv2_encfull_b256_s42`, resumed onto the target-aware launcher, 30k target, 4 nodes | RUNNING |
+| 1892943 / 1892944 | ep_1888087_60000 / 80000 | Auto-submitted exact4k of `ervla_gridv2_encfull_b32_s42` at steps 60k and **80k (endpoint)**; inherited the new `workers_per_gpu` default of 12 — the fix propagates to auto-submitted evals | RUNNING |
+| 1892945 / 1892946 | ep_1888087_60000 / 80000 | Same for `ervla_gridv2_causal_b32_s42` at 60k and **80k (endpoint)** — first true b32 endpoint pair, and it includes the causal GR00T arm | RUNNING |
+| 1892334 / 1892335 / 1892561 / 1892562 | ae-fa3bisect / -rs / ae-aeseed7 / -rs | other workstream (not this session) — listed only so `jobs_status.sh` stops flagging them | RUNNING/PENDING |
 | 1891593 | tr_rc365_piv4c_rs2 | **Second** continuation, queued because 1878219 is projected to miss 50k on seed4 | PENDING `afterany:1878219` |
 | 1891595 / 1891596 | rc_piv4c2_s4 / s42 | Replacement RoboCasa evals behind the second continuation | PENDING `afterok:1891593` |
 | 1878223 / 1878224 | rc_piv4c_s4 / s42 | Original evals behind 1878219 | PENDING — **expected to be cancelled** when 1878219 times out; superseded by1891595/96 |
@@ -65,7 +74,7 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1878940 | sm_piv4_imgdrop | **PARTIAL — 3/5 PASS, resubmitted as 1879173.** `seq1` (token removal + whole VLM frozen), `seq2` (stage-1→stage-2 handoff) and `state` (new control, state_dim 8) all passed 20 updates + eval 10/20. `anneal` and `blind` died with **CUDA OOM in the DeepSpeed gradient partition — a launcher bug, not the dropout code**: the script exported `CUDA_VISIBLE_DEVICES`, but `train_libero_slurm.sh` overwrites it from `STARVLA_CUDA_VISIBLE_DEVICES`, so every slot saw all four GPUs and three processes piled onto GPU 0 (33 + 22 + 1 GiB). `train_seed_pair_slurm.sh` documents exactly this trap. The two `removal: pixels` arms are the heaviest (full ViT, full sequence) so they lost the contention; `seq1` runs no vision tower at all, which is why it survived. Fixed by launching four background slots with `STARVLA_CUDA_VISIBLE_DEVICES=$slot`, the proven pattern. Original description: `anneal` (scheduled pixel zeroing, compressed to start 5/end 15 so 20 steps cross blind→ramp→sighted), `blind` (rate 1.0 at train *and* eval), `seq1` (`removal: tokens` — no image tokens, no `pixel_values` key, whole VLM frozen), `seq2` (stage-1→stage-2 handoff against a real piv4 checkpoint), `state` (the new no-dropout control, `state_dim: 8`). Five arms on four GPUs, 20 updates + eval 10/20 each | SUBMITTED 2026-09-18 18:41 |
 | 1878833 | sm_piv4_imgdrop | Superseded first attempt | **CANCELLED before it read any config** — every arm had `include_state: false`; proprioception must reach the encoder as quantised tokens, so all configs were regenerated with `state_dim: 8` / `include_state: true` and a new state-carrying control was added. Resubmitted as 1878940. |
 | 1878217 | tr_rc365_piv4c | RoboCasa causal backbone + LayerwiseFM_v4, seeds4/42, 50k | **TIMEOUT** 12:01:03 at Sep19 06:03 — expected, the 12h wall. Reached s4 28,036 / s42 30,648. |
-| 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 | **RUNNING** 6:56/12:00. **Seeds resumed unevenly**: `save_interval: 10000` meant s4 fell back to its 20,000 checkpoint (losing 8,036 steps) while s42 resumed from 30,000. Now s4 36,439 / s42 48,051. At 1.50 and 1.35 s/it, s42 needs 0.73h but **s4 needs 5.65h against 5.06h of wall — it misses by ~35 min**, so this segment will TIMEOUT too and `afterok` will cancel evals1878223/24. |
+| 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 | **RUNNING** 9:09/12:00. **s42 reached 50,000 and its checkpoint is on disk (13:45)** — that half is done. s4 is at 41,674 and needs 3.47h against 2.84h of wall, so it misses again. Worse, `save_interval: 10000` means s4's next save is at 50,000, which it will not reach (projected ~48,490) — **the remaining ~2:50 of s4 compute produces no new checkpoint and is pure waste**; segment 3 will resume it from 40,000 for the third time. |
 | 1878223 / 1878224 | rc_piv4c_s4 / s42 | RoboCasa 17-task x48-ep evals at 50k, same harness/manifests as1858852/53 so results compare directly | PENDING `afterok:1878219` |
 | 1878149 | sm_rc_piv4c | **Smoke** for the missing 2x2 cell: QwenPI_v4 head on a **causal** backbone, RoboCasa, seeds4/42, 20 updates + eval10/20 | **PASSED** 00:05:21, exit0:0. Both seeds ran all 20 updates, evaluated at 10 and 20, and wrote complete step-20 checkpoints (5.84 GB each). Loss finite and falling: s4 1.3276 -> action_dit_loss 0.9931, s42 1.3197 -> 0.9894. The only `Error`/`NaN` matches in the logs are an offline albumentations version check and an `NCCL_ASYNC_ERROR_HANDLING` deprecation notice — no traceback, no NaN. Unfreezing the whole backbone (`freeze_modules: ''`) works with LayerwiseFM_v4, which was the risk this smoke existed to test. Chain 1878217 released. |
 | 1878156 / 1878157 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,12h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
@@ -1397,3 +1406,60 @@ At `--workers_per_gpu 12`, all ten round-3 evals showed **0 permanently exhauste
 after 22 minutes (one had 28 retries, all of which succeeded). Round 2 at the default 32
 workers showed 36-60 permanent failures per job in the same window. Evidence supports
 lowering the default from 32; confirm on round 4 before changing it.
+
+## Aggregator trap: re-running an eval into the same results dir MERGES with the old one
+
+Round 4 of the image-dropout evals (state fixed, 12 workers) wrote into the same
+`results/libero-plus/` directories as the stateless round 1 (32 workers). Shards are
+named by their `[start,end)` episode range; a different worker count produces a different
+sharding, so round-4 files did NOT overwrite round-1 files — they sat beside them, and
+`aggregate_results.py` globs every `*.json` in the suite dir. Its own docstring (line 31)
+warns about exactly this. Result: `state_s43` read **65.6%** from the JSON while its own
+job log said **77.7%** — a blend of 53% stale and 77.7% fresh.
+
+Fixed 2026-09-19 12:40: every file older than round 4's start was moved to
+`results/libero-plus/_stale_round1_stateless/` in all ten dirs, per-suite and combined
+`overall_results.json` regenerated, and each total verified against the per-job log count
+(`grep -c '^INFO:dual_logger:Success: ' slurm_logs/eval_libero_plus_<jid>.err`). All ten
+match to 0.1pp at n=4000.
+
+**Rule:** when re-evaluating a checkpoint, either pass a fresh `output_dir` or clear the
+old shards first. The job log is the ground truth; the JSON is only as clean as the dir.
+Note also the harness logs every episode twice (`INFO -` and `INFO:dual_logger:`); count
+one prefix only, or every episode figure is ~2x inflated (rates are unaffected).
+
+## RESULTS (corrected) — image-dropout family, LIBERO-plus exact4k, n=4000, chunk 8, with state
+
+| arm | s42 | s43 | mean |
+|---|---|---|---|
+| `state` (control) | 77.7% | 77.7% | **77.7%** |
+| `seq_stage2` (10k vision-free frozen stage 1 → 20k sighted) | 61.4% | 61.1% | 61.3% |
+| `imgdrop_anneal` (blind→2k, ramp→10k) | 40.9% | 37.2% | 39.1% |
+| `imgdrop_anneal_late` (blind→10k, ramp→20k) | 34.5% | 38.1% | 36.3% |
+| `blind` (state-only, train+eval) | 36.4% | 35.0% | 35.7% |
+
+Supersedes the round-1 table above, which measured a stateless-eval bug, not the arms.
+
+## Per-axis: bidirectional encoder vs matched causal, LIBERO -> LIBERO-plus zero-shot
+
+Seed-averaged, n=8,000 per column (2 seeds x 4,000). `bidir+state` = QwenPI_v4, state_dim 8,
+horizon 8. `bidir nostate` = QwenPI_v4, state_dim 0, horizon 16. `causal` = QwenPI_v3
+decoder-only, state_dim 0, horizon 16. Note the head differs (v4 vs v3; v4 alone was worth
+~+2.5pp in earlier matched seeds), so `bidir+state - causal` is NOT yet an architecture-only
+number. The missing control is **causal + PI_v4 + state at horizon 8** — one training run.
+
+| axis | bidir+state | bidir nostate | causal | bidir+state - causal |
+|---|---|---|---|---|
+| Camera Viewpoints | 63.7% | 55.3% | 52.1% | **+11.6** |
+| Robot Initial States | 60.8% | 62.1% | 51.2% | **+9.5** |
+| Objects Layout | 78.7% | 79.5% | 70.2% | **+8.5** |
+| Light Conditions | 94.5% | 87.4% | 87.6% | +6.8 |
+| Language Instructions | 83.9% | 84.1% | 80.2% | +3.7 |
+| Background Textures | 92.9% | 92.5% | 92.3% | +0.6 |
+| Sensor Noise | 78.9% | 77.7% | 81.0% | **-2.0** |
+| **overall** | **77.7%** | 75.7% | 72.0% | **+5.7** |
+
+Reading: the encoder's advantage is concentrated on the GEOMETRIC axes (camera, initial
+state, layout) — the three LIBERO-Plus names as where SOTA VLAs are most brittle. It is flat
+on background and loses on sensor noise. Adding state moved camera (+8.4) and light (+7.1)
+but not initial-state or layout, which the architecture alone already carried.
