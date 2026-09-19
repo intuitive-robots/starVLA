@@ -20,8 +20,52 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | What | State |
 |---|---|---|---|
-| 1878217 | tr_rc365_piv4c | RoboCasa **causal backbone + LayerwiseFM_v4 head** (the missing 2x2 cell), seeds4/42, 50k | PENDING `afterok:1878149` — a failed smoke stops the whole chain |
-| 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 past the 12h wall | PENDING `afterany:1878217` (afterany, because segment 1 is *expected* to TIMEOUT) |
+| 1891593 | tr_rc365_piv4c_rs2 | **Second** continuation, queued because 1878219 is projected to miss 50k on seed4 | PENDING `afterany:1878219` |
+| 1891595 / 1891596 | rc_piv4c2_s4 / s42 | Replacement RoboCasa evals behind the second continuation | PENDING `afterok:1891593` |
+| 1878223 / 1878224 | rc_piv4c_s4 / s42 | Original evals behind 1878219 | PENDING — **expected to be cancelled** when 1878219 times out; superseded by1891595/96 |
+| 1885185 → 1885186 / 1885187 | tr_anneal_late → ep_anneal_late_s42/s43 | **Late-decay anneal.** Blind through step 10,000, then linear 1.0→0.0 by 20,000, so the rate reaches 0 only at the final step. Its 10k blind budget matches the sequential arm's stage 1 exactly, making it the one-stage counterpart at equal blind exposure — LA4VLA's "mixed vs sequential" comparison. Evals chained `afterok` | SUBMITTED 2026-09-19 |
+| 1883887 → 1883888 → 1883889 | tr_seq1_s42 → tr_seq2_s42 → ep_seq2_s42 | **Sequential arm, 10k+20k.** Stage 1 vision-free 10,000 x 128, whole VLM frozen; stage 2 sighted 20,000 x 64 from its `steps_10000`; then exact4k. Fully chained `afterok` | SUBMITTED 2026-09-18 23:15 |
+| 1883890 → 1883891 → 1883892 | tr_seq1_s43 → tr_seq2_s43 → ep_seq2_s43 | Same, seed 43 | SUBMITTED |
+| 1881708 → 1881720 / 1881721 | tr_state → ep_state_s42/s43 | **chunk 8 restart.** Image-dropout control: state, no dropout | SUBMITTED 2026-09-18 20:29 |
+| 1881710 → 1881722 / 1881723 | tr_blind → ep_blind_s42/s43 | **chunk 8 restart.** State-only ceiling — read first | SUBMITTED |
+| 1881719 → 1881724 / 1881725 | tr_imgdrop_anneal → ep_* | **chunk 8 restart.** Image dropout annealed 1.0→0.0 over steps 2k→10k | SUBMITTED |
+| 1881726 / 1881729 | tr_seq1_s42 / s43 | Sequential stage 1 at 4k × 128 | **COMPLETED** 00:39:10 / 00:38:43, exit 0:0 — superseded by the 10k stage 1 (1883887/1883890); 4,000 frozen-backbone steps were too few for a prior to form |
+| 1881727 / 1881730 → 1881728 / 1881731 | tr_seq2_s42 / s43 → ep_* | Sequential stage 2 from `steps_4000` | **CANCELLED at ~step 8,000** and relaunched as the 10k+20k chain. Before cancelling it confirmed the handoff works in production: `📦 loading checkpoint: .../steps_4000_pytorch_model.pt`, and the prior transferred — first three logged losses 0.0874/0.0580/0.1149 against the cold control's 0.3947/0.3503/0.2483 |
+| 1881737 | v2_g32zt | **chunk 8 restart.** Sweep v2 b32 pair tokfull + tokcam, 80k / warmup 2000 | SUBMITTED |
+| 1881738 | v2_g32ct | **chunk 8 restart.** Sweep v2 b32 encfull + causal | SUBMITTED |
+| 1881739 | v2_g32zp | **chunk 8 restart.** Sweep v2 b32 zonly + piv4 | SUBMITTED |
+| 1881740 / 1881741 | v2_g64zf / v2_g64zc | **chunk 8 restart.** Sweep v2 b64 tokfull / tokcam, 40k | SUBMITTED |
+| 1881742 / 1881743 | v2_g128zc / v2_g128e | **chunk 8 restart.** Sweep v2 b128 tokcam / encfull, 30k, 2 nodes | SUBMITTED |
+| 1881744 / 1881745 | v2_g256zc / v2_g256e | **chunk 8 restart.** Sweep v2 b256 tokcam / encfull, 30k, 4 nodes | SUBMITTED |
+| 1881040 | v2_g32zt | **Sweep v2** b32 pair: `ervla_gridv2_tokfull_b32_s42` + `ervla_gridv2_tokcam_b32_s42`, 80k steps / warmup 2000 | SUBMITTED 2026-09-18 |
+| 1881041 | v2_g32ct | **Sweep v2** b32 controls: `ervla_gridv2_encfull_b32_s42` + `ervla_gridv2_causal_b32_s42`, 80k / 2000 | SUBMITTED |
+| 1881043 | v2_g32zp | **Sweep v2** b32 pair: `ervla_gridv2_zonly_b32_s42` + `ervla_gridv2_piv4_b32_s42`, 80k / 2000 | SUBMITTED |
+| 1881044 | v2_g64zf | **Sweep v2** b64 `ervla_gridv2_tokfull_b64_s42`, 40k / 2000 | SUBMITTED |
+| 1881045 | v2_g64zc | **Sweep v2** b64 `ervla_gridv2_tokcam_b64_s42`, 40k / 2000 | SUBMITTED |
+| 1881046 | v2_g128zc | **Sweep v2** b128 `ervla_gridv2_tokcam_b128_s42`, 30k / 2000, 2 nodes | SUBMITTED |
+| 1881047 | v2_g128e | **Sweep v2** b128 `ervla_gridv2_encfull_b128_s42`, 30k / 2000, 2 nodes | SUBMITTED |
+| 1881048 | v2_g256zc | **Sweep v2** b256 `ervla_gridv2_tokcam_b256_s42`, 30k / 2000, 4 nodes | SUBMITTED |
+| 1881049 | v2_g256e | **Sweep v2** b256 `ervla_gridv2_encfull_b256_s42`, 30k / 2000, 4 nodes | SUBMITTED |
+| 1878150 | tr_g32zt | Global-batch **32** pair: `ervla_grid_tokfull_b32_s42` + `ervla_grid_tokcam_b32_s42` | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878151 | tr_g32ct | Global-batch **32** controls: `ervla_grid_encfull_b32_s42` + `ervla_grid_causal_b32_s42` | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878152 | tr_g64zf | Global-batch **64**: `ervla_grid_tokfull_b64_s42`, one 4-GPU node | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878153 | tr_g64zc | Global-batch **64**: `ervla_grid_tokcam_b64_s42` | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878154 | tr_g128zc | Global-batch **128**: `ervla_grid_tokcam_b128_s42`, 2 nodes | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878155 | tr_g128e | Global-batch **128**: `ervla_grid_encfull_b128_s42`, 2 nodes | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878156 | tr_g256zc | Global-batch **256**: `ervla_grid_tokcam_b256_s42`, 4 nodes | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878157 | tr_g256e | Global-batch **256**: `ervla_grid_encfull_b256_s42`, 4 nodes | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1878254 | tr_g32zp | Global-batch **32** pair: `ervla_grid_zonly_b32_s42` + `ervla_grid_piv4_b32_s42` | **CANCELLED 2026-09-18 and relaunched as sweep v2** — every arm ran 80k steps / 8k warmup regardless of batch, which is 256k warmup samples at b32 but 2.05M at b256 |
+| 1879710 → 1879713 / 1879714 | tr_state → ep_state_s42/43 | **Control** for the image-dropout family: piv4 + quantised state, no dropout. Seeds 42/43, 20k, one 4-GPU node. Evals chained `afterok` | SUBMITTED 2026-09-18 19:02 |
+| 1879711 → 1879715 / 1879716 | tr_blind → ep_blind_s42/43 | **The state-only ceiling — read this one first.** `vision_rate: 1.0` at train *and* eval. If it lands near 1879710 then LIBERO success cannot discriminate between visual representations and nothing in the other arms is interpretable | SUBMITTED 2026-09-18 19:02 |
+| 1879712 → 1879717 / 1879718 | tr_imgdrop_anneal → ep_imgdrop_anneal_s42/s43 | **Headline arm**: image dropout annealed 1.0→0.0 over steps 2k→10k, one run, no second checkpoint. The two-stage curriculum as a schedule | SUBMITTED 2026-09-18 19:02 |
+| 1879719 / 1879723 | tr_seq1_s42 / s43 | Sequential **stage 1**: `removal: tokens` (no image tokens, no vision tower), whole VLM frozen, 4k × 128 global on 4 GPUs, one seed per node | SUBMITTED 2026-09-18 19:02 |
+| 1879720 / 1879724 → 1879721 / 1879725 | tr_seq2_s42 / s43 → ep_seq_stage2_s42/s43 | Sequential **stage 2**: ordinary sighted 12k × 64 from stage 1's `steps_4000` via `pretrained_checkpoint`. `afterok` on the matching stage 1. 4k×128 + 12k×64 = 1.28M samples = the control's 20k×64, matched on samples not steps | SUBMITTED 2026-09-18 19:02 |
+| 1879430 | sm_piv4_imgdrop | Smoke rerun 2, now asserting on the metrics rather than the exit status | **ALL FIVE PASSED**, 00:06:53, exit 0:0. `anneal` traced its schedule exactly — `1.0` held for six steps, then `0.9 0.8 0.7 0.6 0.5 0.4 0.3 0.2 0.1`, then `0.0` for the rest (compressed to start 5/end 15 for the smoke) — which is what proves `_publish_train_step` reaches the model and the rate is not frozen at its start value. `blind` and `seq1` logged `vision_keep_rate` 0.0 on every step. Full family released. |
+| 1879173 | sm_piv4_imgdrop | Smoke rerun after the 1878940 GPU-binding bug | **ALL FIVE COMPLETED, 00:07:13, exit 0:0** — 20 updates, eval 10/20 and a complete `steps_20` checkpoint per arm; losses finite and falling, and the arms diverge from `state` at identical seed/data (step 20: state 0.9504, blind 0.9880, anneal 0.9211, seq1 1.0303), which is what says the blinding changes the forward. **But `vision_keep_rate`/`vision_drop_rate` never appeared in the logs:** `_train_step` copies an explicit allowlist of keys out of the framework's output dict, so the two new metrics were returned and dropped. Plumbed at both call sites plus `wandb.define_metric`; resubmitted as 1879430 to confirm. Nothing was wrong with the dropout itself — only with the evidence it leaves. |
+| 1878940 | sm_piv4_imgdrop | **PARTIAL — 3/5 PASS, resubmitted as 1879173.** `seq1` (token removal + whole VLM frozen), `seq2` (stage-1→stage-2 handoff) and `state` (new control, state_dim 8) all passed 20 updates + eval 10/20. `anneal` and `blind` died with **CUDA OOM in the DeepSpeed gradient partition — a launcher bug, not the dropout code**: the script exported `CUDA_VISIBLE_DEVICES`, but `train_libero_slurm.sh` overwrites it from `STARVLA_CUDA_VISIBLE_DEVICES`, so every slot saw all four GPUs and three processes piled onto GPU 0 (33 + 22 + 1 GiB). `train_seed_pair_slurm.sh` documents exactly this trap. The two `removal: pixels` arms are the heaviest (full ViT, full sequence) so they lost the contention; `seq1` runs no vision tower at all, which is why it survived. Fixed by launching four background slots with `STARVLA_CUDA_VISIBLE_DEVICES=$slot`, the proven pattern. Original description: `anneal` (scheduled pixel zeroing, compressed to start 5/end 15 so 20 steps cross blind→ramp→sighted), `blind` (rate 1.0 at train *and* eval), `seq1` (`removal: tokens` — no image tokens, no `pixel_values` key, whole VLM frozen), `seq2` (stage-1→stage-2 handoff against a real piv4 checkpoint), `state` (the new no-dropout control, `state_dim: 8`). Five arms on four GPUs, 20 updates + eval 10/20 each | SUBMITTED 2026-09-18 18:41 |
+| 1878833 | sm_piv4_imgdrop | Superseded first attempt | **CANCELLED before it read any config** — every arm had `include_state: false`; proprioception must reach the encoder as quantised tokens, so all configs were regenerated with `state_dim: 8` / `include_state: true` and a new state-carrying control was added. Resubmitted as 1878940. |
+| 1878217 | tr_rc365_piv4c | RoboCasa causal backbone + LayerwiseFM_v4, seeds4/42, 50k | **TIMEOUT** 12:01:03 at Sep19 06:03 — expected, the 12h wall. Reached s4 28,036 / s42 30,648. |
+| 1878219 | tr_rc365_piv4c_rs | Continuation of1878217 | **RUNNING** 6:56/12:00. **Seeds resumed unevenly**: `save_interval: 10000` meant s4 fell back to its 20,000 checkpoint (losing 8,036 steps) while s42 resumed from 30,000. Now s4 36,439 / s42 48,051. At 1.50 and 1.35 s/it, s42 needs 0.73h but **s4 needs 5.65h against 5.06h of wall — it misses by ~35 min**, so this segment will TIMEOUT too and `afterok` will cancel evals1878223/24. |
 | 1878223 / 1878224 | rc_piv4c_s4 / s42 | RoboCasa 17-task x48-ep evals at 50k, same harness/manifests as1858852/53 so results compare directly | PENDING `afterok:1878219` |
 | 1878149 | sm_rc_piv4c | **Smoke** for the missing 2x2 cell: QwenPI_v4 head on a **causal** backbone, RoboCasa, seeds4/42, 20 updates + eval10/20 | **PASSED** 00:05:21, exit0:0. Both seeds ran all 20 updates, evaluated at 10 and 20, and wrote complete step-20 checkpoints (5.84 GB each). Loss finite and falling: s4 1.3276 -> action_dit_loss 0.9931, s42 1.3197 -> 0.9894. The only `Error`/`NaN` matches in the logs are an offline albumentations version check and an `NCCL_ASYNC_ERROR_HANDLING` deprecation notice — no traceback, no NaN. Unfreezing the whole backbone (`freeze_modules: ''`) works with LayerwiseFM_v4, which was the risk this smoke existed to test. Chain 1878217 released. |
 | 1878156 / 1878157 | tr_g256zc / tr_g256e | Seed42 global-batch256 boundary: token-only shared-z with structured camera dropout versus encoder full-memory/no-z;16 GPUs/run,16/device,80k with20k milestones | **RUNNING**, four nodes each,12h segment. Auto-resume/eval IDs go to `slurm_logs/libero_grid_job_ledger.tsv`. |
@@ -31,6 +75,8 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 | 1878151 | tr_g32ct | Seed42 global-batch32 control pair: encoder full-memory/no-z versus causal full-memory/no-z; two GPUs/run,16/device | **RUNNING**, one4-GPU node,12h segment. |
 | 1878254 | tr_g32zp | Added seed42 batch32 pair: token-only z bottleneck (all ordinary encoder memory masked) and QwenPI-v4 encoder; two GPUs/run,16/device | **PENDING**,12h. Both20-step/in-training-eval smokes passed in interactive allocation1873548. |
 | 1873664 / 1873665 | ep_gz100_10k42 / 43 | Exact4k LIBERO-plus at **step 10,000** of `ervla_gr00t_sharedz_v5_memdrop100_b64` (intermediate-checkpoint comparison against the 20k result) | PENDING (Priority), 2h limit. Submitted 12:3x from another session — recorded here so `jobs_status.sh` stays clean. |
+| 1880757 | ae-policy-rs | other workstream (not this session) — listed only so `jobs_status.sh` stops flagging it | RUNNING |
+| 1877960 | ae-policy | other workstream (not this session) — listed only so `jobs_status.sh` stops flagging it | RUNNING |
 | 1873117 | ae-prepare | other workstream (not this session) — `AE_Data_SelectioN_Robotic/slurm/prepare.jupiter.sbatch`, submitted Sep18 11:14, 6h limit | PENDING (Priority); listed only so `jobs_status.sh` stops flagging it |
 | 1864839 / 1864841 | ep_cnoz_42 / 43 | Exact4k causal full-hidden/no-z GR00T after paired training1864837/38 | COMPLETED, CLEAN:66.200% /60.375%; mean63.288%. |
 | 1864840 / 1864842 | ep_cz4_42 / 43 | Exact4k causal fixed four-token shared-z GR00T after paired training1864837/38 | COMPLETED, CLEAN:57.275% /56.950%; mean57.113%; paired−6.175pp. |
@@ -493,6 +539,22 @@ them. Patch:
 Apply once 1871858/59, 1864841/42 have drained. The same wait applies to the
 `failed_suites.txt` truncation fix noted above.
 
+### RoboCasa 50k needs THREE segments, not two — budget for it
+
+`save_interval: 10000` interacts badly with the 12h wall. A segment that dies at
+step 28,036 resumes from **20,000**, not 28,036, so up to 9,999 steps are thrown
+away per timeout, and the two seeds in a pair drift apart because they hit the
+wall at different steps. On the causal arm: s4 lost 8,036 steps, s42 only 648,
+and after one continuation s4 is 11,600 steps behind its pair-mate.
+
+piv4 got to 50k in two segments (1858730 -> 1858851) by luck of where its
+checkpoints fell. Assume three for anything at this step count, and chain the
+continuations with `afterany` up front rather than reacting to each timeout.
+
+A cheaper fix for future runs: `save_interval: 5000` halves the worst-case loss
+at the cost of more checkpoint space (these checkpoints are 5.84 GB each because
+`freeze_modules: ''` saves the whole backbone).
+
 ## Planned / not yet launched
 
 ### RoboCasa PI-v4 head on causal backbone — LAUNCHED 1878149 -> 1878217 -> 1878219 -> 1878223/24
@@ -702,3 +764,636 @@ sbatch --parsable --time=02:00:00 --job-name=ep_gz100_10k43 --export=ALL,POLICY_
 ```
 
 Submitted September18. Both replacement jobs were pending for priority at the initial queue check.
+
+## LIBERO piv4 image-dropout arms (pre-encoder modality dropout)
+
+New mechanism: `framework.modality_dropout` in
+`starVLA/model/modules/modality_dropout.py`, mixed into `Qwen_PI_v3` so `QwenPI_v4`
+inherits it. Removes a row's images **before** the bidirectional encoder runs, which is
+what LIT / APT / LA4VLA / action-priors all force and what the existing
+`shared_z.memory_dropout_mode: camera` does **not** (that one masks image columns out of
+the action head's memory *after* the encoder has already mixed vision into the language
+tokens).
+
+Two removal mechanisms, deliberately not interchangeable:
+* `removal: pixels` zeroes `pixel_values` after the processor. Token count, sequence
+  length, masks, mrope positions and FLOPs stay bit-identical to a sighted row, so rows at
+  different rates stay comparable inside one batch — but a blind row costs a full sighted
+  step. Same argument as `QWen3_Blind.py`.
+* `removal: tokens` never hands the images to the processor: no image tokens, no vision
+  tower, much shorter sequence, so a bigger batch fits. The instruction then sits at a
+  different offset than in a sighted row, so this belongs in a *uniform* phase, never
+  mixed with sighted rows.
+
+`vision_rate` accepts a scalar or a `{start, end, start_step, end_step}` ramp with the
+same semantics as `trainer.loss_scale` ramps. `Trainer._publish_train_step` pushes
+`completed_steps` onto the framework every optimizer step so the schedule advances.
+
+**Correction worth carrying forward:** the piv4 configs' `freeze_modules` does NOT freeze
+the encoder. In `full_duplicate`, `language_model.layers` is the **decoder**
+(`train_starvla.py:1477`), which `skip_decoder: true` never runs; the encoder lives in
+`language_model.encoder_layers` and is absent from the list. A real enc-dec run logs
+`4511.708M Total, 2127.532M Trainable`, i.e. one full stack trains. The "frozen-backbone
+representation comparison" comment in the RoboCasa configs does not describe the config.
+Only `ervla_v5_piv4_seq_stage1.yaml` actually freezes the VLM (`freeze_modules:
+'qwen_vl_interface'`).
+
+Control for every arm: `ervla_v5_piv4_actiononly.yaml`, seeds 42/43 at 20k (training
+1858694, evals 1858835/36). Do not re-run it.
+
+**All arms carry proprioception.** `include_state: true` / `state_dim: 8`, and
+`Qwen_PI_v3._add_state_conditioning` quantises the normalised state into 256 uniform bins
+over [-1,1] and appends `<instruction> [STATE] <bins> [ACTION]` (the pi-0.5 convention,
+`share_tools.state2str_transform`), so state reaches the bidirectional encoder as ordinary
+text tokens. A blinded row therefore carries instruction + state, which is LA4VLA's
+vision-free stage-1 input exactly.
+
+That forces a **new control**: `ervla_v5_piv4_state.yaml`, identical to
+`ervla_v5_piv4_actiononly.yaml` apart from those two entries. The dropout arms are measured
+against *it*, not against the older no-state run — adding state and adding dropout are two
+changes. The no-state run (1858694, evals 1858835/36) stays useful as the separate "does
+state help at all" reference.
+
+```bash
+cd /e/project1/m3/blank4/code/starVLA
+
+# Mandatory smoke gate: 20 updates + eval 10/20 for every arm, four GPUs in parallel.
+sbatch --parsable smoke_piv4_imgdrop_slurm.sh                                   # 1878940
+```
+
+### Launched 2026-09-18 19:02 (gate 1879430 passed)
+
+Order matters: **`state` and `blind` run first, as a pair.** `blind` is the state-only
+ceiling, and if it lands near its control then LIBERO success cannot discriminate between
+visual representations and nothing in the other arms is interpretable. `QWen3_Blind.py`
+records proprioception alone already matching the best VLM backbone on LIBERO at every
+demo count, and `PROBE_INSIGHTS.md` line 72 records causal RoboCasa collapsing 100/144 →
+0/144 when the state suffix is removed. This pair measures how much of LIBERO success
+survives with state but no pixels.
+
+```bash
+cd /e/project1/m3/blank4/code/starVLA
+
+# 1. the ceiling (run first, alone)
+sbatch --parsable --job-name=tr_piv4_blind train_seed_pair_slurm.sh \
+  examples/LIBERO/train_files/ervla_v5_piv4_blind.yaml \
+  ervla_v5_piv4_blind 42 43
+
+# 2. the headline arm: annealed image dropout, one run, no second checkpoint
+sbatch --parsable --job-name=tr_piv4_anneal train_seed_pair_slurm.sh \
+  examples/LIBERO/train_files/ervla_v5_piv4_imgdrop_anneal.yaml \
+  ervla_v5_piv4_imgdrop_anneal 42 43
+
+# 3. the staged comparison (one seed per node: stage 2's checkpoint path carries the seed)
+#    stage 1: 4k x 128 global (32/device x 4 GPUs), whole VLM frozen, no image tokens
+for S in 42 43; do
+  sbatch --parsable --job-name=tr_piv4_seq1_s$S --gres=gpu:4 train_libero_slurm.sh \
+    --config examples/LIBERO/train_files/ervla_v5_piv4_seq_stage1.yaml \
+    --run_id ervla_v5_piv4_seq_stage1_s$S --seed $S
+done
+#    stage 2: 12k x 64 global (16/device x 4 GPUs), ordinary sighted training from it.
+#    4,000x128 + 12,000x64 = 1.28M samples = the control's 20,000x64. Matched on samples,
+#    not steps. Fill in the stage-1 job id for the dependency.
+for S in 42 43; do
+  sbatch --parsable --job-name=tr_piv4_seq2_s$S --gres=gpu:4 \
+    --dependency=afterok:<STAGE1_JOBID_s$S> train_libero_slurm.sh \
+    --config examples/LIBERO/train_files/ervla_v5_piv4_seq_stage2.yaml \
+    --run_id ervla_v5_piv4_seq_stage2_s$S --seed $S \
+    --trainer.pretrained_checkpoint \
+      playground/Checkpoints/ervla_v5_piv4_seq_stage1_s$S/checkpoints/steps_4000_pytorch_model.pt
+done
+```
+
+RoboCasa365 counterparts exist in the worktree
+(`ervla_robocasa365_piv4_imgdrop_anneal.yaml`, `ervla_robocasa365_piv4_blind.yaml`,
+schedule scaled to the 50k budget: blind to 5k, ramp to 25k, sighted thereafter) and are
+**not** launched — LIBERO first. Their control is
+`ervla_robocasa365_piv4.yaml`, seeds 4/42 at 50k: **0.6630 / 0.6544** (evals 1858852/53).
+There, `include_state: true` and PI puts state in the prompt, so the blind arm is a
+state-only ceiling rather than an instruction-only one.
+
+### Operating notes
+
+* A rate set on `enabled: false` is rejected at construction. That combination is a
+  silent no-op arm, which is the one failure mode that yields a clean-looking duplicate
+  of the control.
+* `removal: tokens` + `mode: camera` is rejected: rows would differ both in length and in
+  which camera sits at which offset.
+* Watch `vision_keep_rate` (realised) against `vision_drop_rate` (scheduled) in wandb. A
+  persistent divergence means `protect_state` is rescuing more rows than intended.
+* Unit coverage: `test/test_modality_dropout.py`, 26 tests, mostly guarding the
+  row→image→patch mapping — if that is wrong the arm trains identically to the control
+  and reports a plausible, wrong "no effect".
+
+### W&B
+
+Group **`piv4_imgdrop_libero`** in `starvla_libero` (entity `niblank`). `.wandb_group` is
+pre-seeded into every output dir by `launch_piv4_imgdrop_libero.sh`, because the trainer
+reads that file and never writes it — a `--wandb_group` override alone is lost on a 12h-wall
+resume.
+
+`WANDB_MODE=offline` on compute nodes, so nothing appears online until it is synced:
+
+```bash
+cd /e/project1/m3/blank4/code/starVLA
+nohup bash scripts/sync_piv4_imgdrop_wandb.sh --watch \
+  1879710 1879711 1879712 1879719 1879720 1879723 1879724 \
+  > slurm_logs/piv4_imgdrop_wandb_sync.log 2>&1 &     # running since 19:02, pid 2247095
+```
+
+It discovers run dirs by their `.wandb_group` file (so a later arm needs no edit), appends
+every offline segment into the run's canonical `.wandb_run_id` (so a resumed arm stays one
+W&B run rather than several unrelated ones), fixes the group server-side, loops every 15
+min, and takes a final snapshot once all watched jobs end. Login node only — compute nodes
+have no route to wandb.ai. One pass without `--watch`.
+
+### What to read, in order
+
+1. **`blind` vs `state`** (1879715/16 vs 1879713/14). This decides whether anything else is
+   interpretable. `QWen3_Blind.py` records proprioception alone already matching the best
+   VLM backbone on LIBERO at every demo count; `PROBE_INSIGHTS.md` line 72 records causal
+   RoboCasa collapsing 100/144 → 0/144 without the state suffix. If blind lands near its
+   control, stop and say so — that is a publishable negative and the control neither LIT,
+   APT, LA4VLA nor the action-prior papers report.
+2. **`anneal` vs `state`** — does the one-stage curriculum buy anything at all.
+3. **`anneal` vs `seq_stage2`** — one-stage mixing against the staged version, at matched
+   samples. LA4VLA is the only paper that A/B'd these (sequential 86.75 vs mixed 87.53 on
+   MetaWorld; 96.28 vs 95.75 on LIBERO — a tie both ways), so a tie here reproduces theirs
+   and the interesting outcome is a gap.
+
+### Not launched
+
+RoboCasa365 counterparts (`ervla_robocasa365_piv4_imgdrop_anneal.yaml`,
+`ervla_robocasa365_piv4_blind.yaml` in the worktree, schedule scaled to 50k: blind to 5k,
+ramp to 25k, sighted after) are written and validated but **not** submitted — LIBERO first.
+Control there is `ervla_robocasa365_piv4.yaml` seeds 4/42 at 50k: **0.6630 / 0.6544**
+(evals 1858852/53). RoboCasa already has `include_state: true`, so no config change is
+needed to carry state.
+
+## W&B groups and the sync watchers
+
+`WANDB_MODE=offline` on compute nodes, so **nothing appears online until something syncs
+it**. `scripts/sync_wandb_group.sh` is that something. It is group-agnostic: `WANDB_GROUP_`
+selects which runs an instance owns, so one copy serves every family and several instances
+watch different groups side by side. (It was `sync_piv4_imgdrop_wandb.sh`; stop a watcher
+before renaming or editing its file — bash lazy-reads a running script by byte offset.)
+
+| group | runs | watcher |
+|---|---|---|
+| `piv4_imgdrop_libero` | the 8 image-dropout runs (1879710/11/12/19/23 + the two stage-2 continuations) | `--watch 1879710 1879711 1879712 1879719 1879720 1879723 1879724` |
+| `libero_batch_sweep` | the 12 global-batch runs above | `--watch 1878150 1878151 1878152 1878153 1878154 1878155 1878156 1878157 1878254` |
+
+```bash
+cd /e/project1/m3/blank4/code/starVLA
+WANDB_GROUP_=piv4_imgdrop_libero nohup bash scripts/sync_wandb_group.sh \
+  --watch 1879710 1879711 1879712 1879719 1879720 1879723 1879724 \
+  > slurm_logs/wandb_sync_piv4_imgdrop.log 2>&1 &
+WANDB_GROUP_=libero_batch_sweep nohup bash scripts/sync_wandb_group.sh \
+  --watch 1878150 1878151 1878152 1878153 1878154 1878155 1878156 1878157 1878254 \
+  > slurm_logs/wandb_sync_batch_sweep.log 2>&1 &
+```
+
+Operating notes for the watcher:
+
+* Login node only — compute nodes have no route to wandb.ai.
+* It appends every offline segment into the run's canonical `.wandb_run_id`. The sweep runs
+  already carry **two** streams each (one per 12h segment), which without this would be two
+  disconnected W&B runs per arm instead of one.
+* `--append --include-synced --no-mark-synced` **does not duplicate**: verified on a run
+  synced twice concurrently — 4 rows, 4 unique steps, 0 duplicates. It appends by offset,
+  so re-sending a prefix is a no-op.
+* Grouping an already-running experiment works **server-side**: a run past `wandb.init`
+  cannot pick up a newly written `.wandb_group`, so `fix_groups` sets it through the API.
+  The sweep runs went `vla-train` → `libero_batch_sweep` that way. Their next resumed
+  segment inits with the group directly from the file.
+* The project resolves case-insensitively: URLs may read `starVLA_Libero` while the config
+  says `starvla_libero`. Cosmetic; the API finds the run either way.
+* A run can show `state=finished` on the server while training continues — each sync pass
+  finalises its upload. Read `squeue`, not the W&B state badge.
+
+## Batch sweep v2 — why v1 was cancelled and what replaced it
+
+**v1 (1878150-57, 1878254) was uninterpretable.** Every arm got
+`max_train_steps 80000 / num_warmup_steps 8000` whatever its batch. Expressed in samples
+that is wildly unequal:
+
+| arm | warmup samples | % of the anchor's 2.56M budget | LR at 2.56M |
+|---|---|---|---|
+| b32 | 256k | 10% | schedule complete |
+| b64 | 512k | 20% | ~50% of peak |
+| b128 | 1.02M | 40% | ~85% of peak |
+| b256 | **2.05M** | **80%** | **~100% of peak** |
+
+At the sample-matched point b256 had spent 80% of its budget warming up and was still at
+peak LR. `ENCODER_PUSH_PLAN.md` line 7 had in fact specified a schedule "parameterized by
+samples"; v1 did not implement it.
+
+**v2 schedule.** `num_warmup_steps 2000` for every arm — the absolute warmup the 20k runs
+used (`ervla_zonly_gr00t_sharedz_ground_temporal_v5`, the 78.475% anchor, and its b64
+control are both 2000/20000). Steps are sample-matched to 2.56M where that clears a 30,000
+step floor, else the floor:
+
+| arm | steps | samples | note |
+|---|---|---|---|
+| b32 | 80,000 | 2.56M | matches the anchor exactly |
+| b64 | 40,000 | 2.56M | |
+| b128 | 30,000 | 3.84M | floor |
+| b256 | 30,000 | 7.68M | floor |
+
+The floor is not optional: the b64/10k **mid-cosine** checkpoint scored 69.663% against
+76.875% for the same run with its schedule complete — **-7.2pp from schedule position
+alone**, against a 1.6pp batch effect. Every v2 arm completes its own cosine at its own
+endpoint, so no arm is ever read mid-schedule.
+
+**Stated limitation:** b128/b256 are *not* sample-matched; they see 1.5x and 3x the
+anchor's data. That is the conservative direction — if b32 still wins on a third of the
+samples the sample-efficiency claim is stronger; only a large-batch win would be
+unattributable.
+
+**Run ids are `ervla_gridv2_*`**, not reused, so v1's checkpoints, dataloader state and
+offline W&B streams are neither resumed from nor appended to at colliding step numbers.
+
+```bash
+cd /e/project1/m3/blank4/code/starVLA
+bash relaunch_batch_sweep_v2.sh          # emits every job id
+WANDB_GROUP_=libero_batch_sweep_v2 nohup bash scripts/sync_wandb_group.sh \
+  --watch 1881040 1881041 1881043 1881044 1881045 1881046 1881047 1881048 1881049 \
+  > slurm_logs/wandb_sync_batch_sweep_v2.log 2>&1 &
+```
+
+### The anchor these arms are chasing
+
+`ervla_zonly_gr00t_sharedz_ground_temporal_v5` — shared-z + GR00T + readout, **global batch
+32**, 20k steps, warmup 2000. LIBERO-plus exact4k seeds 42/43 = 78.675% / 78.275%, mean
+**78.475%** (SD 0.283pp). Matched b64 control = 76.875%, **-1.600pp** (s42 -3.075, s43 -0.125).
+
+From `results_collected/batch32_vs_batch64_training_curves.csv`:
+
+| comparison | b32 | b64 |
+|---|---|---|
+| action loss, steps 16k-20k (matched STEPS) | 0.04636 | **0.03061** |
+| action loss, final 20k | 0.04377 | **0.02557** |
+| action loss, 320k-640k examples (matched SAMPLES) | **0.05225** | 0.05939 |
+| open-loop MSE, matched samples | **0.04844** | 0.05418 |
+| mse_score RMSE-corrected, matched samples | **0.14075** | 0.15337 |
+| mse_score RAW, matched samples | 0.00332 | 0.00256 ← **invalid** |
+
+**Do not compare raw `mse_score` across per-device batch sizes.**
+`train_starvla.py:1071` computes `np.linalg.norm(pred - gt) / np.prod(actions.shape)`,
+i.e. **RMSE / sqrt(N)** with `N = eval_batch x action_horizon x action_dim`. It therefore
+carries a spurious **1/sqrt(batch)** factor. Verified against the archived curves:
+
+    b32 anchor   per_device=16  N=1792  raw*sqrt(N) = 0.14054   (csv 0.14075)
+    b64 control  per_device=32  N=3584  raw*sqrt(N) = 0.15326   (csv 0.15337)
+    raw ratio 0.7711  vs  predicted (1/sqrt2)*(RMSE ratio) 0.7705
+
+Two things follow:
+
+* It is **per-device** batch, not global: `eval_action_model` runs `predict_action` on the
+  main process's local batch only. The anchor used per_device 16 and its b64 control 32 --
+  that is the whole 1/sqrt(2). **Sweep v2 is unaffected**, because every arm holds
+  `per_device_batch_size: 16` and takes its global batch from GPU count, so the eval batch
+  is 16 everywhere and `mse_score` is directly comparable across the grid.
+* `action_horizon` is in that same denominator. It is 16 in every sweep config, the anchor
+  and the b64 control, so it is not a confound today -- but a horizon-8 row
+  (`OPTIMIZATION_SWEEP_PLAN.md` line 64) would show a raw `mse_score` ~sqrt(2) "better" for
+  free. Recover RMSE as `raw * sqrt(eval_batch * horizon * action_dim)` before comparing.
+
+Also note `eval_action_model` draws from `self._get_next_batch()` -- the **training**
+dataloader. `mse_score` is a fit diagnostic on a training batch, not validation;
+`open_loop/mse_mean` on fixed trajectories is the held-out one.
+
+b64 ends training with *lower* action loss and *worse* rollout. The supervised metrics do
+not select the better checkpoint — screen on exact4k success, not on the loss curve.
+
+## Chunk size: LIBERO is 8, and that is upstream's default
+
+`action_horizon: 8` (with `future_action_window_size: 7`) is now set in all eleven
+in-flight LIBERO configs — the five piv4 image-dropout arms and the six sweep arms.
+
+**This restores the upstream convention rather than inventing one.** On
+`upstream/starVLA_dev` (github.com/starVLA/starVLA):
+
+| file | action_horizon |
+|---|---|
+| `examples/simBenchmarks/LIBERO/train_files/starvla_cotrain_libero.yaml` | **8** |
+| `examples/modelExtensions/CoTrainVLM/train_files/starvla_cotrain_libero.yaml` | **8** |
+| `starVLA/config/training/starvla_cotrain_libero.yaml` | **8** |
+| `QwenGR00T` dataclass default | **8** |
+| `QwenPI` dataclass default | 16 |
+| `openpi/pi05_libero_8gpu.yaml` / `pi0_libero_8gpu.yaml` | 10 / 50 (openpi recipes, not ours) |
+
+Every native starVLA LIBERO config is 8. Our 16 came from `QwenPI`'s dataclass default by
+inheritance, not by decision — the ervla configs descend from the PI lineage.
+
+**Timing.** The eval env is `OffScreenRenderEnv` at robosuite's default `control_freq=20`
+and `model2libero_interface.py:179` steps one action per env step, so **chunk 8 = 0.4 s**
+at rollout; one second would be 20 steps. Note the LeRobot mirror declares `fps: 10.0`
+(`libero_lerobot/libero/meta/info.json`) against that 20 Hz env — if the demos really were
+subsampled 2x, every LIBERO run in this repo trains on 10 Hz motion and replays at 20 Hz.
+Unverified and independent of the chunk change, but worth closing out.
+
+**Comparability cost, stated plainly.** The 78.475% LIBERO-plus anchor
+(`ervla_zonly_gr00t_sharedz_ground_temporal_v5`), its b64 control and every archived curve
+in `results_collected/batch32_vs_batch64_training_curves.csv` were trained at horizon 16.
+The chunk-8 runs are a different policy class, so "did we beat 78.475%" is no longer
+like-for-like. The cheap way to keep that comparison is the execute-4/8/16 inference screen
+on the existing horizon-16 checkpoint (`OPTIMIZATION_SWEEP_PLAN.md` line 64), which needs
+no retraining.
+
+Raw `mse_score` will also read ~sqrt(2) "better" at chunk 8 for free, because
+`action_horizon` sits in its `N = eval_batch x horizon x action_dim` denominator. Corrected
+RMSE is unaffected.
+
+**Restart hygiene.** Relaunching reuses the same run ids, and the cancelled horizon-16 runs
+had already written `.wandb_run_id`, offline W&B streams and (for `seq_stage1`) checkpoints
+into those directories. Left alone, the new runs would have appended chunk-8 history onto
+the chunk-16 W&B runs at colliding steps, and `seq_stage2` would have loaded a horizon-16
+checkpoint into a horizon-8 head. Both families' stale directories were moved to
+`playground/Checkpoints/_archive_h16_*` before any job initialised, and `.wandb_group` was
+re-seeded into the fresh ones. **Archive before relaunching under a reused run id.**
+
+## Sequential arm: 10k + 20k, and what it can claim
+
+Stage 1 was 4,000 steps (total-sample-matched to the control). Too short for a prior to
+form when the whole VLM is frozen and only the piv4 head trains. Now:
+
+| | steps | global batch | samples |
+|---|---|---|---|
+| stage 1 (vision-free, VLM frozen) | 10,000 | 128 | 1.28M |
+| stage 2 (sighted, full FT) | 20,000 | 64 | 1.28M |
+| **total** | | | **2.56M** |
+| control `ervla_v5_piv4_state` | 20,000 | 64 | 1.28M |
+
+**Stage 2 now matches the control exactly** — same 20,000 steps, same warmup 2,000, same
+64 global batch — so the only difference between them is the initialisation. That is the
+LIT/APT convention (APT runs 100k stage-1 iterations before its stage 2) and it is the
+framing the research question needs: *does a vision-free pretraining phase help?*
+
+**It is NOT total-compute-matched.** The arm spends 2x the control's samples. A win
+therefore supports "vision-free pretraining helps", **not** "staging is free". If the
+stronger claim is wanted, the control has to be rerun at 40,000 steps (2.56M samples);
+that arm does not currently exist.
+
+Chain is fully automatic: `tr_seq1 -> tr_seq2 (afterok) -> exact4k (afterok)`. Nothing
+needs launching by hand when stage 1 lands.
+
+## Blind-phase length is now an ablation, not an assumption
+
+Two annealed arms share every other setting:
+
+| arm | blind through | ramp | fully sighted from | job |
+|---|---|---|---|---|
+| `imgdrop_anneal` | 2,000 | 2k → 10k | 10,000 | 1881719 |
+| `imgdrop_anneal_late` | 10,000 | 10k → 20k | never (rate hits 0 at the last step) | 1885185 |
+
+**Why the second one exists.** At step 14,000 the original arm is fully sighted yet its
+loss still tracks the permanently blind arm rather than the sighted control — pooled over
+both seeds, steps 12k+: `state` 0.0370, `blind` 0.0416, `anneal` **0.0415**, against a
+seed spread of 0.0024. Four thousand fully sighted steps did not recover the gap. Either
+vision is worth almost nothing on this loss (blind−state is only +0.0046, ~2x the seed
+noise), or the blind phase durably suppressed visual reliance. The second is the mechanism
+LIT/APT claim to induce; the pair of arms is what separates "the blind phase was too
+short" from "the blind phase did something that does not wash out".
+
+**Known tension in the late arm, accepted deliberately:** the ramp ends at
+`max_train_steps`, so no row is ever trained with dropout fully off, while evaluation is
+fully sighted (`inference_vision_rate: 0.0`). The policy meets an input distribution at
+rollout it never saw in training. If it underperforms for that reason rather than on
+merit, the fix is a third arm ending the ramp near 18,000 to leave a sighted tail.
+
+It also makes the staging comparison clean: 10,000 blind steps is exactly the sequential
+arm's stage 1 (`ervla_v5_piv4_seq_stage1.yaml`), so `anneal_late` vs `seq_stage2` is
+one-stage mixing against two-stage curriculum at **equal blind budget** — the A/B LA4VLA
+ran (sequential 86.75 vs mixed 87.53 on MetaWorld, 96.28 vs 95.75 on LIBERO; a tie both
+ways).
+
+## RESULTS — image-dropout family, LIBERO-plus exact4k
+
+All eight training jobs COMPLETED clean (exit 0:0). Evals at n=4,000 unless marked partial.
+
+| arm | horizon | state | success | note |
+|---|---|---|---|---|
+| `actiononly_s42` / `s43` (old control) | 16 | no | **76.12% / 75.20%** | the healthy reference |
+| `state_s43` | 8 | yes | **53.02%** | s42 still running |
+| `seq_stage2_s43` | 8 | yes | **1.88%** | 10k blind stage 1 → 20k fully sighted stage 2 |
+| `imgdrop_anneal_s42` | 8 | yes | **0.22%** | fully sighted from step 10,000 |
+| `blind_s43` | 8 | yes | **0.03%** | blind at train and eval |
+
+**1. Vision is necessary on LIBERO-plus. The state-only ceiling is zero.** `blind` scores
+0.03% (1/4,000). This is the control none of LIT/APT/LA4VLA report, and it comes out
+decisively: proprioception plus instruction solves nothing on this suite. Note this does
+**not** contradict `QWen3_Blind.py`, which found proprioception competitive on *vanilla*
+LIBERO — LIBERO-plus perturbs backgrounds, camera pose, objects and language, and state
+alone cannot track any of that. The two results together say the state shortcut is a
+vanilla-LIBERO artifact that the plus suite removes.
+
+**2. Pre-encoder image dropout is catastrophic, and it does not recover.** `anneal` is
+fully sighted for its last 10,000 steps and still scores 0.22%, i.e. `blind`'s number, not
+the control's. `seq_stage2` gets 20,000 *fully sighted* steps after its frozen vision-free
+stage and reaches only 1.88%. A vision-free phase does not "prime" this encoder; it
+destroys visual grounding durably enough that ordinary sighted training cannot repair it.
+That is the opposite sign of the LIT/APT/LA4VLA claim, measured with the controls they omit.
+
+**3. Training loss completely failed to predict this.** Pooled over both seeds at steps
+12k+: `state` 0.0370, `blind` 0.0416, `anneal` 0.0415 — a 12% spread on the flow-matching
+loss for a **53% versus 0.2%** behavioural difference. The supervised metric ranked these
+arms as near-identical. This is the sharpest instance yet of the warning already in
+`PROBE_INSIGHTS.md` and the batch32/64 record: **screen on rollout success, never on the
+loss curve.**
+
+**Open confound, do not skip.** `state` (53.02%) versus `actiononly` (76.12%/75.20%)
+changes **two** things at once: action_horizon 16 → 8 and the addition of quantised state.
+The 23pp drop cannot be attributed to either alone. Resolving it needs one arm at
+horizon 8 without state, or horizon 16 with state. Until then "chunk 8 is the upstream
+default" is a convention claim, not a performance claim.
+
+## Compute audit, 2026-09-19 ~10:00
+
+Two real problems found, both fixed; everything else is doing useful work.
+
+**1. Infinite resubmit loop (fixed).** `train_libero_grid_slurm.sh` line 148 hardcodes
+`steps_80000` as its completion test and line 78 only evaluates 20k/40k/60k/80k. Sweep v2
+targets 40k (b64) and 30k (b128/b256), so those arms finished training, never produced a
+`steps_80000` checkpoint, and resubmitted themselves forever — **six 14-minute segments in
+90 minutes doing zero steps of work** (1888372/1888421/1888479/1888604/1888696/1888892,
+all `COMPLETED 0:0`). The b64 arms were already done at 40,000 with their 20k and 40k evals
+correctly auto-submitted, so only the loop was waste. Cancelled 1889234/1889295, wrote
+`train_libero_grid_target_slurm.sh` (derives the target from `--trainer.max_train_steps`,
+evaluates milestones *below* the target plus the target itself, and chains resumes onto
+itself), and resumed the four 30k arms onto it from their checkpoints
+(1889364/65/66/67). The b32 arms target 80,000, which matches the old hardcode, so they
+were never affected and still run on the original script.
+
+**2. Dead eval on a degraded render node (resubmitted).** `ep_seq2_s42` (1883889) ran
+**4h21 with 213 permanently exhausted shards and zero completed episodes** — `rc=134`
+(SIGABRT), the `mjr_readPixels` signature in CLAUDE.md. Cancelled and resubmitted as
+1889391, which lands elsewhere.
+
+**Partially degraded, left running:** grid evals 1888088 / 1888090 / 1888083 carry 12-31
+permanently failed shards each and will return incomplete suites. Check their episode
+counts before using; a suite short of 1,000 is not comparable with a full one.
+
+**Worth knowing, not waste:** the auto-submitted b32 evals score `steps_20000` and
+`steps_40000` of an **80,000-step cosine**. Those are mid-schedule checkpoints. They are
+valid as a within-arm learning curve and **invalid as an endpoint comparison** — the
+b64/10k diagnostic measured that error at -7.2pp. Do not put them in a batch-size table.
+
+**How to spot the loop again:** `tail slurm_logs/libero_grid_job_ledger.tsv`. Resume
+entries for the same run arriving every few minutes, with segments that `COMPLETED 0:0` in
+~14 minutes, is the signature. A healthy segment runs to the 12h wall or to the target.
+
+## BUG: the LIBERO eval never sent proprioceptive state — first eval round is VOID
+
+`eval_libero.py` computed the 8-dim state and then dropped it when building the request:
+
+```python
+state = np.concatenate((obs["robot0_eef_pos"], _quat2axisangle(obs["robot0_eef_quat"]),
+                        obs["robot0_gripper_qpos"]))
+observation = {..., "observation.state": np.expand_dims(state, axis=0), ...}
+example_dict = {"image": [...], "lang": ...}      # state never forwarded
+```
+
+`Qwen_PI_v3.predict_action` then takes `state = ... if "state" in examples[0] else None`, so
+every state-trained policy rolled out with **no `[STATE]` suffix and no state token**,
+having had both in every training sample. The LIBERO client is the only one with this gap —
+RoboCasa365, Franka, RoboTwin and RoboChallenge all send state. It was invisible because
+every LIBERO config before 2026-09 used `state_dim: 0`.
+
+**It explains the whole result pattern, monotonically in state-reliance:**
+
+| arm | reliance on state | round-1 rollout |
+|---|---|---|
+| `actiononly` (no state) | none | 76.12% — unaffected |
+| `state` | partial, vision compensates | 53.02% |
+| `seq_stage2` (stage 1 = instruction+state only) | high | 1.88% |
+| `anneal` | very high | 0.22% |
+| `blind` (state is its only non-visual channel) | total | 0.03% |
+
+and it explains the contradiction that exposed it: `seq2` finished with a **lower** action
+loss than the control (0.01289 vs 0.01391), normal `mse_score` (0.00207) and normal
+open-loop MSE (0.04045). Those are computed in the trainer, where state IS present. The
+models are fine; only the rollout was broken. **No retraining is needed — re-evaluation is.**
+
+### The fix
+
+* `policy_wrapper.py` advertises `expects_state` in the handshake, derived from the
+  checkpoint's own `framework.action_model.state_dim > 0`. Verified: state arms True,
+  `actiononly` and every sweep arm False.
+* `model2libero_interface.py` reads it (default False, the historically correct value).
+* `eval_libero.py` forwards `observation.state` **only when the checkpoint expects it**.
+  Sending state unconditionally would append a `[STATE]` suffix to models never trained
+  with one and break the healthy 76% control.
+
+**State is sent RAW, and that is deliberate.** `Libero4in1DataConfig.transform()`
+normalises the ACTION keys only, so the training loader hands the framework raw state and
+`state2str_transform` quantises that into 256 bins over [-1,1]. Passing raw state
+reproduces the training quantiser exactly, saturation included (roll is ~pi and pins to bin
+255 in training too). Normalising it here would be a different, equally silent bug.
+Layout matches dim-for-dim: `modality.json` is `[x,y,z,roll,pitch,yaw,pad,gripper]` and
+dims 6-7 hold the two `gripper_qpos` finger joints (observed range +/-0.04), exactly what
+the client's concatenation puts there.
+
+Round-2 evals: 1889568/69 state, 1889571/73 blind, 1889574/75 anneal, 1889576/77
+anneal_late, 1889578/79 seq2.
+
+### Also: widespread EGL shard failures
+
+Running grid evals carry **36-60 permanently exhausted shards out of 128** each
+(1888083/84/86/88/90), i.e. 28-47% of episodes missing. `rc=134` / `mjr_readPixels`, the
+degraded-render-node signature. Those results are not merely noisier — a suite short of
+1,000 episodes is **not comparable** with a full one and may be biased if the failures
+correlate with particular tasks. Check `total_count == 1000` per suite before using any
+number. 1883889 was the extreme case (213 exhausted, 0 episodes, 4h21) and was resubmitted.
+
+## EGL aborts: cause, error handling, and the mitigation
+
+**How errors are handled (they do NOT retry forever).** `eval_libero_plus_slurm.sh` sets
+`SUITE_ATTEMPTS=3`. Each retry runs with `STARVLA_RESUME_EVAL=1`, so shards already on disk
+are kept and only failures re-run; after 3 attempts the suite gives up and writes a failure
+sentinel. Bounded — but on a bad node you still pay 3x before it stops, and the shards that
+exhausted their attempts are simply **missing from the results**, which is what makes a
+partial suite dangerous rather than merely noisy.
+
+**Why it hits LIBERO-plus and not plain LIBERO.** The concurrency differs by 8x:
+
+| | workers_per_gpu (actual) | servers_per_gpu |
+|---|---|---|
+| `eval_libero_slurm.sh` | **4** | 1 |
+| `eval_libero_plus_slurm.sh` | **32** | 1 |
+
+Each sim worker opens its own MuJoCo EGL context, so LIBERO-plus runs 32 concurrent EGL
+contexts per GPU against plain LIBERO's 4. Note the LIBERO-plus **docstring is stale** — it
+advertises `default: 8` and `servers_per_gpu default: 2` while lines 124-125 actually apply
+32 and 1. The aborts land immediately after `Starting episode 1...`, i.e. at the first
+render, and are `Aborted` (SIGABRT, rc=134) rather than a Python traceback.
+
+This also explains the partial node-dependence recorded in CLAUDE.md. At 32 contexts a
+healthy node copes and a marginal one does not, which is why two jobs showed 0 failures
+while five showed 36-60 of 128 shards in the same hour. It is not purely "a bad node".
+
+**Mitigation in flight:** the round-3 state-arm evals (1889613-1889622) run with
+`--workers_per_gpu 12`. If failure counts drop to ~0, lower concurrency is the fix and the
+default should be reduced (and the docstring corrected); if they do not, the cause is
+elsewhere and node placement is the remaining lever. Compare permanently-exhausted shard
+counts against round 2 before changing the default.
+
+## Chunk size 8 is NOT the cause of the low sweep numbers
+
+Retracted. `results_master.csv` has completed chunk-8 LIBERO-plus runs scoring well above
+the sweep: `cot_trace_ours_v3_cotw01` **83.08%**, `cot_trace_det_v3_cotw01` 81.22%,
+`gr00t_deeps` 77.17% — all `action_horizon: 8`, all n=4,000. Chunk 8 is fine.
+
+`tokfull_b64` at 57.30% had a complete eval (n=4,000, not EGL-truncated), so that is a real
+number for that arm. `ervla_gr00t_sharedz_v5_zmem4_tokenonly_full` is a **new variant that
+has never completed a run before**; the ~76% z-family numbers it sits below are different
+architectures, not the same one at a different chunk size. The simplest reading is that the
+token-only zmem4 variant is weaker, not that anything is broken.
+
+## Correction: the state switch already existed — it was unreachable, not missing
+
+My earlier entry said the LIBERO eval had no state path and I added one. That was wrong in
+two ways and is corrected here.
+
+1. **I patched the wrong files, twice.** `examples/LIBERO/eval_files/` is the plain-LIBERO
+   path. Every exact4k job runs **LIBERO-plus**, and specifically its *parallel* client
+   `examples/LIBERO-plus/eval_files/parallel_eval/eval_libero_model.py`. Rounds 2 and 3 of
+   the evals (1889568-79, 1889613-22) were therefore still stateless and were cancelled.
+
+2. **The parallel client already supported state.** Line 896:
+
+   ```python
+   if os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "0") == "1":
+       if state.shape != (8,):
+           raise RuntimeError(f"expected 8-D LIBERO state, got {state.shape}")
+       example_dict["state"] = observation["observation.state"].astype(np.float32)
+   ```
+
+   It is off by default and carries the right 8-D shape guard. No new code was needed.
+
+**The actual defect: the variable could never be set.** `eval_libero_in_one.sh` runs
+`apptainer exec --cleanenv`, which strips the host environment apart from explicitly listed
+`--env` flags, and `STARVLA_EVAL_INCLUDE_STATE` was not among them. Exporting it at any
+level above the container had no effect, so the branch was unreachable dead code. Fixed by
+adding the passthrough next to `STARVLA_PAIRED_ROLLOUT`:
+
+```bash
+--env "STARVLA_EVAL_INCLUDE_STATE=${STARVLA_EVAL_INCLUDE_STATE:-0}" \
+```
+
+**Round 4** (1889850-1889859) runs with `--export=ALL,STARVLA_EVAL_INCLUDE_STATE=1` and
+`--workers_per_gpu 12`. Any future eval of a state-trained LIBERO checkpoint needs that
+export or it silently measures a stateless policy.
+
+Still outstanding: `policy_wrapper.metadata` now advertises `expects_state`, and the two
+plain-LIBERO files auto-enable state from it, while the parallel path uses the env var.
+Two mechanisms for one contract. The env var is authoritative for LIBERO-plus; the
+handshake field is informational. Worth unifying — the auto-detecting version cannot be
+forgotten at submit time, which is exactly how this round was lost.
+
+## EGL mitigation looks effective
+
+At `--workers_per_gpu 12`, all ten round-3 evals showed **0 permanently exhausted shards**
+after 22 minutes (one had 28 retries, all of which succeeded). Round 2 at the default 32
+workers showed 36-60 permanent failures per job in the same window. Evidence supports
+lowering the default from 32; confirm on round 4 before changing it.
