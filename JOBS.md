@@ -143,7 +143,7 @@ Refreshed 2026-09-18 17:59 CEST from `squeue`, `sacct`, raw training logs and ra
 
 | Job | Name | Outcome |
 |---|---|---|
-| 1893392 (+retry1894445) | rc_piv4c_s42now | RoboCasa eval, **causal backbone + LayerwiseFM_v4**, seed42 @50k — the missing 2x2 cell | **PARTIAL, 13/17 tasks: 0.638.** Matched against encoder+layerwise (1858853) on the same 13 tasks: **encoder 0.631 vs causal 0.638, delta +0.006 = 0.2 SE — statistically identical.** 3 units (CloseToasterOvenDoor, OpenDrawer, PickPlaceDrawerToCounter) died on **GPU2 of jpbo-063-01** with `Fatal Python error: Aborted` after 3 attempts each — the degraded-GPU signature, all on one device; resubmitted as1894445. **This falsifies the encoder attribution**: on RoboCasa the +0.28 belongs to the layerwise head, not to the bidirectional backbone. Seed4 still training (1891593). |
+| 1893392 + 1894445 | rc_piv4c_s42now / retry | RoboCasa eval, **causal backbone + LayerwiseFM_v4**, seed42 @50k — the missing 2x2 cell | **COMPLETE, 16 tasks matched: causal 0.632 vs encoder 0.645, delta -0.013 = 0.5 SE (n=768/arm) — statistically identical.** The 3 GPU2 casualties on jpbo-063-01 were recovered by the retry in 6:49. **The RoboCasa gain is the layerwise head, not the bidirectional backbone.** Seed4 still training (1891593, 44,318/50,000). |
 | 1877720–1877727 | initial tr_g* grid segments | **CANCELLED intentionally after100–300 warmup steps** when the training allocation was corrected from2h to12h. No complete checkpoint was written; replacements are1878150–57. |
 | 1858852 / 1858853 | rc_piv4_s4 / s42 | RoboCasa 17-task x48-episode eval at step50k, QwenPI_v4 (encoder-only, `skip_decoder`, dense layer-wise conditioning) | **RUNNING, 16/17 tasks, zero retries.** s4 **0.661** (508/768), s42 **0.659** (506/768). Directly comparable with 1842871 (same `rc365_units.sbatch`, same CKPT_STEP=50000, same 48 eps/task): on the 16 common tasks **piv4 0.661/0.659 vs pi_v5 enc-dec 0.379 and pi_causal 0.354** — a +0.28 absolute, ~+75% relative jump, the largest RoboCasa gain recorded so far. Biggest per-task movers: OpenCabinet 0.02/0.06 -> 0.67, NavigateKitchen 0.15/0.10 -> 0.77, PickPlaceToasterToCounter 0.17/0.08 -> 0.81, CloseFridge 0.17/0.21 -> 0.77. PickPlace tasks barely move (PickPlaceCounterToStove 0.65 -> 0.60, i.e. slightly down) and CloseBlenderLid stays near the floor (0.04/0.06 -> 0.15/0.33). |
 | 1863854 / 1863855 | ep_gz4f100_42 / 43 | Exact4k LIBERO-plus — GR00T shared-z zmem4, memory_dropout 1.0 (z-only) | **COMPLETED, CLEAN** both seeds. s42 **0.7650** (0.657/0.797/0.830/0.776), s43 **0.7595** (0.609/0.783/0.845/0.801). Seed mean **0.762** — best of this batch, still below the zonly+GR00T 0.7847. |
@@ -574,10 +574,10 @@ Seed 42, 13 tasks evaluated on both arms with identical manifests:
 |---|---|---:|
 | causal | DiT-B | 0.354 |
 | v5 encoder | DiT-B | 0.379 |
-| v5 encoder | LayerwiseFM_v4 | 0.631 |
-| **causal** | **LayerwiseFM_v4** | **0.638** |
+| v5 encoder | LayerwiseFM_v4 | 0.645 |
+| **causal** | **LayerwiseFM_v4** | **0.632** |
 
-The two layerwise arms differ by 0.006 against an SE of 0.027. So the large
+On the full 16 matched tasks (n=768/arm) the two layerwise arms differ by 0.013 against an SE of 0.025. So the large
 RoboCasa gain is a property of **how the action head reads the backbone**, not of
 bidirectional encoding. Any paper claim of the form "bidirectional backbones
 improve manipulation" is not supported by this benchmark and must be dropped.
