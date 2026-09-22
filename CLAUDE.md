@@ -38,6 +38,17 @@ the eval client must come from the same tree — use absolute paths for both.
 Dependent jobs queued with `afterok` are cancelled when their parent dies — resubmit the
 parent *and* its evals.
 
+## Paper writing (papers/BiBrain_ICLR_2027)
+
+- **Never use em dashes (`---` or `--` for `—`).** Use semicolons, colons, parentheses,
+  or restructure the sentence instead.
+- Load `/research-paper-writing` before writing or revising any section. After drafting,
+  iterate the section against its skill reference (`references/abstract.md`,
+  `references/introduction.md`, etc.) until it passes the quality checklist.
+- One paragraph, one message. State the message in the first sentence.
+- Every claim in Abstract/Introduction must map to a concrete experiment with status
+  (supported / pending / TODO).
+
 ## Sim evaluation
 
 MuJoCo renders on the GPU via EGL inside the Apptainer images; do not fall back to OSMesa.
