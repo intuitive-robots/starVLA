@@ -823,6 +823,89 @@ class DroidLerobotJointPosDataConfig:
 
 ###########################################################################################
 
+class DroidPi05TwoCamDataConfig:
+    """DROID for pi0.5 DROID fine-tuning, mirroring openpi ``pi05_droid_jointpos`` / RoboLab (2026-10-11).
+
+    * cameras: ``left_external`` -> first image slot (openpi ``exterior_image_1_left`` -> base_0_rgb),
+      ``wrist`` -> second (``wrist_image_left`` -> left_wrist_0_rgb). The right external camera is not loaded.
+      Frames stay at the stored 180x320; the PI05 framework letterboxes them to 224 (openpi resize_with_pad).
+    * state: 7 joint positions + gripper position, q99-normalised (openpi quantile norm -> [-1, 1]).
+    * action: the 7 commanded joint positions of the next ``action_horizon`` steps (default 16) and the
+      absolute gripper. With ``datasets.vla_data.action_mode: rel`` + ``action_mode_apply_keys:
+      [action.joint_position]`` the joints become a_t - s_0 (openpi DeltaActions(make_bool_mask(7, -1)));
+      the gripper stays absolute. All dims q99-normalised, the gripper too (openpi normalises it as well).
+    * statistics: use ``datasets.vla_data.stats_override_path`` with the checkpoint's openpi norm stats so the
+      fine-tune starts in the exact normalised space the converted pi05_droid_jointpos policy was trained in.
+    * augmentation: ``datasets.vla_data.augmentation`` (none | photometric | crop_photometric) is applied in the
+      worker (the PI05 framework has no model-side augmentation).
+    """
+
+    video_keys = [
+        "video.left_external",
+        "video.wrist",
+    ]
+    state_keys = [
+        "state.joint_position",
+        "state.gripper_position",
+    ]
+    action_keys = [
+        "action.joint_position",
+        "action.gripper_position",
+    ]
+    action_key_dims = {
+        "action.joint_position": 7,
+        "action.gripper_position": 1,
+    }
+    state_key_dims = {
+        "state.joint_position": 7,
+        "state.gripper_position": 1,
+    }
+    language_keys = [
+        "annotation.language_instruction_1",
+        "annotation.language_instruction_2",
+        "annotation.language_instruction_3",
+    ]
+    observation_indices = [0]
+    action_indices = list(range(16))
+
+    def modality_config(self, action_horizon: int | None = None):
+        action_indices = list(range(action_horizon)) if action_horizon else self.action_indices
+        return {
+            "video": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.video_keys),
+            "state": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.state_keys),
+            "action": ModalityConfig(delta_indices=action_indices, modality_keys=self.action_keys),
+            "language": ModalityConfig(delta_indices=self.observation_indices, modality_keys=self.language_keys),
+        }
+
+    def transform(self, data_cfg: dict | None = None):
+        data_cfg = data_cfg or {}
+        augmentation = str(data_cfg.get("augmentation", "none")).lower()
+        allowed = {"none", "photometric", "crop_photometric"}
+        if augmentation not in allowed:
+            raise ValueError(f"unknown DROID augmentation {augmentation!r}; expected one of {sorted(allowed)}")
+        transforms = []
+        if augmentation != "none":
+            # train(): one sampled crop / rotation / jitter shared by both views; eval(): identity
+            transforms.append(CoTVideoAugment(apply_to=self.video_keys, mode=augmentation, crop_scale=0.95))
+        transforms.extend(
+            [
+                StateActionToTensor(apply_to=self.state_keys),
+                StateActionTransform(
+                    apply_to=self.state_keys,
+                    normalization_modes={key: "q99" for key in self.state_keys},
+                ),
+                StateActionToTensor(apply_to=self.action_keys),
+                StateActionTransform(
+                    apply_to=self.action_keys,
+                    normalization_modes={key: "q99" for key in self.action_keys},
+                ),
+            ]
+        )
+        return ComposedModalityTransform(transforms=transforms)
+
+
+###########################################################################################
+
 class DroidLerobotResizedJointPosDataConfig:
     default_data_cfg = {
         "obs_image_size": [180, 320],
@@ -1393,6 +1476,7 @@ ROBOT_TYPE_CONFIG_MAP = {
     "oxe_rt1": OxeRT1DataConfig(),
     "droid_lerobot_joint_pos": DroidLerobotJointPosDataConfig(),
     "droid_lerobot_resized_joint_pos": DroidLerobotResizedJointPosDataConfig(),
+    "droid_pi05_2cam": DroidPi05TwoCamDataConfig(),
     "SO101": SO101Config(),
     "demo_sim_franka_delta_joints": SingleFrankaRobotiqDeltaJointsDataConfig(),
     "arx_x5": ArxX5DataConfig(),

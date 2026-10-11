@@ -1350,7 +1350,18 @@ class LeRobotSingleDataset(Dataset):
         if subset_parquet_files is not None:
             parquet_files_filtered = subset_parquet_files
 
-        if is_main():
+        # datasets.vla_data.stats_override_path (default off, 2026-10-11): fixed LeRobot-style statistics
+        # ({original_key: {mean, std, min, max, q01, q99}} or {"statistics": {...}}), e.g. a converted
+        # checkpoint's own norm stats, so fine-tuning keeps that checkpoint's normalisation. Every rank reads the
+        # file; nothing is scanned or cached. The keys must already be in the action_mode's space (rel deltas).
+        stats_override_path = self.data_cfg.get("stats_override_path") if self.data_cfg else None
+        if stats_override_path:
+            with open(stats_override_path, "r") as f:
+                payload = json.load(f)
+            le_statistics = payload.get("statistics", payload)
+            print(f"[stats] {self.dataset_name}: statistics from stats_override_path={stats_override_path} "
+                  f"(action_mode={action_mode})")
+        elif is_main():
             le_statistics = _load_or_compute_statistics(
                 stats_path,
                 stats_cache_config=stats_cache_config,
@@ -1369,7 +1380,7 @@ class LeRobotSingleDataset(Dataset):
         else:
             le_statistics = None
 
-        if dist.is_initialized():
+        if dist.is_initialized() and not stats_override_path:
             dist.barrier()
 
         if le_statistics is None:

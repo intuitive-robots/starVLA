@@ -72,6 +72,13 @@ DATASET_NAMED_MIXTURES = {
     "droid_lerobot_180x320_relative_joint": [
         ("droid_success_180x320", 1.0, "droid_lerobot_relative_joint"),
     ],
+    # 2026-10-11 pi0.5 DROID fine-tune (openpi pi05_droid_jointpos / RoboLab inputs): left external + wrist,
+    # joints relative to the current state + absolute gripper (action_mode rel), openpi norm stats via
+    # stats_override_path. droid_success_180x320_pi05 is a view of droid_success_180x320 (symlinked data/videos,
+    # own meta/modality.json and keep_ranges in meta/episodes), built by /e/scratch/m3/blank4/pi05_droid/scripts.
+    "droid_pi05_2cam": [
+        ("droid_success_180x320_pi05", 1.0, "droid_pi05_2cam"),
+    ],
     "droid_lerobot_resized": [
         ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
     ],

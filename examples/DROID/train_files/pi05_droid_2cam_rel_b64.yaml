@@ -1,0 +1,146 @@
+# pi0.5 (PI05) DROID fine-tune from openpi's pi05_droid_jointpos (2026-10-11), the policy RoboLab evaluates
+# (openpi config pi05_droid_jointpos, gs://openpi-assets-simeval/pi05_droid_jointpos), converted to starVLA format
+# in /e/scratch/m3/blank4/pi05_droid/pi05_droid_starvla (fallback init: pi05_base_starvla). This yaml is the CONTROL;
+# the E7f arm adds the RoboTwin $E7FPI flags (views [external, wrist], fusion layer 10 of 18), see
+# /e/scratch/m3/blank4/pi05_droid/submit_droid_20261011.sh. Training/model block mirrors
+# examples/LIBERO/train_files/pi05_libero_matched_b32.yaml; data mirrors the checkpoint's openpi training inputs:
+#
+#  * cameras: DROID left external -> base_0_rgb, wrist -> left_wrist_0_rgb (openpi DroidInputs; the right-wrist slot
+#    is masked there, i.e. absent here). 180x320 frames, letterboxed to 224 by the framework (resize_with_pad).
+#  * state: 7 joints + gripper, q99 with the checkpoint's own openpi quantile stats, as 256-bin digits in the prompt
+#    ("Task: ..., State: b0 ... b7;\nAction: ", discrete_state_mode starvla = clip to [-1, 1] then bin, which equals
+#    openpi's digitisation for in-range values).
+#  * actions: horizon 16 (RoboLab executes 15 open loop); joints RELATIVE to the current joints (a_t - s_0, openpi
+#    DeltaActions on the 7 joints, which pi05_droid_jointpos was trained with: its action stats are deltas with
+#    mean ~0, |q| <= 0.53 rad), gripper absolute; all 8 dims q99-normalised with the openpi stats. The policy server
+#    must add the current joints back (training_action_mode rel) before sending absolute joint targets to RoboLab.
+#  * idle frames removed with DROID keep_ranges (openpi's non-idle filter), empty instructions skipped.
+#  * crop_photometric applied in the loader workers (0.95 crop + rotation + colour jitter, both views).
+run_id: pi05_droid_ctrl_s42
+run_root_dir: /e/scratch/m3/blank4/pi05_droid/checkpoints
+seed: 42
+wandb_entity: niblank
+wandb_project: starvla_droid_pi05
+is_debug: false
+
+framework:
+  name: PI05
+  precision: bfloat16
+  action_dim: 32
+  action_horizon: 16
+  max_state_dim: 32
+  discrete_state_input: true
+  discrete_state_mode: starvla
+  state_token_mode: text
+  state_num_bins: 256
+  max_token_len: 200
+  # openpi DROID inference default (10 Euler steps); LIBERO used 4
+  num_inference_steps: 10
+  image_resolution:
+  - 224
+  - 224
+  image_keys:
+  - base_0_rgb
+  - left_wrist_0_rgb
+  train_forward: split
+  repeated_diffusion_steps: 8
+  action_loss_dims: 8
+  output_action_dim: 8
+  tokenizer:
+    model_path: /e/scratch/m3/blank4/hf_pi_model_starvla/tokenizer/paligemma_tokenizer.model
+    pad_state_value: -2.0
+    extra_pythonpath: /e/scratch/m3/blank4/pylibs_openpi
+  paligemma:
+    model_name_or_path: ''
+  action_model:
+    action_horizon: 16
+  # read only by train_starvla.log_eval_backend_banner (assumes a Qwen backbone)
+  qwenvl:
+    attn_implementation: sdpa
+  modality_dropout:
+    enabled: false
+  fusion_registers:
+    enabled: false
+  future_copies:
+    enabled: false
+  state_dropout_rate: 0.0
+  state_dropout_mask: false
+  instruction_dropout_rate: 0.0
+
+datasets:
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/scratch/m3/blank4/pi05_droid/data
+    data_mix: droid_pi05_2cam
+    lerobot_version: v3.0
+    action_horizon: 16
+    action_type: relative_qpos
+    action_mode: rel
+    action_mode_apply_keys:
+    - action.joint_position
+    action_mode_state_map:
+      action.joint_position: state.joint_position
+    stats_override_path: /e/scratch/m3/blank4/pi05_droid/stats/stats_override_openpi_droid_jointpos.json
+    include_state: true
+    # the DROID config always q99-normalises the state; the marker tells the policy server the contract
+    state_normalization: q99
+    state_normalization_applied: true
+    use_keep_ranges: true
+    filter_nonempty_language: true
+    augmentation: crop_photometric
+    # keep the stored 180x320 frames: the framework letterboxes them to 224 (openpi resize_with_pad). Without this
+    # key a fresh lerobot_datasets run defaults to pack_image_size [224, 224], a plain resize that squashes 16:9 to 1:1.
+    pack_image_size: null
+    holdout_trajectories_per_dataset: 0
+    holdout_trajectories_per_task: 0
+    video_backend: decord
+    sequential_step_sampling: false
+    load_all_data_for_training: true
+    per_device_batch_size: 16
+    drop_last: true
+    num_workers: 16
+    prefetch_factor: 4
+    persistent_workers: true
+    pin_memory: true
+    seed: 42
+
+trainer:
+  pretrained_checkpoint: /e/scratch/m3/blank4/pi05_droid/pi05_droid_starvla/bfloat16/model.safetensors
+  eval_interval: 1000
+  # no held-out trajectories (holdout 0): the periodic eval is the train-batch action MSE only
+  open_loop_eval: false
+  # unused in the pi0.5 graph: the action expert's LM head (263M) and the PaliGemma final norm
+  freeze_modules: action_head.gemma_expert.lm_head,vlm.model.model.language_model.norm
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+  gradient_clipping: 1.0
+  # as the LIBERO / RoboTwin pi0.5 ports: PaliGemma 1e-5, action expert 1e-4, everything else 2.5e-5
+  learning_rate:
+    action_head: 0.0001
+    base: 2.5e-05
+    vlm: 1.0e-05
+  logging_frequency: 100
+  loss_scale:
+    vla: 1.0
+    structured_aux: 0.05
+  lr_scheduler_type: cosine_with_min_lr
+  max_grad_norm: 1.0
+  max_train_steps: 50000
+  num_warmup_steps: 1000
+  optimizer:
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+    name: AdamW
+    weight_decay: 1.0e-08
+  save_full_training_state: true
+  save_interval: 5000
+  save_total_limit: 1
+  full_state_save_total_limit: 1
+  delete_training_state_on_finish: false
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  weight_decay: 0.0
+  is_resume: false
+use_deepspeed: true
