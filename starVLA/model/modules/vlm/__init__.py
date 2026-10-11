@@ -1,6 +1,11 @@
 def get_vlm_model(config):
 
     vlm_name = config.framework.qwenvl.base_vlm
+    # Fine-tuned checkpoints live under generic output directories whose path does not
+    # necessarily contain the upstream model name. In particular, a Qwen3-VL checkpoint
+    # under `train_downstream` used to fall through to the temporary Qwen3.5 path match.
+    # Let launch configs state the family explicitly; `auto` preserves legacy behaviour.
+    vlm_impl = str(config.framework.qwenvl.get("vlm_impl", "auto")).lower()
 
     # Encoder-decoder arm (encdec-vlm). Selected by an explicit flag rather than by
     # base_vlm string, because it is built FROM the same base weights as the causal arm —
@@ -39,7 +44,15 @@ def get_vlm_model(config):
 
         return _QWen3_Blind_Interface(config)
 
-    if "Qwen2.5-VL" in vlm_name or "nora" in vlm_name.lower():  # temp for some ckpt
+    if vlm_impl in {"qwen3", "qwen3_vl"}:
+        from .QWen3 import _QWen3_VL_Interface
+
+        return _QWen3_VL_Interface(config)
+    elif vlm_impl in {"qwen35", "qwen3.5", "qwen3_5"}:
+        from .QWen3_5 import _QWen3_5_VL_Interface
+
+        return _QWen3_5_VL_Interface(config)
+    elif "Qwen2.5-VL" in vlm_name or "nora" in vlm_name.lower():  # temp for some ckpt
         from .QWen2_5 import _QWen_VL_Interface
 
         return _QWen_VL_Interface(config)

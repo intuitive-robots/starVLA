@@ -33,6 +33,18 @@ from starVLA.dataloader.cot_resolver import (
     extract_structured_cot_targets,
 )
 from starVLA.model.modules.projector.readout import ReadoutProjector
+from starVLA.model.modules.modality_z import ModalityZInterface
+from starVLA.model.modules.state_tokens import StateTokenMixin
+from starVLA.model.modules.privileged_tokens import PrivilegedTokenMixin
+from starVLA.model.modules.modality_dropout import ModalityDropoutMixin
+from starVLA.model.modules.future_latent import FutureLatentMixin, TaskPredMixin
+from starVLA.model.modules.fusion_registers import FusionRegisterMixin
+from starVLA.model.modules.backbone_loop import BackboneLoopMixin
+from starVLA.model.modules.instruction_mask import InstructionMaskMixin
+from starVLA.model.modules.future_copies import FutureCopyMixin
+from starVLA.model.modules.position_prompt import PositionPromptMixin
+from starVLA.model.modules.m3_mask import M3MaskMixin
+from starVLA.model.modules.teacher_align import TeacherAlignMixin
 from starVLA.training.trainer_utils import initialize_overwatch
 
 logger = initialize_overwatch(__name__)
@@ -71,8 +83,8 @@ class QwenGR00TDefaultConfig:
         default_factory=lambda: {
             # Path to base VLM checkpoint (local or HF hub id)
             "base_vlm": "./playground/Pretrained_models/Qwen3-VL-4B-Instruct",
-            # Attention implementation: "flash_attention_2" | "eager" | "sdpa"
-            "attn_implementation": "flash_attention_2",
+            # Booster installs FlashAttention-3; active configs also pin this explicitly.
+            "attn_implementation": "flash_attention_3",
             # VLM hidden dimension (used for cross-attention alignment)
             "vl_hidden_dim": 2048,
         }
@@ -242,7 +254,8 @@ class StructuredEncoderRegressionHead(nn.Module):
 
 
 @FRAMEWORK_REGISTRY.register("QwenGR00T")
-class Qwen_GR00T(SharedZMixin, baseframework):
+class Qwen_GR00T(TeacherAlignMixin, M3MaskMixin, PositionPromptMixin, FutureCopyMixin, InstructionMaskMixin, BackboneLoopMixin, FusionRegisterMixin, StateTokenMixin, PrivilegedTokenMixin, ModalityDropoutMixin, SharedZMixin,
+                 FutureLatentMixin, TaskPredMixin, baseframework):
     """
     Multimodal vision-language-action model (GR00T variant).
 
@@ -252,6 +265,10 @@ class Qwen_GR00T(SharedZMixin, baseframework):
 
     Focus: Predict future continuous actions conditioned on images + instruction.
     """
+
+    # policy_wrapper checks this before honouring STARVLA_ZERO_IMAGE_INDICES.
+    supports_zero_image_indices = True
+
 
     def __init__(
         self,
@@ -269,6 +286,36 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         # Merge framework defaults with YAML config (YAML wins on conflicts)
         self.config = merge_framework_config(QwenGR00TDefaultConfig, config)
         self.qwen_vl_interface = get_vlm_model(config=self.config)
+        # After get_vlm_model: _configure_state_tokens resolves the tokenizer and the
+        # vocab size off the built interface.
+        self._configure_state_tokens(self.config)
+        self._configure_privileged_tokens(self.config)
+        self._configure_modality_dropout(self.config)
+        # Training-only aux objectives on block-L image tokens (default off). They add
+        # modules and one block hook but never touch the head's input or predict_action.
+        self._configure_future_latent(self.config)
+        self._configure_task_pred(self.config)
+        self._configure_instruction_mask(self.config)  # instruction dropout with mask slots (default off)
+        self._configure_m3_mask(self.config)  # M3 modality masking (default off)
+        self._configure_fusion_registers(self.config)
+        self._build_future_latent_modules(int(self.qwen_vl_interface.model.config.hidden_size))
+        self._build_task_pred_modules(int(self.qwen_vl_interface.model.config.hidden_size))
+        self._build_fusion_register_modules(int(self.qwen_vl_interface.model.config.hidden_size))
+        # Looped backbone blocks (default off); built after the aux hooks so they wrap the loop band.
+        self._configure_backbone_loop(self.config)
+        self._build_backbone_loop(int(self.qwen_vl_interface.model.config.hidden_size))
+        # Future copies of the camera tokens after the text (default off; F1).
+        self._configure_future_copies(self.config)
+        self._build_future_copies(int(self.qwen_vl_interface.model.config.hidden_size),
+                                  n_cameras=len(getattr(self, "fusion_views", []) or [0, 0]))
+        # Teacher alignment of camera tokens (default off; training-only head, T1-T6).
+        self._configure_teacher_align(self.config)
+        self._build_teacher_align(int(self.qwen_vl_interface.model.config.hidden_size))
+        # Position prompt: simulator masks / 3D boxes as droppable input on image duplicates and / or target
+        # (default off; needs datasets.vla_data.annot).
+        self._configure_position_prompt(self.config)
+        self._build_position_prompt(int(self.qwen_vl_interface.model.config.hidden_size),
+                                    n_cameras=len(getattr(self, "fusion_views", []) or [0, 0]))
         # align dims --> we should put them to config or no?
         self.config.framework.action_model.diffusion_model_cfg.cross_attention_dim = (
             self.qwen_vl_interface.model.config.hidden_size
@@ -373,8 +420,58 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         else:
             self.readout_projector = None
 
+        modality_z_cfg = dict(self.config.framework.get("modality_z", {}) or {})
+        self.modality_z_enabled = bool(modality_z_cfg.get("enabled", False))
+        if self.modality_z_enabled:
+            if self.readout_projector is not None:
+                raise ValueError("modality_z and readout_tokens are mutually exclusive")
+            if self.shared_z_enabled:
+                raise ValueError("modality_z and shared_z are mutually exclusive")
+            if not bool(self.config.datasets.vla_data.get("include_state", False)):
+                raise ValueError("modality_z requires datasets.vla_data.include_state=true")
+            if self.state_token_mode != "reserved_ids":
+                raise ValueError("modality_z requires token-ID state (state_token_mode=reserved_ids)")
+            self.modality_z_interface = ModalityZInterface(hidden_size, modality_z_cfg)
+        else:
+            self.modality_z_interface = None
+
+    def _modality_z_context(
+        self, qwen_inputs: dict, last_hidden: torch.Tensor
+    ) -> Optional[torch.Tensor]:
+        if self.modality_z_interface is None:
+            return None
+        state_mask = getattr(self, "_last_state_token_mask", None)
+        if state_mask is None:
+            raise RuntimeError("modality_z is enabled but the state-ID splice produced no mask")
+        input_ids = qwen_inputs.get("input_ids")
+        if input_ids is None:
+            raise RuntimeError("modality_z requires input_ids")
+        valid = self._encoder_valid_mask(qwen_inputs, last_hidden)
+        model_config = getattr(self.qwen_vl_interface.model, "config", None)
+        image_token_id = getattr(model_config, "image_token_id", None)
+        if image_token_id is None:
+            raise RuntimeError("modality_z requires model.config.image_token_id")
+        return self.modality_z_interface(
+            last_hidden,
+            valid,
+            input_ids,
+            state_mask,
+            int(image_token_id),
+            # `in` + attribute access (not .get) so config.yaml records the key; the
+            # eval server reads config.yaml and fell back to 8 without it (C29).
+            int(self.config.framework.action_model.token_state_dim)
+            if "token_state_dim" in self.config.framework.action_model
+            else 8,
+        )
+
     def _dit_valid_mask(self, qwen_inputs: dict, last_hidden: torch.Tensor) -> torch.Tensor:
         """Return the exact valid-token mask corresponding to ``last_hidden``."""
+        if self.modality_z_interface is not None:
+            return torch.ones(
+                (last_hidden.shape[0], self.modality_z_interface.num_output_tokens),
+                device=last_hidden.device,
+                dtype=torch.bool,
+            )
         if self.readout_projector is not None:
             return torch.ones(
                 (last_hidden.shape[0], self.readout_projector.queries.shape[1]),
@@ -508,8 +605,10 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         **kwargs,
     ) -> Tuple:
         """ """
+        self._loop_set_iters()  # no-op unless framework.backbone_loop.enabled
         batch_images = [example["image"] for example in examples]  #  [B，[PLT]]
         instructions = [example["lang"] for example in examples]  # [B, str]
+        raw_instructions = list(instructions)  # before state / register conditioning (instruction mask)
         actions = [example["action"] for example in examples]  # label [B， len, 7]
 
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # [B, 1, state_dim]
@@ -579,12 +678,71 @@ class Qwen_GR00T(SharedZMixin, baseframework):
 
         # Step 1: QWenVL input format
         text_conversations = cot_conversations if has_cot else None
+        # Proprioception is routed through the VLM's token pathway, not just the action
+        # head: ThinkProprio (2602.06575) Tab. 7 measures head-side state as equivalent to
+        # no state at all. No-op when include_state is false (states is None).
+        instructions, _, state_keep = self._add_state_conditioning(instructions, state)
+        # Stage-1 privileged geometry (LIT 2609.12641). No-op unless
+        # framework.privileged_tokens.enabled, and dropped entirely in stage 2 -- at which
+        # point shared_z regresses these same quantities from vision, which is LIT's pose
+        # decoder. Feeding and predicting the same target in one stage would be an
+        # identity shortcut, so stage 1 must not enable shared_z targets.
+        instructions = self._add_privileged_conditioning(
+            instructions, [ex.get("cot_structured_targets") for ex in examples]
+        )
+        instructions = self._fc_add_state_slots(instructions)  # future-state copies (no-op unless future_copies.state)
+        instructions = self._add_fusion_register_slots(instructions)  # no-op unless enabled
+        instructions = self._m3_add_query_slots(instructions)  # M3 action queries; no-op unless on
+        # Pre-encoder image dropout, mirroring QwenPI_v3._encode_vl_hidden_states. This was
+        # missing here entirely: `framework.modality_dropout` was parsed by nothing on the
+        # GR00T path, so a blind config trained fully sighted and reported no metric at all.
+        vision_keep = self._modality_vision_keep(len(batch_images), state_keep)
+        blind_rows = not bool(vision_keep.all())
+        encoder_images = (
+            self._modality_strip_images(batch_images, vision_keep)
+            if blind_rows and self.modality_removal == "tokens"
+            else batch_images
+        )
+        encoder_images = self._fc_duplicate(encoder_images)  # future copies after the text (no-op unless on)
+        encoder_images = self._pp_duplicate(encoder_images)  # position-prompt duplicates (no-op unless on)
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
-            images=batch_images,
+            images=encoder_images,
             instructions=instructions,
             cot_conversations=text_conversations,
             cot_modes=cot_modes if has_cot else None,
         )
+        self._fc_reset_prompt()
+        self._pp_reset_prompt()
+        dropped_images = None
+        if blind_rows and self.modality_removal == "pixels":
+            dropped_images = self._modality_zero_pixels(
+                qwen_inputs, [len(images) for images in encoder_images], vision_keep,
+                **(self._fc_zero_kwargs() or self._pp_zero_kwargs())
+            )
+        self._last_vision_keep_rate = float(vision_keep.mean())
+        self._mask_instruction_tokens(qwen_inputs, raw_instructions)  # no-op unless instruction_dropout_rate
+        aux_active = self._aux_active()
+        aux_state_bins = (
+            list(self._pending_state_bins)
+            if aux_active and getattr(self, "_pending_state_bins", None) is not None
+            else None
+        )
+        if aux_active and getattr(self, "_state_true_bins", None) is not None:
+            # state_dropout_mask: target passes see the TRUE state of every row (online rows see the mask)
+            aux_state_bins = list(self._state_true_bins)
+        self._splice_state_tokens(qwen_inputs)
+        self._splice_privileged_tokens(qwen_inputs)
+        self._fc_splice_state_slots(qwen_inputs)  # no-op unless future_copies.state
+        self._splice_fusion_registers(qwen_inputs)
+        self._m3_splice_queries(qwen_inputs)  # M3 action queries; no-op unless on
+        self._arm_fusion_queries(qwen_inputs, dropped_images)
+        self._fc_arm(qwen_inputs)  # future-copy marker (+ training capture); no-op unless on
+        self._pp_arm(qwen_inputs, examples, has_annot=all("annot" in ex for ex in examples))  # no-op unless on
+        self._ta_arm(qwen_inputs, [len(images) for images in encoder_images])  # no-op unless teacher_align present_vit
+        if aux_active:
+            self._future_latent_arm(stop=False)
+            self._fusion_future_arm(stop=False)  # no-op unless fusion_registers.future_layer
+        self._m3_apply(qwen_inputs, raw_instructions)  # M3 modality masking; no-op unless m3_mask.enabled
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -595,6 +753,12 @@ class Qwen_GR00T(SharedZMixin, baseframework):
             )
             # last_hidden_state: [B, seq_len, H]
             last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
+        self._m3_restrict_head(qwen_inputs)  # M3: head reads images + queries only; no-op unless on
+        aux_online_hidden = self._future_latent_take() if aux_active else None
+        self._fc_take_online()
+        self._pp_take_online()
+        self._ta_take_online()
+        aux_online_ids = qwen_inputs["input_ids"] if aux_active else None
 
         # CoT CE loss from the VLM language head (only present when labels were attached).
         cot_loss = qwenvl_outputs.loss if (has_cot and qwenvl_outputs.loss is not None) else None
@@ -604,7 +768,10 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         )
 
         # Readout projection (optional) — compress VLM tokens before DiT
-        if self.readout_projector is not None:
+        modality_z_context = self._modality_z_context(qwen_inputs, last_hidden)
+        if modality_z_context is not None:
+            dit_context = modality_z_context
+        elif self.readout_projector is not None:
             dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
         else:
             dit_context = last_hidden                          # [B, L, H]
@@ -624,6 +791,14 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 np.array(actions), device=dit_context.device, dtype=dit_context.dtype
             )  # [B, T_full, action_dim]
             actions_target = actions[:, -self.action_horizon :, :]  # (B, action_horizon, action_dim)
+            # Per-step validity from the m3_data bridge (False where the horizon overran the episode end).
+            # Only that loader emits the key, so every other dataset keeps the plain mean loss.
+            action_valid = None
+            if examples and all("action_valid_mask" in ex for ex in examples):
+                action_valid = torch.as_tensor(
+                    np.stack([np.asarray(ex["action_valid_mask"], dtype=bool) for ex in examples]),
+                    device=actions_target.device,
+                )[:, -self.action_horizon :]
 
             choice_output = None
             if self.choice_head is not None:
@@ -661,9 +836,14 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 else 4
             )
             actions_target_repeated = actions_target.repeat(repeated_diffusion_steps, 1, 1)
+            action_valid_repeated = (
+                action_valid.repeat(repeated_diffusion_steps, 1) if action_valid is not None else None
+            )
 
             state_repeated = None
-            if state is not None:
+            # State may be intentionally token-only: include_state=true supplies it to the
+            # VLM while action_model.state_dim=0 disables the separate continuous bypass.
+            if state is not None and self.action_model.state_encoder is not None:
                 state = torch.tensor(np.array(state), device=dit_context.device, dtype=dit_context.dtype)
                 state_repeated = state.repeat(repeated_diffusion_steps, 1, 1)
 
@@ -712,12 +892,17 @@ class Qwen_GR00T(SharedZMixin, baseframework):
                 encoder_attention_mask=dit_attention_bias_repeated,
                 z_conditioning=self._shared_z_action_conditioning(shared_z_repeated),
                 encoder_memory_keep=encoder_memory_keep_repeated,
+                action_valid_mask=action_valid_repeated,
             )  # (B, chunk_len, action_dim)
 
         result = {
             "action_loss": action_loss,
             "cot_coverage": cot_coverage,
             "cot_keep_rate": cot_keep_rate,
+            # The trainer copies an allowlist off this dict; a metric absent here is
+            # silently discarded, which is how a no-op dropout passes for a working one.
+            "vision_keep_rate": getattr(self, "_last_vision_keep_rate", 1.0),
+            "vision_drop_rate": self._modality_current_vision_rate(),
         }
         if self.shared_z_enabled:
             # Same trainer slot PI uses, and the same mutual-exclusion guard: both would be
@@ -736,6 +921,51 @@ class Qwen_GR00T(SharedZMixin, baseframework):
             result.update(structured_aux_metrics)
         if choice_output is not None:
             result.update(choice_output)
+        # Training-only aux on block-L image tokens. Runs LAST: the future-latent target
+        # pass is a second backbone forward, and nothing above may read interface state
+        # it would overwrite.
+        if aux_active:
+            if "structured_aux_loss" in result:
+                raise RuntimeError("future_latent/task_pred and another aux share the structured_aux slot")
+            aux_loss, aux_metrics = None, {}
+            if getattr(self, "task_pred_enabled", False):
+                # before the future-latent target pass, which re-runs the backbone
+                aux_loss, aux_metrics = self._task_pred_loss(
+                    aux_online_hidden, aux_online_ids, examples, dropped_images,
+                )
+            if getattr(self, "fusion_registers_enabled", False):
+                aux_loss, aux_metrics = self._fusion_register_loss(
+                    aux_online_hidden, aux_online_ids, batch_images, instructions,
+                    aux_state_bins, dropped_images, examples=examples,
+                )
+            if getattr(self, "fcopy_enabled", False):
+                fc_loss, fc_metrics = self._future_copies_loss(
+                    aux_online_ids, examples, batch_images, instructions, aux_state_bins,
+                )
+                aux_loss = fc_loss if aux_loss is None else aux_loss + fc_loss
+                aux_metrics.update(fc_metrics)
+            if getattr(self, "teacher_align_enabled", False):  # copies mode already ran inside future_copies
+                ta_loss, ta_metrics = self._teacher_align_loss(
+                    aux_online_hidden, aux_online_ids, examples, dropped_images,
+                )
+                if ta_loss is not None:
+                    aux_loss = ta_loss if aux_loss is None else aux_loss + ta_loss
+                aux_metrics.update(ta_metrics)
+            if getattr(self, "pp_enabled", False):
+                pp_loss, pp_metrics = self._position_prompt_loss(aux_online_ids, examples)
+                aux_loss = pp_loss if aux_loss is None else aux_loss + pp_loss
+                aux_metrics.update(pp_metrics)
+            if getattr(self, "future_latent_enabled", False):
+                fl_loss, fl_metrics = self._future_latent_loss(
+                    aux_online_hidden, aux_online_ids, examples, instructions,
+                    aux_state_bins, dropped_images,
+                )
+                aux_loss = fl_loss if aux_loss is None else aux_loss + fl_loss  # both inner-weighted
+                aux_metrics.update(fl_metrics)
+            result["structured_aux_loss"] = aux_loss
+            result.update(aux_metrics)
+        result.update(self._loop_metrics())
+        result.update(self._instr_mask_metrics())
         return result
 
     @torch.inference_mode()
@@ -755,6 +985,7 @@ class Qwen_GR00T(SharedZMixin, baseframework):
         """
         if type(examples) is not list:
             examples = [examples]
+        self._loop_set_iters()  # no-op unless framework.backbone_loop.enabled
         batch_images = [to_pil_preserve(example["image"]) for example in examples]  #  [B，[PLT]]
         instructions = [example["lang"] for example in examples]  # [B, str]
 
@@ -766,11 +997,43 @@ class Qwen_GR00T(SharedZMixin, baseframework):
 
         # Step 1: QWenVL input format
         cot_modes = ["no_cot"] * len(instructions) if self.cot_dropout_enabled else None
+        instructions, _, _ = self._add_state_conditioning(instructions, state)
+        instructions = self._fc_add_state_slots(instructions)  # future-state copies (no-op unless future_copies.state)
+        instructions = self._add_fusion_register_slots(instructions)  # no-op unless enabled
+        instructions = self._m3_add_query_slots(instructions)  # M3 action queries; no-op unless on
+        # Deliberately NO privileged conditioning here: the trace is training-time only.
+        # LIT III-D: "At inference ... the Stage 1 pose encoder and Stage 2 pose decoder
+        # are omitted. The policy requires only visual observations, language, and robot
+        # state." A stage-1 checkpoint evaluated directly will therefore be off-distribution
+        # -- that is expected, and is why only the stage-2 model is ever evaluated.
+        encoder_images = self._fc_duplicate(batch_images)  # future copies (no-op unless on)
+        encoder_images = self._pp_duplicate(encoder_images)  # position-prompt duplicates (no-op unless on)
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
-            images=batch_images,
+            images=encoder_images,
             instructions=instructions,
             cot_modes=cot_modes,
         )
+        self._fc_reset_prompt()
+        self._pp_reset_prompt()
+        # Eval-time camera removal (policy_wrapper STARVLA_ZERO_IMAGE_INDICES; default off):
+        # zero the listed image positions' pixel_values after the processor, exactly as
+        # modality_dropout removal=pixels removes a camera in training.
+        zero_positions = examples[0].get("_zero_image_indices")
+        if zero_positions:
+            if any(ex.get("_zero_image_indices") != zero_positions for ex in examples):
+                raise ValueError("_zero_image_indices must be identical for every example")
+            self._zero_image_positions(
+                qwen_inputs, [len(images) for images in encoder_images],
+                self._pp_mirror_positions(self._fc_mirror_positions(zero_positions))
+            )
+        self._splice_state_tokens(qwen_inputs)
+        self._fc_splice_state_slots(qwen_inputs)  # no-op unless future_copies.state
+        self._splice_fusion_registers(qwen_inputs)
+        self._m3_splice_queries(qwen_inputs)  # M3 action queries; no-op unless on
+        # masked_query: the learned queries stand in for cameras removed at eval
+        self._arm_fusion_queries(qwen_inputs, [list(zero_positions or [])] * len(batch_images))
+        self._fc_arm(qwen_inputs)
+        self._pp_arm(qwen_inputs, examples, has_annot=False)  # inference: never given, learned query
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -781,8 +1044,12 @@ class Qwen_GR00T(SharedZMixin, baseframework):
 
             # last_hidden_state: [B, seq_len, H]
             last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
+        self._m3_restrict_head(qwen_inputs)  # M3: head reads images + queries only; no-op unless on
 
-        if self.readout_projector is not None:
+        modality_z_context = self._modality_z_context(qwen_inputs, last_hidden)
+        if modality_z_context is not None:
+            dit_context = modality_z_context
+        elif self.readout_projector is not None:
             dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
         else:
             dit_context = last_hidden                          # [B, L, H]
@@ -808,7 +1075,7 @@ class Qwen_GR00T(SharedZMixin, baseframework):
 
         state = (
             torch.from_numpy(np.array(state)).to(dit_context.device, dtype=dit_context.dtype)
-            if state is not None
+            if state is not None and self.action_model.state_encoder is not None
             else None
         )
         flow_seeds = [example.get("flow_seed") for example in examples]

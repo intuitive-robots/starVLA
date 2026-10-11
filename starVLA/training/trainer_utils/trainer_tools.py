@@ -145,7 +145,9 @@ def build_param_lr_groups(model, cfg):
         if module is None:
             print(f"⚠️ module path `{module_name}` is disabled (None)")
             continue
-        params = [p for p in module.parameters()
+        # A bare nn.Parameter (e.g. backbone_loop's loop_gate) is its own group.
+        members = [module] if isinstance(module, torch.nn.Parameter) else module.parameters()
+        params = [p for p in members
                   if id(p) not in frozen_params and id(p) not in used_params]
         if params:  # only add param group if there are trainable parameters
             param_groups.append({"params": params, "lr": lr, "name": module_name})

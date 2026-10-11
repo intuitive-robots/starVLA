@@ -38,8 +38,9 @@ logger = initialize_overwatch(__name__)
 IGNORE_INDEX = -100
 
 from starVLA.model.framework.base_framework import baseframework
-from starVLA.model.framework.share_tools import add_discretized_state_to_instruction, merge_framework_config
+from starVLA.model.framework.share_tools import merge_framework_config
 from starVLA.model.modules.action_model.MLP_ActionHeader import get_action_model
+from starVLA.model.modules.state_tokens import StateTokenMixin
 from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.training.trainer_utils.trainer_tools import resize_images
 
@@ -89,7 +90,7 @@ class QwenOFTDefaultConfig:
 
 
 @FRAMEWORK_REGISTRY.register("QwenOFT")
-class Qwenvl_OFT(baseframework):
+class Qwenvl_OFT(StateTokenMixin, baseframework):
     """
     Multimodal vision-language-action model (OFT variant).
 
@@ -117,6 +118,10 @@ class Qwenvl_OFT(baseframework):
         # Merge framework defaults with YAML config (YAML wins on conflicts)
         self.config = merge_framework_config(QwenOFTDefaultConfig, config)
         self.qwen_vl_interface = get_vlm_model(config=self.config)
+        # Keep OFT on the same proprioception contract as GR00T / PI-v3.  In
+        # token_only mode the raw state is quantised and spliced into pinned VLM
+        # token ids; it never enters the MLP action head as a continuous bypass.
+        self._configure_state_tokens(self.config)
         # align action_hidden_dim to VLM hidden_size at runtime
         self.config.framework.action_model.action_hidden_dim = self.qwen_vl_interface.model.config.hidden_size
         self.action_model = get_action_model(config=self.config)
@@ -166,9 +171,8 @@ class Qwenvl_OFT(baseframework):
             [example["state"] for example in examples] if "state" in examples[0] else None
         )  # List[ndarray (1, state_dim)] or None
 
-        # Optionally prepend discretised proprioceptive state tokens to each instruction (π₀.5 style).
-        instructions = (
-            self.add_discretized_state_to_instruction(instructions, state) if state is not None else instructions
+        instructions, state_keep_rate, _ = self._add_state_conditioning(
+            instructions, state
         )
 
         # step 0: add special action token to instruction
@@ -180,6 +184,7 @@ class Qwenvl_OFT(baseframework):
 
         # Step 1: QWenVL input format
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        self._splice_state_tokens(qwen_inputs)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -208,7 +213,7 @@ class Qwenvl_OFT(baseframework):
             # Compute L1 loss
             action_loss = self.l1_loss(pred_actions, actions_target)
 
-        return {"action_loss": action_loss}
+        return {"action_loss": action_loss, "state_keep_rate": state_keep_rate}
 
     @torch.inference_mode()
     def predict_action(
@@ -235,10 +240,7 @@ class Qwenvl_OFT(baseframework):
             [example["state"] for example in examples] if "state" in examples[0] else None
         )  # List[ndarray (1, state_dim)] or None
 
-        # Optionally prepend discretised proprioceptive state tokens to each instruction (π₀.5 style).
-        instructions = (
-            self.add_discretized_state_to_instruction(instructions, state) if state is not None else instructions
-        )
+        instructions, _, _ = self._add_state_conditioning(instructions, state)
 
         train_obs_image_size = getattr(self.config.datasets.vla_data, "obs_image_size", None)
         if train_obs_image_size:
@@ -253,6 +255,7 @@ class Qwenvl_OFT(baseframework):
 
         # Step 1: QWenVL input format
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        self._splice_state_tokens(qwen_inputs)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -320,10 +323,6 @@ class Qwenvl_OFT(baseframework):
         expanded_index = selected_pos.unsqueeze(-1).expand(-1, -1, H)
         action_queries = last_hidden.gather(dim=1, index=expanded_index)
         return action_queries
-
-    # Discretised state → instruction prefix (π₀.5 style); shared with QwenPI_v3.
-    add_discretized_state_to_instruction = staticmethod(add_discretized_state_to_instruction)
-
 
 if __name__ == "__main__":
     import argparse

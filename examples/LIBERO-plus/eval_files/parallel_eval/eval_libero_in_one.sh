@@ -51,6 +51,11 @@ end_idx=$3
 num_gpus=${4:-1}
 tasks_per_gpu=${5:-0}
 workers_per_gpu=${6:-1}
+# Keep shard geometry separate from live simulator concurrency.  Resume keys
+# include the shard id/count, so lowering workers_per_gpu would make completed
+# files unusable and could duplicate episodes.  This cap runs the same shards
+# in waves instead.
+max_concurrent_workers_per_gpu="${max_concurrent_workers_per_gpu:-${workers_per_gpu}}"
 num_trials_per_task=${7:-1}
 gpu_ids_csv=${8:-}
 base_port=${9:-10093}
@@ -97,6 +102,7 @@ worker_max_attempts="${worker_max_attempts:-3}"
 # Four long-lived launcher streams still keep exactly one simulator active on
 # each GPU; only the failed task is retried.
 isolate_exact_tasks="${STARVLA_ISOLATE_EXACT_TASKS:-0}"
+skip_existing_episodes="${STARVLA_SKIP_EXISTING_EPISODES:-0}"
 
 case "${LIBERO_PLUS_RUNTIME}" in
     auto)
@@ -147,6 +153,12 @@ if [ "${LIBERO_PLUS_RUNTIME}" = apptainer ]; then
     apptainer_bind_args+=(--bind "${output_dir}:${output_dir}:rw")
 fi
 
+# NOTE on STARVLA_EVAL_INCLUDE_STATE below: it is forwarded EMPTY by default, not
+# as "0". `apptainer exec --cleanenv` drops the host environment, so it has to be
+# passed explicitly -- but passing a hard "0" would override the checkpoint's own
+# answer. Empty means "ask the checkpoint": eval_libero_model.py then follows the
+# server's `expects_state` handshake. A literal "1"/"0" still forces the decision,
+# for deliberately evaluating a state-trained model blind.
 run_eval_worker() {
     local gpu_id=$1
     shift
@@ -172,6 +184,8 @@ run_eval_worker() {
             --env "MKL_NUM_THREADS=${MKL_NUM_THREADS}" \
             --env "STARVLA_FAST_GLASS_BLUR=${STARVLA_FAST_GLASS_BLUR:-0}" \
             --env "STARVLA_PAIRED_ROLLOUT=${STARVLA_PAIRED_ROLLOUT:-0}" \
+            --env "STARVLA_EVAL_INCLUDE_STATE=${STARVLA_EVAL_INCLUDE_STATE:-}" \
+            --env "STARVLA_EGL_INIT_LOCK=${STARVLA_EGL_INIT_LOCK:-}" \
             "${LIBERO_PLUS_SIF}" \
             /opt/conda/envs/libero/bin/python "${EVAL_SCRIPT}" "$@"
     else
@@ -194,6 +208,10 @@ fi
 num_gpu_slots=${#gpu_ids[@]}
 if [ "${num_gpu_slots}" -eq 0 ]; then
     echo "[ERROR] No GPUs were provided."
+    exit 1
+fi
+if [ "${max_concurrent_workers_per_gpu}" -lt 1 ] || [ "${max_concurrent_workers_per_gpu}" -gt "${workers_per_gpu}" ]; then
+    echo "[ERROR] max_concurrent_workers_per_gpu must be in [1, ${workers_per_gpu}], got ${max_concurrent_workers_per_gpu}."
     exit 1
 fi
 
@@ -260,6 +278,7 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
                         --end_idx "$task_end" \
                         --stride "$stride" \
                         --exact_sample_count "$exact_sample_count" \
+                        --skip_existing_episodes "$skip_existing_episodes" \
                         --gripper_encoding "${gripper_encoding:-auto}" \
                         --object_perturb_m "${object_perturb_m:-0.0}" \
                         --object_perturb_roles "${object_perturb_roles:-source,target}" \
@@ -301,7 +320,139 @@ if [ "${isolate_exact_tasks}" = "1" ] && [ "${exact_sample_count}" -gt 0 ]; then
     exit 0
 fi
 
+# One shard with retries. Args: <suite> <stride> <result_tag> <failed_manifest> <start> <end> <shard> <num_shards>
+# <part index> <gpu_id> <port>. Shared by the per-suite launch below and the chained launch (chain specs).
+run_part() {
+    local task_suite_name="$1" stride="$2" result_tag="$3" failed_manifest="$4" current_start="$5" current_end="$6"
+    local current_shard="$7" current_num_shards="$8" i="$9" gpu_id="${10}" worker_port="${11}" shard_suffix shard_result attempt rc
+    # eval_libero_model.py appends "_shard<i>of<M>" to its own sample_tag when
+    # num_shards > 1 (see its sample_tag construction). The shell never did, so
+    # the --resume probe looked for 0_to_2519_exact1000.json while disk held
+    # 0_to_2519_exact1000_shard43of48.json: the test could never match and
+    # --resume silently re-ran every shard, with zero "skipping" lines.
+    shard_suffix=""
+    if [ "${current_num_shards}" -gt 1 ]; then
+        shard_suffix="_shard${current_shard}of${current_num_shards}"
+    fi
+    shard_result="${output_dir}/logs/${task_suite_name}/${current_start}_to_${current_end}${result_tag}${shard_suffix}.json"
+    if [ "${resume_eval}" = "1" ] && [ -s "${shard_result}" ]; then
+        echo "Part ${i} [${current_start},${current_end}): already complete, skipping"
+        return 0
+    fi
+    for ((attempt=1; attempt<=worker_max_attempts; attempt++)); do
+        if run_eval_worker "${gpu_id}" \
+            --pretrained_path "$your_ckpt" \
+            --task_suite_name "$task_suite_name" \
+            --num_trials_per_task "$num_trials_per_task" \
+            --output_dir "$output_dir" \
+            --host "$server_host" \
+            --port "$worker_port" \
+            --use_server "$use_server" \
+            --start_idx "$current_start" \
+            --end_idx "$current_end" \
+            --stride "$stride" \
+            --exact_sample_count "$exact_sample_count" \
+            --skip_existing_episodes "$skip_existing_episodes" \
+            --shard_idx "$current_shard" \
+            --num_shards "$current_num_shards" \
+            --gripper_encoding "${gripper_encoding:-auto}" \
+            --object_perturb_m "${object_perturb_m:-0.0}" \
+            --object_perturb_roles "${object_perturb_roles:-source,target}" \
+            --object_perturb_seed "${object_perturb_seed:-20260812}" \
+            --save_video "${save_video:-False}" \
+            --overlay_trace "${overlay_trace:-False}"; then
+            return 0
+        else
+            rc=$?
+        fi
+        echo "[WARN] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} failed (rc=${rc}, attempt ${attempt}/${worker_max_attempts})."
+        [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
+    done
+    echo "[ERROR] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} exhausted ${worker_max_attempts} attempts."
+    echo "${current_start} ${current_end} ${current_shard} ${current_num_shards}" >> "${failed_manifest}"
+    return "${rc}"
+}
+
 num_workers=$((num_gpu_slots * workers_per_gpu))
+
+# ── Chained suites (STARVLA_CHAIN_SPECS, set by auto_eval_libero_plus.sh when chain_suites=true) ──
+# "suite:start:end:stride:interleave;suite:...": every worker slot is launched once (2 s stagger once) and runs
+# its share of each suite back to back, instead of relaunching all workers per suite and waiting for the slowest
+# shard every time. Per-suite partitioning, shard ids, result names, failed manifests and resume are unchanged.
+if [ -n "${STARVLA_CHAIN_SPECS:-}" ]; then
+    declare -A c_start c_end c_shard c_nshards
+    IFS=';' read -r -a chain_specs <<< "${STARVLA_CHAIN_SPECS}"
+    chain_suites=(); declare -A c_stride c_tag c_manifest
+    for spec in "${chain_specs[@]}"; do
+        IFS=':' read -r c_suite c_s c_e c_str c_il <<< "${spec}"
+        chain_suites+=("${c_suite}")
+        c_stride[$c_suite]=${c_str}
+        if [ "${exact_sample_count}" -gt 0 ]; then c_tag[$c_suite]="_exact${exact_sample_count}"
+        elif [ "${c_str}" != "1" ]; then c_tag[$c_suite]="_stride${c_str}"
+        else c_tag[$c_suite]=""; fi
+        c_manifest[$c_suite]="${output_dir}/failed_shards_${c_suite}.txt"
+        : > "${c_manifest[$c_suite]}"
+        if [ "${c_il}" = "1" ]; then
+            for ((w=0; w<num_workers; w++)); do
+                c_start["$c_suite,$w"]=${c_s}; c_end["$c_suite,$w"]=${c_e}
+                c_shard["$c_suite,$w"]=$((partition_idx * num_workers + w)); c_nshards["$c_suite,$w"]=$((num_partitions * num_workers))
+            done
+        else
+            c_total=$((c_e - c_s)); c_chunk=$((c_total / num_workers)); c_rem=$((c_total % num_workers)); c_cur=${c_s}
+            for ((w=0; w<num_workers; w++)); do
+                c_next=$((c_cur + c_chunk + (w < c_rem ? 1 : 0)))
+                [ "${c_next}" -gt "${c_e}" ] && c_next=${c_e}
+                c_start["$c_suite,$w"]=${c_cur}; c_end["$c_suite,$w"]=${c_next}
+                c_shard["$c_suite,$w"]=0; c_nshards["$c_suite,$w"]=1
+                c_cur=${c_next}
+            done
+        fi
+        echo "Chained suite ${c_suite}: [${c_s}, ${c_e}) stride=${c_str} interleave=${c_il} over ${num_workers} workers"
+    done
+    resume_eval="${STARVLA_RESUME_EVAL:-0}"
+    gpu_launcher_pids=()
+    for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
+        gpu_id=${gpu_ids[$gpu_slot]}
+        (
+            pids=()
+            launcher_rc=0
+            for ((local_worker=0; local_worker<workers_per_gpu; local_worker++)); do
+                i=$((gpu_slot * workers_per_gpu + local_worker))
+                worker_port=$((base_port + gpu_slot * servers_per_gpu + local_worker % servers_per_gpu))
+                sleep 2   # EGL start-up stagger, once per worker slot instead of once per suite
+                (
+                    slot_rc=0
+                    for c_suite in "${chain_suites[@]}"; do
+                        [ "${c_start[$c_suite,$i]}" -ge "${c_end[$c_suite,$i]}" ] && continue
+                        echo "Part ${i}: gpu=${gpu_id} ${c_suite} [${c_start[$c_suite,$i]}, ${c_end[$c_suite,$i]}) shard=${c_shard[$c_suite,$i]}/${c_nshards[$c_suite,$i]} port=${worker_port}"
+                        run_part "${c_suite}" "${c_stride[$c_suite]}" "${c_tag[$c_suite]}" "${c_manifest[$c_suite]}" \
+                            "${c_start[$c_suite,$i]}" "${c_end[$c_suite,$i]}" "${c_shard[$c_suite,$i]}" "${c_nshards[$c_suite,$i]}" \
+                            "${i}" "${gpu_id}" "${worker_port}" || slot_rc=1
+                    done
+                    exit "${slot_rc}"
+                ) &
+                pids+=($!)
+            done
+            for pid in "${pids[@]}"; do
+                wait "${pid}" || launcher_rc=1
+            done
+            exit "${launcher_rc}"
+        ) &
+        gpu_launcher_pids+=($!)
+    done
+    workers_rc=0
+    for pid in "${gpu_launcher_pids[@]}"; do
+        wait "${pid}" || workers_rc=1
+    done
+    if [ "${workers_rc}" -ne 0 ]; then
+        echo "[ERROR] Shard(s) failed in chained suites (${chain_suites[*]}). NOT aggregating."
+        echo "        Failed ranges per suite: ${output_dir}/failed_shards_<suite>.txt"
+        echo "        Re-run the SAME command with STARVLA_RESUME_EVAL=1 to retry only those."
+        exit 1
+    fi
+    echo "All chained suites finished: ${chain_suites[*]}"
+    exit 0
+fi
 
 total=$((end_idx - start_idx))
 chunk_size=$((total / num_workers))
@@ -389,6 +540,7 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
     gpu_id=${gpu_ids[$gpu_slot]}
     (
         pids=()
+        launcher_rc=0
         for ((local_worker=0; local_worker<workers_per_gpu; local_worker++)); do
             i=$((gpu_slot * workers_per_gpu + local_worker))
             [ "$i" -ge "$num_active_workers" ] && break
@@ -403,47 +555,16 @@ for ((gpu_slot=0; gpu_slot<num_gpu_slots; gpu_slot++)); do
 
             sleep 2
 
-            (
-                shard_result="${output_dir}/logs/${task_suite_name}/${current_start}_to_${current_end}${result_tag}.json"
-                if [ "${resume_eval}" = "1" ] && [ -s "${shard_result}" ]; then
-                    echo "Part ${i} [${current_start},${current_end}): already complete, skipping"
-                    exit 0
-                fi
-                for ((attempt=1; attempt<=worker_max_attempts; attempt++)); do
-                    if run_eval_worker "${gpu_id}" \
-                        --pretrained_path "$your_ckpt" \
-                        --task_suite_name "$task_suite_name" \
-                        --num_trials_per_task "$num_trials_per_task" \
-                        --output_dir "$output_dir" \
-                        --host "$server_host" \
-                        --port "$worker_port" \
-                        --use_server "$use_server" \
-                        --start_idx "$current_start" \
-                        --end_idx "$current_end" \
-                        --stride "$stride" \
-                        --exact_sample_count "$exact_sample_count" \
-                        --shard_idx "$current_shard" \
-                        --num_shards "$current_num_shards" \
-                        --gripper_encoding "${gripper_encoding:-auto}" \
-                        --object_perturb_m "${object_perturb_m:-0.0}" \
-                        --object_perturb_roles "${object_perturb_roles:-source,target}" \
-                        --object_perturb_seed "${object_perturb_seed:-20260812}" \
-                        --save_video "${save_video:-False}" \
-                        --overlay_trace "${overlay_trace:-False}"; then
-                        exit 0
-                    else
-                        rc=$?
-                    fi
-                    echo "[WARN] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} failed (rc=${rc}, attempt ${attempt}/${worker_max_attempts})."
-                    [ "${attempt}" -lt "${worker_max_attempts}" ] && sleep $((attempt * 10))
-                done
-                echo "[ERROR] Part ${i} [${current_start},${current_end}) shard ${current_shard}/${current_num_shards} exhausted ${worker_max_attempts} attempts."
-                echo "${current_start} ${current_end} ${current_shard} ${current_num_shards}" >> "${failed_manifest}"
-                exit "${rc}"
-            ) &
+            ( run_part "${task_suite_name}" "${stride}" "${result_tag}" "${failed_manifest}" "${current_start}" "${current_end}" \
+                "${current_shard}" "${current_num_shards}" "${i}" "${gpu_id}" "${worker_port}" ) &
             pids+=($!)
+            if [ "${#pids[@]}" -ge "${max_concurrent_workers_per_gpu}" ]; then
+                for pid in "${pids[@]}"; do
+                    wait "${pid}" || launcher_rc=1
+                done
+                pids=()
+            fi
         done
-        launcher_rc=0
         for pid in "${pids[@]}"; do
             wait "${pid}" || launcher_rc=1
         done

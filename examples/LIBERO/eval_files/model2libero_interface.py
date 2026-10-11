@@ -19,6 +19,7 @@ from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 
 from deployment.model_server.tools.websocket_policy_client import WebsocketClientPolicy
 from examples.SimplerEnv.eval_files.adaptive_ensemble import AdaptiveEnsembler
@@ -37,18 +38,47 @@ class ModelClient:
         adaptive_ensemble_alpha: float = 0.1,
         host: str = "0.0.0.0",
         port: int = 10095,
+        image_size: Optional[Sequence[int]] = None,
     ) -> None:
         # Connect & receive handshake metadata (action_chunk_size, etc.)
         self.client = WebsocketClientPolicy(host, port)
         meta = self.client.get_server_metadata()
         self.action_chunk_size = int(meta["action_chunk_size"])
+        # Whether this checkpoint was trained with proprioceptive state. Older servers do
+        # not advertise it; False is the historically correct default, because every
+        # LIBERO config before 2026-09 set state_dim: 0.
+        self.expects_state = bool(meta.get("expects_state", False))
         self._server_metadata = meta
+
+        # Prefer an explicit caller override; otherwise follow the image size
+        # that the checkpoint reports was actually applied during training.
+        # Legacy checkpoints report None and therefore retain native 256x256.
+        server_image_size = (
+            meta.get("training_obs_image_size")
+            if meta.get("image_preprocessing_contract_version") == 2
+            else None
+        )
+        effective_image_size = image_size if image_size is not None else server_image_size
+        if effective_image_size is None:
+            self.image_size: Optional[tuple[int, int]] = None
+        else:
+            if len(effective_image_size) != 2:
+                raise ValueError(
+                    "image_size must be a (height, width) pair, "
+                    f"got {effective_image_size!r}"
+                )
+            target_height, target_width = (int(value) for value in effective_image_size)
+            if target_height <= 0 or target_width <= 0:
+                raise ValueError(
+                    f"image_size dimensions must be positive, got {effective_image_size!r}"
+                )
+            self.image_size = (target_height, target_width)
 
         self.policy_setup = policy_setup
         self.unnorm_key = unnorm_key
         print(
             f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key}, "
-            f"action_chunk_size: {self.action_chunk_size}, "
+            f"action_chunk_size: {self.action_chunk_size}, expects_state: {self.expects_state}, "
             f"server_meta: {meta} ***"
         )
 
@@ -110,6 +140,21 @@ class ModelClient:
         task_description = example.get("lang", None)
         if task_description != self.task_description:
             self.reset(task_description)
+
+        # image_size uses (height, width); PIL resize uses (width, height).
+        if self.image_size is not None and example.get("image"):
+            target_height, target_width = self.image_size
+            resized = []
+            for image in example["image"]:
+                array = np.asarray(image)
+                if array.shape[:2] != self.image_size:
+                    array = np.asarray(
+                        Image.fromarray(array).resize(
+                            (target_width, target_height), Image.Resampling.BILINEAR
+                        )
+                    )
+                resized.append(array)
+            example = {**example, "image": resized}
 
         # Refresh chunk if needed.
         cot_is_fresh = False

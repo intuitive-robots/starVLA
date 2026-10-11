@@ -12,6 +12,7 @@ from starVLA.dataloader.gr00t_lerobot.transform.state_action import (
     StateActionSinCosTransform,
     StateActionToTensor,
     StateActionTransform,
+    StateBinarize,
 )
 from starVLA.dataloader.gr00t_lerobot.transform.video import (
     VideoColorJitter,
@@ -498,8 +499,47 @@ class Libero4in1DataConfig:
         }
         return modality_configs
 
-    def transform(self):
-        transforms = [
+    def transform(self, data_cfg=None):
+        """Build LIBERO transforms, preserving historical raw-state checkpoints.
+
+        Older LIBERO policies were trained without a state transform: their state values
+        reached the state-token quantizer in raw environment units and were clipped there.
+        Opt in to the intended q99 state normalization with
+        ``datasets.vla_data.state_normalization: q99``.  Keeping the default raw is
+        necessary so loading an old checkpoint does not silently change its inference
+        contract.
+        """
+        state_normalization = None
+        if data_cfg is not None:
+            state_normalization = data_cfg.get("state_normalization", None)
+        if state_normalization in ("", "none", "raw", False):
+            state_normalization = None
+        if state_normalization not in (None, "q99"):
+            raise ValueError(
+                "LIBERO state_normalization must be omitted/raw or 'q99', got "
+                f"{state_normalization!r}"
+            )
+
+        # 2026-10-09: optional open / closed gripper state (both finger joints snapped to -1 / +1 after q99).
+        gripper_binary = bool(data_cfg.get("state_gripper_binary", False)) if data_cfg is not None else False
+        if gripper_binary and state_normalization != "q99":
+            raise ValueError("LIBERO state_gripper_binary needs state_normalization: q99")
+
+        transforms = []
+        if state_normalization == "q99":
+            transforms.extend(
+                [
+                    StateActionToTensor(apply_to=self.state_keys),
+                    StateActionTransform(
+                        apply_to=self.state_keys,
+                        normalization_modes={key: "q99" for key in self.state_keys},
+                    ),
+                ]
+            )
+            if gripper_binary:
+                transforms.append(StateBinarize(apply_to=["state.pad", "state.gripper"]))
+
+        transforms.extend([
             # action transforms
             StateActionToTensor(apply_to=self.action_keys),
             StateActionTransform(
@@ -513,7 +553,7 @@ class Libero4in1DataConfig:
                 "action.yaw": "min_max",
             },
         ),
-        ]
+        ])
 
         return ComposedModalityTransform(transforms=transforms)
 

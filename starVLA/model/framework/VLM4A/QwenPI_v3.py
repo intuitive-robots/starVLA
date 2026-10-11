@@ -68,6 +68,8 @@ from starVLA.model.modules.shared_z import (  # noqa: F401  (re-exported for cal
 from starVLA.model.framework.share_tools import merge_framework_config, populate_layerwise_dit_cfg
 from starVLA.model.framework.VLM4A.QwenGR00T import StructuredEncoderRegressionHead
 from starVLA.model.modules.action_model.LayerwiseFM_ActionHeader import LayerwiseFlowmatchingActionHead, get_action_model
+from starVLA.model.modules.modality_dropout import ModalityDropoutMixin
+from starVLA.model.modules.state_tokens import StateTokenMixin
 from starVLA.model.modules.vlm import get_vlm_model
 from starVLA.model.tools import FRAMEWORK_REGISTRY
 from starVLA.training.trainer_utils import initialize_overwatch
@@ -116,7 +118,7 @@ class QwenPI_v3DefaultConfig:
     qwenvl: dict = field(
         default_factory=lambda: {
             "base_vlm": "./playground/Pretrained_models/Qwen3-VL-4B-Instruct",
-            "attn_implementation": "flash_attention_2",
+            "attn_implementation": "flash_attention_3",
             "vl_hidden_dim": 2048,  # auto-overridden at runtime from the loaded VLM
             "num_vl_layers": 36,  # auto-overridden at runtime from the loaded VLM
         }
@@ -163,7 +165,7 @@ class QwenPI_v3DefaultConfig:
 
 
 @FRAMEWORK_REGISTRY.register("QwenPI_v3")
-class Qwen_PI_v3(SharedZMixin, baseframework):
+class Qwen_PI_v3(StateTokenMixin, ModalityDropoutMixin, SharedZMixin, baseframework):
     """
     Multimodal vision-language-action model (QwenPI_v3 variant).
 
@@ -196,13 +198,9 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
         super().__init__()
         # Merge framework defaults with YAML config (YAML wins on conflicts).
         self.config = merge_framework_config(QwenPI_v3DefaultConfig, config)
-        self.state_dropout_rate = float(self.config.framework.get("state_dropout_rate", 0.0))
-        if not 0.0 <= self.state_dropout_rate <= 1.0:
-            raise ValueError(
-                "framework.state_dropout_rate must be between 0 and 1, "
-                f"got {self.state_dropout_rate}"
-            )
+        self._configure_modality_dropout(self.config)
         self.qwen_vl_interface = get_vlm_model(config=self.config)
+        self._configure_state_tokens(self.config)
         encoder_mlm_cfg = dict(
             self.config.framework.qwenvl.get("encoder_mlm", {}) or {}
         )
@@ -631,16 +629,37 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
         instructions: List[str],
         cot_conversations: List[list | None] | None = None,
         cot_modes: List[str] | None = None,
+        state_keep: Optional[np.ndarray] = None,
     ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Return projected states, CoT CE, mask bias, anchor loss, and shared z."""
         has_cot = bool(cot_conversations) and any(c is not None for c in cot_conversations)
         self._shared_z_from_decoder = None
+        # Pre-encoder, not post-encoder: a blinded row must reach the bidirectional
+        # encoder with no image information, or its language tokens mix with vision and
+        # the vision-free pathway is never actually forced. `tokens` removal has to
+        # happen before the processor runs; `pixels` removal after it, so the sequence
+        # stays identical to a sighted row.
+        vision_keep = self._modality_vision_keep(len(batch_images), state_keep)
+        blind_rows = not bool(vision_keep.all())
+        encoder_images = (
+            self._modality_strip_images(batch_images, vision_keep)
+            if blind_rows and self.modality_removal == "tokens"
+            else batch_images
+        )
         qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
-            images=batch_images,
+            images=encoder_images,
             instructions=instructions,
             cot_conversations=cot_conversations if has_cot else None,
             cot_modes=cot_modes,
         )
+        # Must run before the VLM forward: the placeholder ids carry no proprioceptive
+        # meaning, so a missed splice would silently train on a constant state.
+        self._splice_state_tokens(qwen_inputs)
+        if blind_rows and self.modality_removal == "pixels":
+            self._modality_zero_pixels(
+                qwen_inputs, [len(images) for images in batch_images], vision_keep
+            )
+        self._last_vision_keep_rate = float(vision_keep.mean())
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -884,37 +903,6 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
         )
         return cot_loss * 0.0 if guard_only else cot_loss
 
-    def _add_state_conditioning(
-        self,
-        instructions: List[str],
-        states: List[np.ndarray] | None,
-    ) -> tuple[List[str], float]:
-        """Append discretised state, with per-example training-only dropout.
-
-        Dropped state is omitted rather than replaced by zeros: zero is a valid
-        normalized robot state and should not also mean "state unavailable".
-        """
-        if states is None:
-            return instructions, 0.0
-        if len(instructions) != len(states):
-            raise ValueError(
-                f"instruction/state batch mismatch: {len(instructions)} vs {len(states)}"
-            )
-
-        if self.training and self.state_dropout_rate > 0.0:
-            keep_state = np.random.random(len(states)) >= self.state_dropout_rate
-        else:
-            keep_state = np.ones(len(states), dtype=bool)
-
-        conditioned = []
-        for instruction, state, keep in zip(instructions, states, keep_state):
-            if keep:
-                state_str = self.state2str_transform(np.asarray(state)[0])
-                conditioned.append(f"{instruction} [STATE] {state_str} [ACTION]")
-            else:
-                conditioned.append(instruction)
-        return conditioned, float(np.mean(keep_state)) if len(keep_state) else 0.0
-
     def forward(
         self,
         examples: List[dict] = None,
@@ -1007,7 +995,9 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
 
         # Append discretised proprioceptive state, optionally dropping the full
         # state suffix per training example. Raw state never enters PI-v3's DiT.
-        instructions, state_keep_rate = self._add_state_conditioning(instructions, state)
+        instructions, state_keep_rate, state_keep = self._add_state_conditioning(
+            instructions, state
+        )
         state = None  # state is now encoded in the instruction tokens
 
         latent_targets = None
@@ -1038,6 +1028,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
                 cot_conversations if has_cot and self.cot_text_supervision else None
             ),
             cot_modes=cot_modes,
+            state_keep=state_keep,
         )
         cot_loss = self._apply_cot_graph_guard(cot_loss, examples, cot_conversations)
         self._last_shared_z = shared_z
@@ -1124,6 +1115,10 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
             "cot_coverage": cot_coverage,
             "cot_keep_rate": cot_keep_rate,
             "state_keep_rate": state_keep_rate,
+            "vision_keep_rate": getattr(self, "_last_vision_keep_rate", 1.0),
+            # The scheduled rate as well as the realised one: if the two ever diverge
+            # persistently, protect_state is rescuing more rows than intended.
+            "vision_drop_rate": self._modality_current_vision_rate(),
         }
         result.update(latent_teacher_audit)
         if cot_loss is not None:
@@ -1217,7 +1212,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # List[ndarray] or None
 
         # _add_state_conditioning never applies dropout in eval/inference mode.
-        instructions, _ = self._add_state_conditioning(instructions, state)
+        instructions, _, state_keep = self._add_state_conditioning(instructions, state)
         state = None
 
         # Optionally resize images to the resolution used during training.
@@ -1227,7 +1222,7 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
 
         # Step 1: encode through QwenVL
         vl_embs_list, _, encoder_attention_bias, _, shared_z = self._encode_vl_hidden_states(
-            batch_images, instructions
+            batch_images, instructions, state_keep=state_keep
         )
         base_hidden = vl_embs_list[-1]
 
@@ -1252,28 +1247,6 @@ class Qwen_PI_v3(SharedZMixin, baseframework):
 
         normalized_actions = pred_actions.detach().cpu().numpy()
         return {"normalized_actions": normalized_actions}
-
-    def state2str_transform(self, state: np.ndarray) -> str:
-        """Quantise a state vector into 256 uniform bins and return it as a space-separated token string.
-
-        Follows the π₀.5 convention: bins span [-1, 1] uniformly.
-        Example: [-0.5, 0.1, 0.8] -> "95 133 203"
-        """
-        discretized_state = np.digitize(state, bins=np.linspace(-1, 1, 256 + 1)[:-1]) - 1
-        return " ".join(map(str, discretized_state))
-
-    def add_discretized_state_to_instruction(self, instructions: List[str], states: List[np.ndarray]) -> List[str]:
-        """Append discretised proprioceptive state tokens to each instruction.
-
-        Format: ``<original instruction> [STATE] <bin indices> [ACTION]``
-        This lets the VLM attend to the robot state purely through its
-        existing text-token pathway — no extra encoder required.
-        """
-        updated_instructions = []
-        for instr, state in zip(instructions, states):
-            state_str = self.state2str_transform(state[0])
-            updated_instructions.append(f"{instr} [STATE] {state_str} [ACTION]")
-        return updated_instructions
 
 
 if __name__ == "__main__":

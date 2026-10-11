@@ -25,6 +25,7 @@ position-id preamble of ``Qwen35EncDecForConditionalGeneration.forward`` (vision
 ``skip_decoder: true``.
 """
 
+import copy
 import os
 import sys
 from typing import List, Optional
@@ -99,6 +100,26 @@ class _QWen3_5_EncDec_Interface(_QWen3_5_VL_Interface):
             enc_proj=str(qcfg.get("enc_proj", "linear")),
             decoder_mode="prefix",
         )
+
+        # Encoder-only policy analogue of Qwen3-VL's separate decoder head.  Stock
+        # Qwen3.5 ties lm_head.weight to language_model.embed_tokens.weight, so putting
+        # lm_head in freeze_modules would otherwise freeze the encoder input embedding
+        # (including state-token rows).  The policy never executes the causal decoder,
+        # therefore a private frozen output head is sufficient: unlike Qwen3-VL we do
+        # not need a private decoder input embedding because skip_decoder is mandatory.
+        if bool(qcfg.get("separate_decoder_head", False)):
+            input_weight = model.model.language_model.embed_tokens.weight
+            model.lm_head = copy.deepcopy(model.lm_head)
+            model.config.tie_word_embeddings = False
+            model.config.text_config.tie_word_embeddings = False
+            if model.lm_head.weight is input_weight or (
+                model.lm_head.weight.data_ptr() == input_weight.data_ptr()
+            ):
+                raise RuntimeError("Qwen3.5 separate_decoder_head failed to untie lm_head")
+            logger.info(
+                "Qwen3.5 encoder policy: lm_head untied from input embedding "
+                "(%d copied parameters)", model.lm_head.weight.numel()
+            )
         if ckpt:
             logger.info(f"Qwen3.5 enc-dec: built from checkpoint {ckpt}")
 

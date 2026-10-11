@@ -10,7 +10,7 @@ framework:
   name: QwenGR00T
   qwenvl:
     base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3-VL-2B-Instruct
-    attn_implementation: sdpa
+    attn_implementation: flash_attention_3
     vl_hidden_dim: 2048
     enc_dec: true
     encdec_ckpt: /e/project1/m3/blank4/code/train_downstream/train/outputs/enc_dec_2b_v5_tb9216/2026-09-13_04-43-47_job1770825/checkpoints/checkpoint-30054
@@ -27,7 +27,7 @@ framework:
     max_seq_len: 1024
     action_dim: 7
     state_dim: 0
-    action_horizon: 16
+    action_horizon: 8
     repeated_diffusion_steps: 8
     noise_beta_alpha: 1.5
     noise_beta_beta: 1.0
@@ -44,7 +44,7 @@ framework:
       num_layers: 12
       output_dim: 768
       positional_embeddings: null
-    future_action_window_size: 15
+    future_action_window_size: 7
     past_action_window_size: 0
   choice_policy:
     enabled: false
@@ -75,7 +75,7 @@ datasets:
     persistent_workers: true
     pin_memory: true
   vla_data:
-    action_horizon: 16
+    action_horizon: 8
     dataset_py: lerobot_datasets
     data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/libero_lerobot
     data_mix: libero_mixed
@@ -92,13 +92,6 @@ datasets:
     pin_memory: true
     include_state: false
     augmentation: crop_photometric
-    CoT_prompt: Your task is {instruction}. Describe the current subtask and motion. Ground the relevant object in cam1 and cam2, give the cam1 image target and trajectory, and give the future gripper trajectory as 3D deltas in the current cam2 frame.
-    cot:
-      source: mapping
-      mapping_path: /e/project1/m3/blank4/code/encdec-vlm/train/encoder_decoder_training/enc_dec_cot/mappings/cot_d_cam3d.jsonl
-      text_supervision: false
-      dropout_enabled: false
-      dropout_rate: 0.5
     pack_image_size:
     - 224
     - 224
@@ -126,7 +119,8 @@ trainer:
   logging_frequency: 100
   gradient_clipping: 1.0
   gradient_accumulation_steps: 1
-  gradient_checkpointing: true
+  # C15 launches this at 8/device; use the exact-shape smoke as the memory gate.
+  gradient_checkpointing: false
   optimizer:
     name: AdamW
     betas:

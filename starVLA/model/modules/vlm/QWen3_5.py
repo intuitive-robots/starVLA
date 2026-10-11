@@ -4,12 +4,42 @@
 # Design and Merged by [Jinhui YE / HKUST University] in [2026].
 
 import os
+import functools
+import glob
 from typing import Optional
 
 import torch
 from starVLA.training.trainer_utils import initialize_overwatch
 from transformers import AutoProcessor
 from transformers.modeling_outputs import CausalLMOutputWithPast
+
+
+def _ensure_q35_triton_compiler_env() -> None:
+    """Expose the image's prefixed compiler before importing Qwen3.5/FLA.
+
+    FLA chooses its device once at import.  If Triton's CUDA probe cannot find a C
+    compiler, FLA silently binds ``device_torch_lib`` to ``torch.cpu`` and later fails
+    inside DeltaNet even though the model and batch are on CUDA.
+    """
+    if os.environ.get("CC"):
+        return
+    for pattern in (
+        "/opt/conda/envs/*/bin/*-linux-gnu-cc",
+        "/opt/conda/envs/*/bin/*-linux-gnu-gcc",
+    ):
+        for candidate in sorted(glob.glob(pattern)):
+            if not os.access(candidate, os.X_OK):
+                continue
+            os.environ["CC"] = candidate
+            host_cxx = candidate.replace("-cc", "-gcc") if candidate.endswith("-cc") else candidate
+            if os.access(host_cxx, os.X_OK) and "-ccbin" not in os.environ.get("NVCC_PREPEND_FLAGS", ""):
+                os.environ["NVCC_PREPEND_FLAGS"] = (
+                    os.environ.get("NVCC_PREPEND_FLAGS", "") + f" -ccbin {host_cxx}"
+                ).strip()
+            return
+
+
+_ensure_q35_triton_compiler_env()
 
 try:
     from transformers import Qwen3_5ForConditionalGeneration
@@ -19,6 +49,27 @@ except ImportError as import_error:
     ) from import_error
 
 logger = initialize_overwatch(__name__)
+
+
+def _repair_q35_fla_device_binding() -> None:
+    """Repair FLA's cached import-time CPU fallback in the current rank."""
+    try:
+        import fla.utils as fla_utils
+    except ImportError:
+        return
+    if getattr(fla_utils, "device_torch_lib", None) is torch.cuda:
+        return
+    if not torch.cuda.is_available():
+        raise RuntimeError("Qwen3.5 FLA bound to CPU and CUDA is unavailable")
+    logger.warning(
+        "Qwen3.5 causal FLA bound device_torch_lib=%r; re-pointing it at torch.cuda",
+        getattr(getattr(fla_utils, "device_torch_lib", None), "__name__", None),
+    )
+    fla_utils.device = "cuda"
+    fla_utils.device_torch_lib = torch.cuda
+    fla_utils.autocast_custom_fwd = functools.partial(torch.amp.custom_fwd, device_type="cuda")
+    fla_utils.autocast_custom_bwd = functools.partial(torch.amp.custom_bwd, device_type="cuda")
+    fla_utils.custom_device_ctx = lambda index: torch.cuda.device(index)
 
 IGNORE_INDEX = -100
 IMAGE_TOKEN_INDEX = 248056
@@ -86,6 +137,13 @@ class _QWen3_5_VL_Interface(nn.Module):
             if is_flash_attn_3_available():
                 print("[INFO] FlashAttention-3 available; upgrading default sdpa -> flash_attention_3")
                 attn_implementation = "flash_attention_3"
+
+        # The Qwen3.5 encoder path already carries this guard.  The causal path needs
+        # the same per-rank repair: a failed Triton import-time probe otherwise leaves
+        # FLA on torch.cpu and crashes before the first optimizer update.
+        if torch.cuda.is_available():
+            torch.zeros(1, device="cuda")
+        _repair_q35_fla_device_binding()
 
         model = Qwen3_5ForConditionalGeneration.from_pretrained(
             model_id,

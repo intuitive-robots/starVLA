@@ -1,0 +1,139 @@
+# RoboTwin 2.0 FLEX-pi 5-task ablation pilot (2026-10-07), arm P2: causal Qwen3-VL-2B initialised from the
+# pretrained causal embodied base (insight_cp1 checkpoint-28786, vlm_impl qwen3), GR00T DiT head,
+# token-only left/right rare-real state (q99), absolute 14-D joints, chunk 32 (execute 32).
+# Global batch = 16/GPU x 4 GPUs = 64. No CoT, FA3, no activation checkpointing.
+run_id: rt5_p2_clean_s42
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: niblank
+wandb_project: starvla_robotwin_flexpi5
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenGR00T
+  qwenvl:
+    # P2 base (memory note p2-needs-pretrained-base-override): baked in, not CLI-only.
+    base_vlm: /e/project1/m3/blank4/code/train_downstream/train/outputs/insight_cp1_q3vl2b_causal_v5/2026-09-22_18-02-59_job1955957/checkpoints/checkpoint-28786
+    vlm_impl: qwen3
+    enc_dec: false
+    attn_implementation: flash_attention_3
+    vl_hidden_dim: 2048
+  action_model:
+    action_dim: 14
+    # Hard requirement: state enters only as VLM token IDs, never via GR00T's state encoder.
+    state_dim: 0
+    token_state_dim: 16
+    action_horizon: 32
+    future_action_window_size: 31
+    past_action_window_size: 0
+    action_model_type: DiT-B
+    action_hidden_dim: 768
+    hidden_size: 768
+    add_pos_embed: true
+    max_seq_len: 1024
+    repeated_diffusion_steps: 8
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    num_timestep_buckets: 1000
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    diffusion_model_cfg:
+      num_layers: 12
+      output_dim: 768
+      cross_attention_dim: 2048
+      dropout: 0.1
+      final_dropout: true
+      interleave_self_attention: true
+      norm_type: ada_norm
+      positional_embeddings: null
+  state_token_mode: reserved_ids
+  state_routing: token_only
+  state_num_bins: 256
+  state_token_source: rare_real
+  trainable_bin_embedding: false
+  # Loader order is left6,right6,left_gripper,right_gripper. Reorder only for tokens.
+  state_token_permutation: [0, 1, 2, 3, 4, 5, 12, 6, 7, 8, 9, 10, 11, 13]
+  state_token_group_sizes: [7, 7]
+  state_token_group_names: [left, right]
+
+datasets:
+  vla_data:
+    action_horizon: 32
+    dataset_py: lerobot_datasets
+    data_root_dir: /e/project1/m3/blank4/code/starVLA/playground/Datasets/RoboTwin2_flexpi5
+    # robotwin_flexpi5_clean50 (default) or robotwin_flexpi5_rand50 (seeded 50/task randomized subset)
+    data_mix: robotwin_flexpi5_clean50
+    # FLEX-pi contract: absolute 14-D joint targets (no relative/delta transform).
+    action_mode: abs
+    sequential_step_sampling: false
+    per_device_batch_size: 16
+    drop_last: true
+    load_all_data_for_training: true
+    video_backend: decord
+    lerobot_version: "v3.0"
+    # all 50 demonstrations per task are trained on (FLEX-pi: no held-out split)
+    holdout_trajectories_per_task: 0
+    holdout_trajectories_per_dataset: 0
+    num_workers: 16
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+    include_state: true
+    # q99 state normalisation; the _applied marker tells the policy server to apply it too
+    state_normalization: q99
+    state_normalization_applied: true
+    augmentation: crop_photometric
+    pack_image_size: [224, 224]
+  vlm_data:
+    dataset_py: vlm_datasets
+    dataformat: llava_json
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    data_flatten: false
+    base_interval: 2
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    per_device_batch_size: 4
+    num_workers: 4
+    prefetch_factor: 2
+    persistent_workers: true
+    pin_memory: true
+
+trainer:
+  # 5 epochs x 48,531 clean frames / global batch 64 = 3,792 steps (randomized subset: 48,507 -> 3,790,
+  # set on the CLI); warmup ~5%; one checkpoint at the end.
+  max_train_steps: 3792
+  num_warmup_steps: 190
+  save_interval: 3792
+  eval_interval: 500
+  logging_frequency: 100
+  save_full_training_state: false
+  save_total_limit: 1
+  full_state_save_total_limit: 1
+  learning_rate:
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: ''
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  max_grad_norm: 1.0
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08
+  weight_decay: 0.0
+
+use_deepspeed: true

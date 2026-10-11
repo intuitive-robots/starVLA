@@ -100,15 +100,30 @@ class AgilexData50Config(AgilexDataConfig):
                 ),
                 VideoToNumpy(apply_to=self.video_keys),
             ])
+        # Opt-in q99 state normalization (``datasets.vla_data.state_normalization: q99``), as in the
+        # LIBERO registry config: every state key (joints and gripper openings) maps its 1st..99th
+        # percentile to [-1, 1] before the 256-bin state tokenizer. Default (omitted/raw) keeps the
+        # historical min_max joints + binary grippers that every pre-2026-10-07 RoboTwin checkpoint used.
+        # The policy server applies q99 only when the checkpoint carries
+        # ``state_normalization_applied: true`` (deployment/model_server/policy_norm_processor.py).
+        state_normalization = data_cfg.get("state_normalization", None)
+        if state_normalization in ("", "none", "raw", False):
+            state_normalization = None
+        if state_normalization not in (None, "q99"):
+            raise ValueError(f"RoboTwin state_normalization must be omitted/raw or 'q99', got {state_normalization!r}")
+        if state_normalization == "q99":
+            state_modes = {key: "q99" for key in self.state_keys}
+        else:
+            state_modes = {
+                "state.left_joints": "min_max", "state.right_joints": "min_max",
+                "state.left_gripper": "binary", "state.right_gripper": "binary",
+            }
         transforms.extend([
             StateActionToTensor(apply_to=self.state_keys),
             StateActionTransform(
                 apply_to=self.state_keys,
                 binary_threshold=0.49,
-                normalization_modes={
-                    "state.left_joints": "min_max", "state.right_joints": "min_max",
-                    "state.left_gripper": "binary", "state.right_gripper": "binary",
-                },
+                normalization_modes=state_modes,
             ),
             StateActionToTensor(apply_to=self.action_keys),
             StateActionTransform(
@@ -185,6 +200,16 @@ DATASET_NAMED_MIXTURES = {
     # This avoids materialising the legacy per-task directory layout.
     "robotwin_aloha_clean50_v3": [
         ("aloha_agilex_clean", 1.0, "robotwin50"),
+    ],
+    # FLEX-pi 5-task ablation recipe (lift_pot, place_shoe, pick_diverse_bottles,
+    # place_object_basket, stack_bowls_two; 50 demos/task). Metadata-only views built by
+    # examples/Robotwin/train_files/make_flexpi5_views.py under
+    # data_root_dir=playground/Datasets/RoboTwin2_flexpi5 (subset_manifest.json lists the episodes).
+    "robotwin_flexpi5_clean50": [
+        ("aloha_agilex_clean_flexpi5", 1.0, "robotwin50"),
+    ],
+    "robotwin_flexpi5_rand50": [
+        ("aloha_agilex_randomized_flexpi5_s42", 1.0, "robotwin50"),
     ],
     "robotwin_all": [
         ("Clean/adjust_bottle", 1.0, "robotwin"), ("Randomized/adjust_bottle", 1.0, "robotwin"),

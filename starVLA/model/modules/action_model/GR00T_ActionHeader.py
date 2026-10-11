@@ -392,10 +392,13 @@ class FlowmatchingActionHead(nn.Module):
         reduction: str = "mean",
         z_conditioning: torch.Tensor = None,
         encoder_memory_keep: torch.Tensor = None,
+        action_valid_mask: torch.Tensor = None,
     ):
         """
         vl_embs: shape (B, seq_length, feature_dim)
         actions: shape (B, action_horizon, action_dim)
+        action_valid_mask: optional bool (B, action_horizon); False steps (horizon past the episode end, m3_data
+            bridge) are excluded from the loss. None keeps the plain mean over every step.
         """
         device = vl_embs.device
 
@@ -447,7 +450,12 @@ class FlowmatchingActionHead(nn.Module):
         pred_actions = pred[:, -actions.shape[1] :]
 
         # Slice out only the action portion of pred and target.
-        loss_per_sample = ((pred_actions - velocity) ** 2).mean(dim=(1, 2))
+        if action_valid_mask is None:
+            loss_per_sample = ((pred_actions - velocity) ** 2).mean(dim=(1, 2))
+        else:
+            step_keep = action_valid_mask.to(device=pred_actions.device, dtype=pred_actions.dtype)
+            step_err = ((pred_actions - velocity) ** 2).mean(dim=2)
+            loss_per_sample = (step_err * step_keep).sum(dim=1) / step_keep.sum(dim=1).clamp_min(1.0)
         if reduction == "none":
             return loss_per_sample
         if reduction != "mean":

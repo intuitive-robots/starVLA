@@ -38,6 +38,9 @@ from pydantic import BaseModel, Field, ValidationError
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from PIL import Image
+
+# datasets.vla_data.teacher_feats: {pid: OrderedDict(path -> memmap)}, per process (not pickled into workers)
+_TEACHER_CACHE: dict = {}
 import torch.distributed as dist
 
 from starVLA.dataloader.gr00t_lerobot import video as video_utils
@@ -296,6 +299,17 @@ def _filter_dataframe_for_statistics(
     if not stats_filter_config:
         return parquet_data
 
+    # Metadata-only subset views (meta/subset_manifest.json, 2026-10-07): the data files are the
+    # parent release's, so statistics must be restricted to the episodes the view lists.
+    episode_ids = stats_filter_config.get("episode_ids")
+    if episode_ids is not None:
+        parquet_data = parquet_data[parquet_data["episode_index"].isin(episode_ids)]
+        if not any(
+            stats_filter_config.get(flag, False)
+            for flag in ("filter_successful_trajectories", "filter_nonempty_language", "use_keep_ranges")
+        ):
+            return parquet_data
+
     filtered_groups: list[pd.DataFrame] = []
     filter_successful_trajectories = bool(stats_filter_config.get("filter_successful_trajectories", False))
     success_indicator_key = stats_filter_config.get("success_indicator_key")
@@ -391,10 +405,21 @@ def _normalize_action_mode_state_map(action_mode_state_map: dict[str, str] | Non
 def _build_stats_cache_config(
     action_mode: str,
     *,
+    action_indices: Sequence[int] | None = None,
+    state_indices: Sequence[int] | None = None,
+    action_mode_apply_keys: Sequence[str] | None = None,
+    action_mode_state_map: dict[str, str] | None = None,
     stats_filter_config: dict | None = None,
 ) -> dict:
     payload = {
         "mode": action_mode,
+        # Relative/delta statistics depend on both the chunk definition and the
+        # dimensions transformed. Without these fields, an all-dimension cache could be
+        # silently reused for the RoboTwin joints-only/absolute-gripper representation.
+        "action_indices": list(action_indices or []),
+        "state_indices": list(state_indices or []),
+        "action_mode_apply_keys": list(action_mode_apply_keys or []),
+        "action_mode_state_map": dict(action_mode_state_map or {}),
     }
     if stats_filter_config:
         payload["filters"] = {
@@ -404,6 +429,10 @@ def _build_stats_cache_config(
             "filter_nonempty_language": bool(stats_filter_config.get("filter_nonempty_language", False)),
             "language_columns": list(stats_filter_config.get("language_columns", [])),
         }
+        if stats_filter_config.get("episode_ids") is not None:
+            ids = np.asarray(sorted(int(i) for i in stats_filter_config["episode_ids"]), dtype=np.int64)
+            payload["filters"]["episode_ids_md5"] = hashlib.md5(ids.tobytes()).hexdigest()
+            payload["filters"]["num_episode_ids"] = int(len(ids))
     return payload
 
 
@@ -411,7 +440,12 @@ def _invalidate_legacy_stats_cache(stats_path: Path, reason: str) -> None:
     if not stats_path.exists():
         return
     print(f"Removing stale dataset statistics cache at {stats_path}: {reason}")
-    stats_path.unlink()
+    # Multiple independent smoke replicas may discover the same stale shared cache. The
+    # first unlink wins; later writers should proceed to rebuild instead of failing.
+    try:
+        stats_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _load_stats_cache(
@@ -458,7 +492,10 @@ def _save_stats_cache(stats_path: Path, cache_config: dict, statistics: dict) ->
         "__cache_config": cache_config,
         "statistics": statistics,
     }
-    tmp_path = stats_path.with_suffix(".tmp")
+    # Two mandatory smoke replicas can initialise the same dataset concurrently. A fixed
+    # ``stats.tmp`` path lets one rank replace the other's file while it is still open.
+    # The payloads are deterministic, so unique writer files plus atomic replace are safe.
+    tmp_path = stats_path.with_name(f"{stats_path.name}.{os.getpid()}.tmp")
     stats_path.parent.mkdir(parents=True, exist_ok=True)
     with open(tmp_path, "w") as f:
         json.dump(payload, f, indent=4)
@@ -962,6 +999,10 @@ class LeRobotSingleDataset(Dataset):
         self._shared_z_future_offset = int(
             self.data_cfg.get("shared_z_future_offset", 0) if self.data_cfg else 0
         )
+        # future_offsets: several future frames per camera; the tail rule and future_image use the largest.
+        self._future_offsets = sorted({int(k) for k in ((self.data_cfg.get("future_offsets") if self.data_cfg else None) or [])})
+        if self._future_offsets:
+            self._shared_z_future_offset = int(self._future_offsets[-1])
         if self.data_cfg:
             debug_enabled = self.data_cfg.get(
                 "worker_memory_debug",
@@ -1276,14 +1317,38 @@ class LeRobotSingleDataset(Dataset):
                     "language_columns": language_columns,
                     "episode_metadata": episode_metadata,
                 }
+        # Opt-in: a metadata-only subset view (meta/subset_manifest.json, written by e.g.
+        # examples/Robotwin/train_files/make_flexpi5_views.py) symlinks the parent release's data
+        # files; compute statistics over the listed episodes only, reading only their parquet files.
+        subset_parquet_files = None
+        subset_manifest_path = self.dataset_path / "meta" / "subset_manifest.json"
+        if self._lerobot_version == "v3.0" and subset_manifest_path.exists():
+            view_episodes = pd.concat(
+                [pd.read_parquet(f) for f in sorted(self.dataset_path.glob(LE_ROBOT3_EPISODE_FILENAME))],
+                ignore_index=True,
+            )
+            stats_filter_config = dict(stats_filter_config or {})
+            stats_filter_config["episode_ids"] = sorted(int(i) for i in view_episodes["episode_index"])
+            subset_parquet_files = sorted(
+                {
+                    self.dataset_path / "data" / f"chunk-{int(c):03d}" / f"file-{int(f):03d}.parquet"
+                    for c, f in zip(view_episodes["data/chunk_index"], view_episodes["data/file_index"])
+                }
+            )
         stats_cache_config = _build_stats_cache_config(
             action_mode=action_mode,
+            action_indices=action_indices,
+            state_indices=state_indices,
+            action_mode_apply_keys=apply_keys,
+            action_mode_state_map=normalized_state_map,
             stats_filter_config=stats_filter_config,
         )
         parquet_files = list(self.dataset_path.glob(LE_ROBOT_DATA_FILENAME))
         parquet_files_filtered = [
             pf for pf in parquet_files if "episode_033675.parquet" not in pf.name
         ]
+        if subset_parquet_files is not None:
+            parquet_files_filtered = subset_parquet_files
 
         if is_main():
             le_statistics = _load_or_compute_statistics(
@@ -1659,8 +1724,15 @@ class LeRobotSingleDataset(Dataset):
 
     def _build_valid_base_indices_by_trajectory(self) -> dict[int, np.ndarray]:
         valid_indices: dict[int, list[int]] = defaultdict(list)
+        # shared_z_future_keep_tail (default false): keep the last `offset` frames of each
+        # episode in the sampler. They are packed without `future_image` (see the pops
+        # below), so a future-target aux skips them while the action loss still trains on
+        # exactly the frames a no-future-offset control samples.
+        keep_tail = bool(
+            self.data_cfg.get("shared_z_future_keep_tail", False) if self.data_cfg else False
+        )
         for trajectory_id, base_index in self.all_steps:
-            if self._shared_z_future_offset:
+            if self._shared_z_future_offset and not keep_tail:
                 trajectory_index = self.get_trajectory_index(int(trajectory_id))
                 if int(base_index) + self._shared_z_future_offset >= int(
                     self.trajectory_lengths[trajectory_index]
@@ -2052,6 +2124,100 @@ class LeRobotSingleDataset(Dataset):
         return (f"{self.dataset_name}/{episode_index // self.chunk_size}/"
                 f"{episode_index % self.chunk_size}")
 
+    def _attach_annot(self, data: dict, trajectory_id: int, base_index: int) -> dict:
+        """Per-row simulator annotations (``observation.annot.*`` parquet columns of
+        lerobot_3_0/libero_lerobot_annot, 2026-10-03), attached before the transforms so that
+        AnnotVideoAugment moves the masks and 2D boxes with the images. Off unless
+        ``datasets.vla_data.annot`` is true; a dataset without the columns gets nothing."""
+        if self.data_cfg is None or not bool(self.data_cfg.get("annot", False)):
+            return data
+        traj = self.get_trajectory_data(trajectory_id)
+        if "observation.annot.valid" not in traj.columns:
+            return data
+        i = int(base_index)
+        if int(traj["frame_index"].iloc[i]) != i:
+            hits = np.nonzero(traj["frame_index"].to_numpy() == i)[0]
+            if len(hits) != 1:
+                raise RuntimeError(f"annot: frame {i} not found once in trajectory {trajectory_id}")
+            i = int(hits[0])
+        row = traj.iloc[i]
+
+        def arr(key, dtype, shape):
+            return np.asarray(row[f"observation.annot.{key}"], dtype=dtype).reshape(shape)
+
+        data["_annot"] = {
+            "mask": arr("mask64", np.uint8, (2, 64, 64)),
+            "box3d": arr("box3d", np.float32, (4, 6)),
+            "pose3d": arr("pose3d", np.float32, (4, 7)),
+            "box2d": arr("box2d", np.float32, (2, 4, 4)),
+            "slotok": arr("slotok", np.uint8, (4,)),
+            "valid": arr("valid", np.uint8, (2,)),
+        }
+        return data
+
+    def _attach_future_state(self, data: dict, trajectory_id: int, base_index: int) -> dict:
+        """``datasets.vla_data.future_state_offset`` (default off, 2026-10-07): the state ``offset`` steps ahead, in the
+        same key order and normalisation as ``sample["state"]`` (raw, or the fitted q99 normalisers), absolute state
+        padding with the episode's last step; for the future-state copies of future_copies."""
+        off = int((self.data_cfg.get("future_state_offset", 0) if self.data_cfg is not None else 0) or 0)
+        if off <= 0:
+            return data
+        vals = [np.asarray(self.get_state_or_action(trajectory_id, "state", k, base_index + off))
+                for k in self.modality_keys["state"]]
+        if self.data_cfg.get("state_normalization", None) not in (None, "", "none", "raw", False):
+            # the same fitted normalisers as the current state (StateActionTransform on the state keys)
+            norms = {}
+            for t in (getattr(self.transforms, "transforms", None) or []):
+                for k, n in (getattr(t, "_normalizers", None) or {}).items():
+                    if k in self.modality_keys["state"]:
+                        norms[k] = n
+            missing = [k for k in self.modality_keys["state"] if k not in norms]
+            if missing:
+                raise RuntimeError(f"future_state_offset: no state normaliser for {missing}")
+            vals = [norms[k].forward(torch.as_tensor(np.asarray(v, dtype=np.float32))).numpy()
+                    for k, v in zip(self.modality_keys["state"], vals)]
+        data["_future_state"] = np.concatenate([v.reshape(v.shape[0], -1) for v in vals], axis=1).astype(np.float16)
+        return data
+
+    def _attach_teacher(self, data: dict, trajectory_id: int, base_index: int) -> dict:
+        """``datasets.vla_data.teacher_feats`` (default off, 2026-10-08): precomputed frozen-teacher patch features of
+        the CLEAN current frame, for framework.teacher_align. Reads
+        ``<root>/<dataset_name>/<teacher>/ep_{episode_index:06d}.npy`` ([T, n_cams, G*G, D] fp16, cameras in the
+        dataset's video-key order; scripts/teacher_feats/precompute_teacher_feats.py) and attaches row ``base_index``
+        ([n_cams, G*G, D]). Arrays are memory-mapped through a small per-process LRU (module level, never pickled
+        into the workers). ``allow_missing: true`` (smoke tests only) leaves a sample without a file unannotated."""
+        cfg = self.data_cfg.get("teacher_feats", None) if self.data_cfg is not None else None
+        if not cfg:
+            return data
+        cfg = dict(cfg)
+        teacher = str(cfg["teacher"])
+        root = str(cfg.get("root", "/e/scratch/m3/blank4/teacher_feats"))
+        path = os.path.join(root, self.dataset_name, teacher, f"ep_{int(trajectory_id):06d}.npy")
+        cache = _TEACHER_CACHE.get(os.getpid())
+        if cache is None:
+            _TEACHER_CACHE.clear()
+            cache = _TEACHER_CACHE.setdefault(os.getpid(), OrderedDict())
+        arr = cache.get(path)
+        if arr is None:
+            if not os.path.exists(path):
+                if bool(cfg.get("allow_missing", False)):
+                    return data
+                raise FileNotFoundError(f"teacher_feats: no {path} (episode {int(trajectory_id)} of {self.dataset_name})")
+            arr = np.load(path, mmap_mode="r")
+            traj_len = int(self.trajectory_lengths[self.get_trajectory_index(int(trajectory_id))])
+            n_cams = len(self.modality_keys.get("video", []))
+            if arr.ndim != 4 or arr.shape[0] != traj_len or arr.shape[1] != n_cams:
+                raise RuntimeError(
+                    f"teacher_feats: {path} has shape {tuple(arr.shape)}, expected [{traj_len} (episode length), "
+                    f"{n_cams} (cameras), G*G, D]")
+            cache[path] = arr
+            while len(cache) > int(cfg.get("cache_episodes", 32)):
+                cache.popitem(last=False)
+        else:
+            cache.move_to_end(path)
+        data["_teacher_feats"] = np.array(arr[int(base_index)], dtype=np.float16)
+        return data
+
     def _attach_cot(self, data: dict, trajectory_id: int, base_index: int) -> dict:
         """Resolve CoT before transforms so all CPU work stays in dataloader workers.
 
@@ -2244,6 +2410,9 @@ class LeRobotSingleDataset(Dataset):
         selected_video_keys = self._resolve_sampled_video_keys(trajectory_id=trajectory_id, base_index=base_index)
         raw_data = self.get_step_data(trajectory_id, base_index, selected_video_keys=selected_video_keys)
         raw_data = self._attach_cot(raw_data, trajectory_id, base_index)
+        raw_data = self._attach_annot(raw_data, trajectory_id, base_index)
+        raw_data = self._attach_future_state(raw_data, trajectory_id, base_index)
+        raw_data = self._attach_teacher(raw_data, trajectory_id, base_index)
         data = self._apply_transforms_for_sample(raw_data, selected_video_keys=selected_video_keys)
         sample = self._pack_sample(data, selected_video_keys=selected_video_keys)
 
@@ -2264,6 +2433,7 @@ class LeRobotSingleDataset(Dataset):
         )
         if self._shared_z_future_offset and remaining <= self._shared_z_future_offset:
             sample.pop("future_image", None)
+            sample.pop("future_images_multi", None)
         self._maybe_log_worker_memory_debug(
             trajectory_id=trajectory_id,
             base_index=base_index,
@@ -2322,8 +2492,36 @@ class LeRobotSingleDataset(Dataset):
 
     def _pack_sample(self, data: dict, selected_video_keys: list[str] | None = None) -> dict:
         """Pack transformed modality data into training sample format."""
+        # ``image_size`` existed in historical configs but was not applied by
+        # this loader. Reinterpreting it now would silently change resumed runs
+        # and make old checkpoint metadata lie about their training inputs.
+        # ``pack_image_size`` is therefore the explicit, versioned opt-in for
+        # pack-time resizing. It is expressed as (height, width).
+        pack_image_size = (
+            self.data_cfg.get("pack_image_size") if self.data_cfg is not None else None
+        )
+        if isinstance(pack_image_size, int):
+            pack_image_size = (pack_image_size, pack_image_size)
+        elif pack_image_size is not None:
+            pack_image_size = tuple(pack_image_size)
+            if len(pack_image_size) != 2:
+                raise ValueError(
+                    "pack_image_size must be an int or a 2-item (height, width) "
+                    f"sequence, got {pack_image_size!r}"
+                )
+        if pack_image_size is not None:
+            pack_image_size = tuple(int(value) for value in pack_image_size)
+            if any(value <= 0 for value in pack_image_size):
+                raise ValueError(
+                    f"pack_image_size dimensions must be positive, got {pack_image_size!r}"
+                )
+            pack_pil_size = (pack_image_size[1], pack_image_size[0])
+        else:
+            pack_pil_size = None
+
         step_images = []
         future_images = []
+        future_multi = {}
         packed_image_mib = 0.0
         if selected_video_keys is None:
             selected_video_keys = self._resolve_sampled_video_keys()
@@ -2334,19 +2532,30 @@ class LeRobotSingleDataset(Dataset):
                 pass
             else:
                 image = Image.fromarray(image)
+            if pack_pil_size is not None and image.size != pack_pil_size:
+                image = image.resize(pack_pil_size, Image.Resampling.BILINEAR)
             step_images.append(image)
             packed_image_mib += _estimate_value_mib(image)
             if self._shared_z_future_offset:
-                if len(video_value) != 2:
+                n_future = len(self._future_offsets) if self._future_offsets else 1
+                if len(video_value) != 1 + n_future:
                     raise RuntimeError(
-                        "shared-z future loading expected [current,future] frames, got "
+                        f"future loading expected 1 + {n_future} frames (current + futures), got "
                         f"{len(video_value)} for {video_key}"
                     )
-                future = video_value[1]
-                if not isinstance(future, Image.Image):
-                    future = Image.fromarray(future)
-                future_images.append(future)
-                packed_image_mib += _estimate_value_mib(future)
+                frames = []
+                for j in range(1, 1 + n_future):
+                    future = video_value[j]
+                    if not isinstance(future, Image.Image):
+                        future = Image.fromarray(future)
+                    if pack_pil_size is not None and future.size != pack_pil_size:
+                        future = future.resize(pack_pil_size, Image.Resampling.BILINEAR)
+                    frames.append(future)
+                    packed_image_mib += _estimate_value_mib(future)
+                future_images.append(frames[-1])
+                if self._future_offsets:
+                    for k, future in zip(self._future_offsets, frames):
+                        future_multi.setdefault(int(k), []).append(future)
 
         language = self._select_language(data)
         action = []
@@ -2365,9 +2574,17 @@ class LeRobotSingleDataset(Dataset):
         }
         if future_images:
             sample["future_image"] = future_images
+        if future_multi:
+            sample["future_images_multi"] = future_multi
         # Presence of the key (including a None value) tells the model that lookup already
         # happened in the worker and prevents a duplicate resolver lookup / augmentation.
         sample["cot_conversation"] = data.get("_cot_conversation")
+        if data.get("_annot") is not None:  # simulator annotations (datasets.vla_data.annot)
+            sample["annot"] = data["_annot"]
+        if data.get("_future_state") is not None:  # datasets.vla_data.future_state_offset
+            sample["future_state"] = data["_future_state"]
+        if data.get("_teacher_feats") is not None:  # datasets.vla_data.teacher_feats
+            sample["teacher_feats"] = data["_teacher_feats"]
         sample["cot_available"] = bool(data.get("_cot_available", False))
         sample["cot_mode"] = data.get("_cot_mode")
         # Parse after worker-side image/coordinate augmentation, so these numeric labels
@@ -3427,6 +3644,9 @@ class LeRobotMixtureDataset(Dataset):
                     selected_video_keys=selected_video_keys,
                 )
                 raw_data = dataset._attach_cot(raw_data, trajectory_id, step)
+                raw_data = dataset._attach_annot(raw_data, trajectory_id, step)
+                raw_data = dataset._attach_future_state(raw_data, trajectory_id, step)
+                raw_data = dataset._attach_teacher(raw_data, trajectory_id, step)
                 data = dataset._apply_transforms_for_sample(
                     raw_data,
                     selected_video_keys=selected_video_keys,
@@ -3441,6 +3661,7 @@ class LeRobotMixtureDataset(Dataset):
                     )
                     if remaining <= dataset._shared_z_future_offset:
                         sample.pop("future_image", None)
+                        sample.pop("future_images_multi", None)
                 dataset._maybe_log_worker_memory_debug(
                     trajectory_id=int(trajectory_id),
                     base_index=int(step),
@@ -3679,6 +3900,14 @@ class LeRobotMixtureDataset(Dataset):
                 modality_configs[modality].add(json.dumps(configs))
         merged_metadata["modalities"] = {}
         for modality, configs in modality_configs.items():
+            if modality == "video" and len(configs) > 1:
+                # Datasets of one embodiment may declare different video fps (PI LIBERO 10, LIBERO-90 v3 copy 20; both
+                # one frame per env step). Decoding uses each dataset's own fps, so only the rest must agree.
+                def _no_fps(c):
+                    return json.dumps({k: {kk: vv for kk, vv in v.items() if kk != "fps"} for k, v in json.loads(c).items()},
+                                      sort_keys=True)
+                assert len({_no_fps(c) for c in configs}) == 1, f"Video configs differ beyond fps: {list(configs)}"
+                configs = {sorted(configs)[0]}
             # Check that all modality configs correspond to the same tag matches
             assert (
                 len(configs) == 1

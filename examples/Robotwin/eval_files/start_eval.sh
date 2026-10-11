@@ -64,6 +64,9 @@ ACTIVE_TASKS=()
 ACTIVE_SERVER_LOGS=()
 ACTIVE_EVAL_LOGS=()
 FAILED_TASKS=()
+declare -A GPU_SERVER_PIDS=()
+declare -A GPU_SERVER_LOGS=()
+declare -A GPU_SERVER_PORTS=()
 
 join_arr() {
     local sep="$1"; shift
@@ -95,13 +98,28 @@ cleanup_active_jobs() {
             kill_descendants "${pid}" TERM
         fi
     done
+    for pid in "${GPU_SERVER_PIDS[@]+"${GPU_SERVER_PIDS[@]}"}"; do
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill_descendants "${pid}" TERM
+        fi
+    done
     sleep 2
     for pid in "${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}"; do
         if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
             kill_descendants "${pid}" KILL
         fi
     done
+    for pid in "${GPU_SERVER_PIDS[@]+"${GPU_SERVER_PIDS[@]}"}"; do
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill_descendants "${pid}" KILL
+        fi
+    done
     for pid in "${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}"; do
+        if [[ -n "${pid}" ]]; then
+            wait "${pid}" 2>/dev/null || true
+        fi
+    done
+    for pid in "${GPU_SERVER_PIDS[@]+"${GPU_SERVER_PIDS[@]}"}"; do
         if [[ -n "${pid}" ]]; then
             wait "${pid}" 2>/dev/null || true
         fi
@@ -119,6 +137,7 @@ Required flags:
   -m, --mode              Eval mode: demo_clean or demo_randomized
   -n, --name              Policy name (used for log directory naming)
   -c, --ckpt              Path to the checkpoint file
+  -a, --action-mode       Action representation: abs, delta, or rel
 
 Tasks (positional):
   Remaining arguments after flags are treated as task names, the keyword
@@ -128,6 +147,8 @@ Optional flags:
   -s, --seed              Eval seed (default: 0, env: ROBOTWIN_SEED)
   -t, --num-trials        Rollouts per task (default: 100, env: ROBOTWIN_NUM_TRIALS)
   -j, --jobs-per-gpu      Concurrent jobs per GPU (default: 1, env: ROBOTWIN_JOBS_PER_GPU)
+      --task-shard-index  Zero-based task shard (default: 0)
+      --task-shard-count  Number of disjoint task shards (default: 1)
   -p, --base-port         First port to allocate (default: 5694, env: ROBOTWIN_BASE_PORT)
       --server-timeout    Seconds to wait for server (default: 600, env: ROBOTWIN_SERVER_TIMEOUT)
       --install-deps      Run pip install bootstrap steps once
@@ -347,58 +368,83 @@ prepare_runtime_dependencies() {
 
 launch_task_in_slot() {
     local slot_idx="$1"
-    local task_name="$2"
+    local unit_spec="$2"
     local gpu_id="${SLOT_GPUS[$slot_idx]}"
     local port="${SLOT_PORTS[$slot_idx]}"
     local launched_pid=""
-    local task_safe="${task_name//\//_}"
     local slot_label="slot${slot_idx}_gpu${gpu_id}_port${port}"
-    local server_log="${LOG_DIR}/${task_safe}_${TASK_CONFIG}_${slot_label}_server.log"
-    local eval_log="${LOG_DIR}/${task_safe}_${TASK_CONFIG}_${slot_label}_eval.log"
+    local server_log="${GPU_SERVER_LOGS[$gpu_id]}"
+    # A unit is `task` (mode/seed from the flags) or `task@mode@seed` (2026-10-07): one job can then
+    # run both phases and several RoboTwin seed groups through the same persistent policy servers.
+    local task_name unit_mode unit_seed unit_setting eval_log
+    IFS='@' read -r task_name unit_mode unit_seed <<< "${unit_spec}"
+    unit_mode="${unit_mode:-${TASK_CONFIG}}"
+    unit_seed="${unit_seed:-${ROBOTWIN_SEED:-0}}"
+    local task_safe="${task_name//\//_}"
+    if [[ "${unit_spec}" == *@* ]]; then
+        eval_log="${LOG_DIR}/${task_safe}__${unit_mode}__seed${unit_seed}__${slot_label}_eval.log"
+        unit_setting="${POLICY_NAME}_seed${unit_seed}"
+    else
+        eval_log="${LOG_DIR}/${task_safe}_${TASK_CONFIG}_${slot_label}_eval.log"
+        unit_setting="${POLICY_NAME}"
+    fi
 
-    echo "[INFO] Launching task=${task_name} mode=${TASK_CONFIG} gpu=${gpu_id} port=${port}"
+    echo "[INFO] Launching task=${task_name} mode=${unit_mode} seed=${unit_seed} gpu=${gpu_id} port=${port}"
 
     (
         set -euo pipefail
 
-        server_pid=""
-        cleanup_server() {
-            if [[ -n "${server_pid}" ]] && kill -0 "${server_pid}" 2>/dev/null; then
-                kill "${server_pid}" 2>/dev/null || true
-                wait "${server_pid}" 2>/dev/null || true
-            fi
-        }
-        trap cleanup_server EXIT INT TERM
-
-        export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-        export STARVLA_PYTHON="${STARVLA_PYTHON}"
-        export ROBOTWIN_PYTHON="${ROBOTWIN_PYTHON}"
-
-        bash "${SCRIPT_DIR}/run_policy_server.sh" "${CKPT_PATH}" "${gpu_id}" "${port}" > "${server_log}" 2>&1 &
-        server_pid=$!
-
-        if ! wait_for_server "${port}" "${ROBOTWIN_SERVER_TIMEOUT:-600}"; then
-            echo "[ERROR] Policy server failed to become ready for task=${task_name} on port=${port}. See ${server_log}" >&2
-            exit 1
-        fi
-
         cd "${SCRIPT_DIR}"
         bash "${SCRIPT_DIR}/eval.sh" \
             "${task_name}" \
-            "${TASK_CONFIG}" \
-            "${POLICY_NAME}" \
-            "${ROBOTWIN_SEED:-0}" \
+            "${unit_mode}" \
+            "${unit_setting}" \
+            "${unit_seed}" \
             "${gpu_id}" \
             "${CKPT_PATH}" \
+            "${ROBOTWIN_ACTION_MODE}" \
             "${port}" \
             > >(tee "${eval_log}" | grep --line-buffered "Success rate" | sed -u "s/^/[RESULT] ${task_name}: /") 2>&1
     ) &
 
     launched_pid=$!
     ACTIVE_PIDS[$slot_idx]="${launched_pid}"
-    ACTIVE_TASKS[$slot_idx]="${task_name}"
+    ACTIVE_TASKS[$slot_idx]="${unit_spec}"
     ACTIVE_SERVER_LOGS[$slot_idx]="${server_log}"
     ACTIVE_EVAL_LOGS[$slot_idx]="${eval_log}"
+}
+
+launch_policy_servers() {
+    local gpu_id port server_log server_pid
+    export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+    export STARVLA_PYTHON ROBOTWIN_PYTHON
+    export ROBOTWIN_MAX_BATCH_SIZE="${JOBS_PER_GPU}"
+    export ROBOTWIN_MAX_WAIT_TIME="${ROBOTWIN_MAX_WAIT_TIME:-0.0}"
+
+    for gpu_id in "${CUDA_DEVICES[@]}"; do
+        port="${GPU_SERVER_PORTS[$gpu_id]}"
+        server_log="${LOG_DIR}/policy_server_gpu${gpu_id}_port${port}.log"
+        echo "[INFO] Launching persistent policy server gpu=${gpu_id} port=${port} batch<=${JOBS_PER_GPU}"
+        bash "${SCRIPT_DIR}/run_policy_server.sh" \
+            "${CKPT_PATH}" "${gpu_id}" "${port}" > "${server_log}" 2>&1 &
+        server_pid=$!
+        GPU_SERVER_PIDS[$gpu_id]="${server_pid}"
+        GPU_SERVER_LOGS[$gpu_id]="${server_log}"
+    done
+
+    for gpu_id in "${CUDA_DEVICES[@]}"; do
+        port="${GPU_SERVER_PORTS[$gpu_id]}"
+        server_pid="${GPU_SERVER_PIDS[$gpu_id]}"
+        server_log="${GPU_SERVER_LOGS[$gpu_id]}"
+        if ! wait_for_server "${port}" "${ROBOTWIN_SERVER_TIMEOUT:-600}"; then
+            echo "[ERROR] Policy server failed on gpu=${gpu_id}, port=${port}. See ${server_log}" >&2
+            return 1
+        fi
+        if ! kill -0 "${server_pid}" 2>/dev/null; then
+            echo "[ERROR] Policy server exited during startup on gpu=${gpu_id}. See ${server_log}" >&2
+            return 1
+        fi
+    done
 }
 
 # --- Argument parsing ---
@@ -406,11 +452,14 @@ launch_task_in_slot() {
 TASK_CONFIG=""
 POLICY_NAME=""
 CKPT_PATH=""
+ACTION_MODE=""
 opt_seed=""
 opt_trials=""
 opt_jobs=""
 opt_port=""
 opt_timeout=""
+opt_shard_index=""
+opt_shard_count=""
 opt_install=false
 
 while (( $# > 0 )); do
@@ -418,11 +467,14 @@ while (( $# > 0 )); do
         -m|--mode)          TASK_CONFIG="$2"; shift 2 ;;
         -n|--name)          POLICY_NAME="$2"; shift 2 ;;
         -c|--ckpt)          CKPT_PATH="$2"; shift 2 ;;
+        -a|--action-mode)   ACTION_MODE="$2"; shift 2 ;;
         -s|--seed)          opt_seed="$2"; shift 2 ;;
         -t|--num-trials)    opt_trials="$2"; shift 2 ;;
         -j|--jobs-per-gpu)  opt_jobs="$2"; shift 2 ;;
         -p|--base-port)     opt_port="$2"; shift 2 ;;
         --server-timeout)   opt_timeout="$2"; shift 2 ;;
+        --task-shard-index) opt_shard_index="$2"; shift 2 ;;
+        --task-shard-count) opt_shard_count="$2"; shift 2 ;;
         --install-deps)     opt_install=true; shift ;;
         -h|--help)          usage; exit 0 ;;
         -*)                 echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -430,9 +482,14 @@ while (( $# > 0 )); do
     esac
 done
 
-if [[ -z "${TASK_CONFIG}" || -z "${POLICY_NAME}" || -z "${CKPT_PATH}" ]]; then
-    echo "Missing required flags: -m/--mode, -n/--name, -c/--ckpt" >&2
+if [[ -z "${TASK_CONFIG}" || -z "${POLICY_NAME}" || -z "${CKPT_PATH}" || -z "${ACTION_MODE}" ]]; then
+    echo "Missing required flags: -m/--mode, -n/--name, -c/--ckpt, -a/--action-mode" >&2
     usage
+    exit 1
+fi
+
+if [[ "${ACTION_MODE}" != "abs" && "${ACTION_MODE}" != "delta" && "${ACTION_MODE}" != "rel" ]]; then
+    echo "Unsupported action mode: ${ACTION_MODE} (expected abs, delta, or rel)" >&2
     exit 1
 fi
 
@@ -457,6 +514,13 @@ ROBOTWIN_NUM_TRIALS="${opt_trials:-${ROBOTWIN_NUM_TRIALS:-100}}"
 ROBOTWIN_JOBS_PER_GPU="${opt_jobs:-${ROBOTWIN_JOBS_PER_GPU:-1}}"
 ROBOTWIN_BASE_PORT="${opt_port:-${ROBOTWIN_BASE_PORT:-5694}}"
 ROBOTWIN_SERVER_TIMEOUT="${opt_timeout:-${ROBOTWIN_SERVER_TIMEOUT:-600}}"
+ROBOTWIN_TASK_SHARD_INDEX="${opt_shard_index:-${ROBOTWIN_TASK_SHARD_INDEX:-0}}"
+ROBOTWIN_TASK_SHARD_COUNT="${opt_shard_count:-${ROBOTWIN_TASK_SHARD_COUNT:-1}}"
+ROBOTWIN_ACTION_MODE="${ACTION_MODE}"
+if (( ROBOTWIN_TASK_SHARD_COUNT < 1 || ROBOTWIN_TASK_SHARD_INDEX < 0 || ROBOTWIN_TASK_SHARD_INDEX >= ROBOTWIN_TASK_SHARD_COUNT )); then
+    echo "Invalid task shard ${ROBOTWIN_TASK_SHARD_INDEX}/${ROBOTWIN_TASK_SHARD_COUNT}" >&2
+    exit 1
+fi
 if ${opt_install}; then
     ROBOTWIN_AUTO_INSTALL_DEPS=1
 fi
@@ -469,7 +533,28 @@ export ROBOTWIN_NUM_TRIALS
 echo "[INFO] starvla python: ${STARVLA_PYTHON}"
 echo "[INFO] robotwin python: ${ROBOTWIN_PYTHON}"
 
-mapfile -t TASKS < <(resolve_tasks "$@")
+mapfile -t ALL_RESOLVED_TASKS < <(resolve_tasks "$@")
+TASKS=()
+for (( task_idx = 0; task_idx < ${#ALL_RESOLVED_TASKS[@]}; ++task_idx )); do
+    if (( task_idx % ROBOTWIN_TASK_SHARD_COUNT == ROBOTWIN_TASK_SHARD_INDEX )); then
+        TASKS+=("${ALL_RESOLVED_TASKS[$task_idx]}")
+    fi
+done
+if (( ${#TASKS[@]} == 0 )); then
+    echo "Task shard ${ROBOTWIN_TASK_SHARD_INDEX}/${ROBOTWIN_TASK_SHARD_COUNT} is empty" >&2
+    exit 1
+fi
+for unit_spec in "${TASKS[@]}"; do
+    IFS='@' read -r _unit_task _unit_mode _unit_seed <<< "${unit_spec}"
+    if [[ -n "${_unit_mode}" && "${_unit_mode}" != "demo_clean" && "${_unit_mode}" != "demo_randomized" ]]; then
+        echo "Unsupported mode in unit ${unit_spec}" >&2
+        exit 1
+    fi
+    if [[ -n "${_unit_seed}" && ! "${_unit_seed}" =~ ^[0-9]+$ ]]; then
+        echo "Unsupported seed in unit ${unit_spec}" >&2
+        exit 1
+    fi
+done
 mapfile -t CUDA_DEVICES < <(detect_cuda_devices)
 
 NUM_GPUS=${#CUDA_DEVICES[@]}
@@ -495,19 +580,27 @@ mkdir -p "${LOG_DIR}"
 
 next_port="${BASE_PORT}"
 for gpu_id in "${CUDA_DEVICES[@]}"; do
-    for (( slot_repeat = 0; slot_repeat < JOBS_PER_GPU; ++slot_repeat )); do
-        assigned_port="$(find_available_port "${next_port}")"
+    assigned_port="$(find_available_port "${next_port}")"
+    GPU_SERVER_PORTS[$gpu_id]="${assigned_port}"
+    next_port=$((assigned_port + 1))
+done
+# Interleave slots across GPUs. A task shard often has fewer tasks than the
+# maximum slot count; GPU-major ordering would then leave the last GPUs idle.
+for (( slot_repeat = 0; slot_repeat < JOBS_PER_GPU; ++slot_repeat )); do
+    for gpu_id in "${CUDA_DEVICES[@]}"; do
         SLOT_GPUS+=("${gpu_id}")
-        SLOT_PORTS+=("${assigned_port}")
-        next_port=$((assigned_port + 1))
+        SLOT_PORTS+=("${GPU_SERVER_PORTS[$gpu_id]}")
     done
 done
 
 echo "[INFO] mode=${TASK_CONFIG}  name=${POLICY_NAME}  seed=${ROBOTWIN_SEED}  trials_per_task=${ROBOTWIN_NUM_TRIALS}"
 echo "[INFO] ckpt=${CKPT_PATH}"
 echo "[INFO] logs=${LOG_DIR}"
-echo "[INFO] gpus=$(join_arr ',' "${CUDA_DEVICES[@]}")  jobs_per_gpu=${JOBS_PER_GPU}  slots=${TOTAL_SLOTS}"
+echo "[INFO] action_mode=${ROBOTWIN_ACTION_MODE} task_shard=${ROBOTWIN_TASK_SHARD_INDEX}/${ROBOTWIN_TASK_SHARD_COUNT}"
+echo "[INFO] gpus=$(join_arr ',' "${CUDA_DEVICES[@]}")  clients_per_gpu=${JOBS_PER_GPU}  slots=${TOTAL_SLOTS} persistent_servers=${NUM_GPUS}"
 echo "[INFO] tasks (${TOTAL_TASKS}): $(join_arr ', ' "${TASKS[@]}")"
+
+launch_policy_servers
 
 next_task_idx=0
 completed_tasks=0

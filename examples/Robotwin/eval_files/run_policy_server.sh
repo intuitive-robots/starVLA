@@ -25,8 +25,11 @@ echo "[INFO] Starting RoboTwin policy server"
 echo "[INFO] checkpoint: ${your_ckpt}"
 echo "[INFO] gpu: ${gpu_id}"
 echo "[INFO] port: ${port}"
+echo "[INFO] max batch size: ${ROBOTWIN_MAX_BATCH_SIZE:-1}"
 
 CUDA_VISIBLE_DEVICES="${gpu_id}" "${star_vla_python}" "${REPO_ROOT}/deployment/model_server/server_policy.py" \
     --ckpt_path "${your_ckpt}" \
     --port "${port}" \
+    --max_batch_size "${ROBOTWIN_MAX_BATCH_SIZE:-1}" \
+    --max_wait_time "${ROBOTWIN_MAX_WAIT_TIME:-0.0}" \
     "${use_bf16_flag[@]}"

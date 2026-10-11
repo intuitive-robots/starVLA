@@ -24,7 +24,9 @@ training — there is no second source of truth for normalization math.
 from __future__ import annotations
 
 import logging
+import inspect
 from typing import Any, Dict, List, Optional, Sequence
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -283,7 +285,51 @@ class PolicyNormProcessor:
         self._state_keys: List[str] = list(getattr(self._data_config, "state_keys", []))
 
         # 2) Build training-time transform pipeline.
-        transform = self._data_config.transform()
+        # Some data configs carry versioned transform choices in the checkpoint's
+        # datasets.vla_data block.  Pass it when supported so policy serving exactly
+        # matches training while old checkpoints (which omit the field) retain their
+        # historical behavior.
+        vla_data_cfg = (cfg.get("datasets") or {}).get("vla_data") or {}
+        if "state_normalization" not in vla_data_cfg:
+            # config.yaml is an accessed-keys snapshot and can drop keys read with .get();
+            # the training contract then lives only in config.full.yaml (q99 LIBERO runs).
+            full_yaml = Path(self._ckpt_path).parents[1] / "config.full.yaml"
+            if full_yaml.exists():
+                from omegaconf import OmegaConf
+
+                full_vla = ((OmegaConf.to_container(OmegaConf.load(full_yaml), resolve=False).get("datasets") or {})
+                            .get("vla_data") or {})
+                # Require the explicit marker: older q35_08 runs list q99 in config.full.yaml but
+                # were trained raw (the LIBERO registry config ignored the key until 2026-09-24).
+                if "state_normalization" in full_vla and full_vla.get("state_normalization_applied") is True:
+                    vla_data_cfg = {"state_normalization": full_vla["state_normalization"]}  # contract key only
+                    if full_vla.get("state_gripper_binary"):
+                        vla_data_cfg["state_gripper_binary"] = True
+                    logging.getLogger(__name__).warning(
+                        "state_normalization=%r taken from %s (missing from config.yaml)",
+                        full_vla["state_normalization"], full_yaml)
+        # The serving processor receives only state/action arrays. Passing the full
+        # training data config for legacy checkpoints also enables their video
+        # augmentation pipeline, which cannot be initialized from action/state-only
+        # dataset_statistics.json and is not used by this processor anyway. Only the
+        # explicit versioned state-normalization contract belongs here.
+        if (
+            "data_cfg" in inspect.signature(self._data_config.transform).parameters
+            and "state_normalization" in vla_data_cfg
+        ):
+            if "state_gripper_binary" not in vla_data_cfg:
+                # the binary-gripper key (2026-10-09) can likewise be missing from config.yaml
+                _fy = Path(self._ckpt_path).parents[1] / "config.full.yaml"
+                if _fy.exists():
+                    from omegaconf import OmegaConf
+
+                    _fv = ((OmegaConf.to_container(OmegaConf.load(_fy), resolve=False).get("datasets") or {})
+                           .get("vla_data") or {})
+                    if _fv.get("state_gripper_binary"):
+                        vla_data_cfg = dict(vla_data_cfg, state_gripper_binary=True)
+            transform = self._data_config.transform(data_cfg=vla_data_cfg)
+        else:
+            transform = self._data_config.transform()
         if not isinstance(transform, ComposedModalityTransform):
             transform = ComposedModalityTransform(transforms=[transform])
         self._transform = transform
@@ -393,4 +439,41 @@ class PolicyNormProcessor:
             if isinstance(v, torch.Tensor):
                 v = v.detach().cpu().numpy()
             parts.append(np.asarray(v))
+        return np.concatenate(parts, axis=-1)
+
+    def apply_state(self, raw_state: np.ndarray) -> np.ndarray:
+        """Normalize an environment state with the exact training transform.
+
+        The returned column order is ``data_config.state_keys``.  Clients should send
+        raw embodiment state in that same order; the model can then apply any purely
+        token-level permutation (for example left/right arm grouping) from its config.
+        """
+        raw_state = np.asarray(raw_state)
+        if raw_state.ndim == 1:
+            raw_state = raw_state[None, :]
+        if raw_state.ndim != 2:
+            raise ValueError(f"Expected state shape (D,) or (T, D); got {raw_state.shape}")
+
+        data: Dict[str, np.ndarray] = {}
+        cursor = 0
+        for full_key in self._state_keys:
+            dim_k = self._state_key_dims.get(full_key, 1)
+            data[full_key] = np.asarray(
+                raw_state[..., cursor : cursor + dim_k], dtype=np.float32
+            )
+            cursor += dim_k
+        if cursor != raw_state.shape[-1]:
+            raise ValueError(
+                f"Sum of per-key state dims ({cursor}) != raw state width "
+                f"({raw_state.shape[-1]}). state_keys={self._state_keys}, "
+                f"state_key_dims={self._state_key_dims}"
+            )
+
+        out = self._transform.apply(data)
+        parts: List[np.ndarray] = []
+        for full_key in self._state_keys:
+            value = out[full_key]
+            if isinstance(value, torch.Tensor):
+                value = value.detach().cpu().numpy()
+            parts.append(np.asarray(value))
         return np.concatenate(parts, axis=-1)

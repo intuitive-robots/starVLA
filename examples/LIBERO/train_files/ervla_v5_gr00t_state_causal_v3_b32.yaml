@@ -1,0 +1,177 @@
+# GR00T + causal parent + token-id state (bsz32, 30k) -- matched denominator
+#
+# Generated arm for the state-conditioned encoder-vs-causal grid (bsz 32, 30k steps).
+#
+# STATE: proprioception is normalised by the dataloader's q99 transform into [-1, 1],
+# quantised into 256 uniform bins, and mapped to tokenizer-specific Latin-free REAL-token
+# rows (`state_token_source: rare_real`) rather than decimal text or the old dead rows.
+# Bin b maps to the b-th selected row (ascending token id); on Qwen3-VL-2B the selected
+# range is 1277..17447. The mapping is injective and gives exactly 8 state tokens/sample.
+#
+# ThinkProprio Tab. 7 is the reason this matters: state injected late at the action head
+# performs identically to omitting state entirely; the gain appears only when token-form
+# state is routed through the backbone as an active query.
+#
+# RETRAIN 2026-09-20 with the FIXED state encoding.
+# The first generation of these arms used the dead reserved rows (state_token_source unset
+# -> "reserved"), where 256 bins collapse onto 7 near-identical embedding vectors. Measured
+# cost on plain LIBERO against a 95.0% healthy reference: causal 73.0% (-22pp), encoder
+# 30.1% (-65pp). The encoder suffers ~3x the damage because bidirectional attention
+# propagates the degenerate tokens to every position.
+#
+# This generation pins state_token_source: rare_real (real Latin-free token rows, 256/256
+# distinct, norm 1.48, pairwise distance 2.05). `trainable_bin_embedding:false` means those
+# rows train in the already-trainable shared language embedding table at the VLM LR.
+#
+# Batch: per_device 8 x 4 GPUs on ONE node = global 32, matching the first generation's
+# global batch while using a whole node per arm (~2x the steps/h of a pair job).
+#
+# trainable_bin_embedding: FALSE here, deliberately.
+#
+# These arms do NOT freeze the backbone -- freeze_modules covers only decoder-side modules,
+# and skip_decoder means those never execute, so embed_tokens is already trainable. The bin
+# rows therefore learn either way. Routing them through the separate state_bin_embed module
+# would instead cause two unintended differences from the v1 arms we are comparing against:
+#
+#   1. LEARNING RATE. state_bin_embed is a framework attribute, not part of
+#      qwen_vl_interface, so build_param_lr_groups sweeps it into the `base` group at
+#      2.5e-05 -- 2.5x the 1e-05 that embed_tokens gets. The bins would train faster than
+#      the table they were copied from, for no reason.
+#   2. STALE ROWS. The forward hook REPLACES the table's output at bin positions, so those
+#      embed_tokens rows receive no gradient and stay at initialisation forever. A
+#      checkpoint trained that way carries dead rows at those ids; loading it with
+#      trainable_bin_embedding false would silently fall back to them and produce garbage
+#      while loading cleanly -- exactly the silent-corruption pattern that cost us a day.
+#
+# The separate module remains necessary for LIT stage 1, which freezes qwen_vl_interface
+# entirely and therefore cannot train the bins any other way.
+datasets:
+  vla_data:
+    action_horizon: 8
+    action_type: delta_qpos
+    augmentation: crop_photometric
+    data_mix: libero_mixed
+    data_root_dir: /e/home/jusers/blank4/jupiter/datasets/lerobot_3_0/libero_lerobot
+    dataset_py: lerobot_datasets
+    drop_last: true
+    include_state: true
+    lerobot_version: v3.0
+    load_all_data_for_training: true
+    marigold_resume_batches_per_rank: 0
+    marigold_resume_steps: 0
+    num_workers: 8
+    pack_image_size:
+    - 224
+    - 224
+    per_device_batch_size: 8
+    persistent_workers: true
+    pin_memory: true
+    prefetch_factor: 4
+    seed: 42
+    sequential_step_sampling: false
+    video_backend: decord
+  vlm_data:
+    base_interval: 2
+    data_flatten: false
+    dataformat: llava_json
+    dataset_py: vlm_datasets
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    num_workers: 4
+    per_device_batch_size: 4
+    persistent_workers: true
+    pin_memory: true
+    prefetch_factor: 2
+framework:
+  action_model:
+    action_dim: 7
+    action_hidden_dim: 768
+    action_horizon: 8
+    action_model_type: DiT-B
+    add_pos_embed: true
+    diffusion_model_cfg:
+      cross_attention_dim: 2048
+      dropout: 0.1
+      final_dropout: true
+      interleave_self_attention: true
+      norm_type: ada_norm
+      num_layers: 12
+      output_dim: 768
+      positional_embeddings: null
+    future_action_window_size: 7
+    hidden_size: 768
+    max_seq_len: 1024
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    num_timestep_buckets: 1000
+    past_action_window_size: 0
+    repeated_diffusion_steps: 8
+    # State reaches the policy only through the eight pinned VLM token IDs.
+    state_dim: 0
+  choice_policy:
+    enabled: false
+    location: encoder
+    num_choices: 5
+  name: QwenGR00T
+  qwenvl:
+    attn_implementation: flash_attention_3
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3-VL-2B-Instruct
+    enc_dec: false
+    vl_hidden_dim: 2048
+  readout_tokens:
+    dropout: 0.0
+    enabled: false
+    ffn_dim: 0
+    num_heads: 8
+    num_layers: 2
+    num_tokens: 32
+  state_token_mode: reserved_ids
+  state_routing: token_only
+  state_num_bins: 256
+  state_token_source: rare_real
+  trainable_bin_embedding: false
+is_debug: false
+run_id: ervla_v5_gr00t_state_causal_b32
+run_root_dir: playground/Checkpoints
+seed: 42
+trainer:
+  eval_interval: 1000
+  freeze_modules: ''   # nothing frozen: Qwen3-VL ties lm_head to embed_tokens, so freezing lm_head would freeze the input embeddings and the state-bin rows too.
+  gradient_accumulation_steps: 1
+  # b8/device fits without activation recomputation; final 2x2-GPU smoke is the gate.
+  gradient_checkpointing: false
+  gradient_clipping: 1.0
+  learning_rate:
+    action_model: 0.0001
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+  logging_frequency: 100
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  lr_scheduler_type: cosine_with_min_lr
+  max_grad_norm: 1.0
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  optimizer:
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+    name: AdamW
+    weight_decay: 1.0e-08
+  save_interval: 5000
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  weight_decay: 0.0
+use_deepspeed: true
+version_id: '0.21'
+wandb_entity: niblank
+wandb_project: starvla_libero

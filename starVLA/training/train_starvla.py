@@ -437,6 +437,56 @@ def _estimated_resume_batches(cfg, completed_steps: int) -> int:
     return completed_steps * grad_accum + eval_batches
 
 
+def configure_pack_image_size(cfg, output_dir: Path) -> None:
+    """Version pack-time resizing without changing historical resumes.
+
+    Fresh LeRobot runs migrate the old intended ``image_size`` value (224 by
+    default) to the explicit ``pack_image_size`` contract. A resumed run uses
+    the value saved with that run; checkpoints predating this contract get an
+    explicit ``None`` and therefore keep their historical native-resolution
+    inputs.
+    """
+    data_cfg = cfg.datasets.vla_data
+    if getattr(data_cfg, "dataset_py", "") != "lerobot_datasets":
+        return
+
+    if bool(getattr(cfg.trainer, "is_resume", False)):
+        checkpoint_path, _ = _latest_model_checkpoint(output_dir / "checkpoints")
+        if checkpoint_path is not None:
+            saved_found = False
+            saved_size = None
+            for config_name in ("config.full.yaml", "config.yaml"):
+                config_path = output_dir / config_name
+                if not config_path.exists():
+                    continue
+                try:
+                    saved = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
+                    saved_vla = saved.get("datasets", {}).get("vla_data", {})
+                    if "pack_image_size" in saved_vla:
+                        saved_found = True
+                        saved_size = saved_vla["pack_image_size"]
+                        break
+                except (OSError, TypeError, ValueError) as exc:
+                    logger.warning("Could not inspect %s for image resize contract: %s", config_path, exc)
+
+            data_cfg.pack_image_size = saved_size if saved_found else None
+            logger.warning(
+                "Resume image contract: pack_image_size=%s loaded from the existing run "
+                "(missing means legacy native-resolution training).",
+                data_cfg.pack_image_size,
+            )
+            return
+
+    if "pack_image_size" not in data_cfg:
+        intended_size = data_cfg.get("image_size", [224, 224])
+        data_cfg.pack_image_size = intended_size
+        logger.info(
+            "Fresh LeRobot run: migrated intended image_size=%s to applied pack_image_size=%s.",
+            intended_size,
+            data_cfg.pack_image_size,
+        )
+
+
 def configure_dataloader_resume(cfg, output_dir: Path) -> None:
     """Populate VLA data config with deterministic resume controls before workers fork."""
     data_cfg = cfg.datasets.vla_data
@@ -446,6 +496,16 @@ def configure_dataloader_resume(cfg, output_dir: Path) -> None:
     data_cfg.marigold_resume_batches_per_rank = 0
     data_cfg.marigold_resume_steps = 0
 
+    if getattr(data_cfg, "dataset_py", "") == "m3_data_datasets":
+        # The m3 reader samples an infinite seeded stream; restarting it unchanged would replay the first segment's
+        # samples. The bridge shifts m3's sample_seed by the completed steps instead (fresh stream per segment).
+        data_cfg.m3_resume_steps = 0
+        if bool(getattr(cfg.trainer, "is_resume", False)):
+            _, completed_steps = _latest_model_checkpoint(output_dir / "checkpoints")
+            data_cfg.m3_resume_steps = int(completed_steps or 0)
+            logger.warning("[m3_data] resume at step %s: sample_seed shifted for a fresh sample stream",
+                           data_cfg.m3_resume_steps)
+        return
     if getattr(data_cfg, "dataset_py", "") != "marigold_data_datasets":
         return
     if not bool(getattr(cfg.trainer, "is_resume", False)):
@@ -606,6 +666,21 @@ class VLATrainer(TrainerUtils):
                 if self.accelerator.is_main_process:
                     logger.warning(f"Skipping dedicated Marigold open-loop eval dataset: {exc}")
                 self.vla_eval_dataset = None
+        elif dataset_py == "m3_data_datasets" and not self._should_skip_open_loop_eval():
+            # Built only when trainer.open_loop_eval is on, so runs that keep it off start exactly as
+            # before. Every rank enters (the processed m3 config is broadcast from rank 0); rank 0 alone
+            # later decodes the episodes, through the same marigold-style open-loop protocol.
+            from starVLA.dataloader.m3_data_datasets import get_m3_data_vla_dataset
+
+            try:
+                self.vla_eval_dataset = get_m3_data_vla_dataset(
+                    data_cfg=self.config.datasets.vla_data,
+                    mode="eval",
+                )
+            except (ValueError, RuntimeError, FileNotFoundError, KeyError) as exc:
+                if self.accelerator.is_main_process:
+                    logger.warning(f"Skipping dedicated m3 open-loop eval dataset: {exc}")
+                self.vla_eval_dataset = None
 
         self._init_wandb()
 
@@ -656,6 +731,10 @@ class VLATrainer(TrainerUtils):
                 "cot_keep_rate",
                 "train/state_keep_rate",
                 "state_keep_rate",
+                "train/vision_keep_rate",
+                "vision_keep_rate",
+                "train/vision_drop_rate",
+                "vision_drop_rate",
                 "eval/cot_loss",
                 "eval_cot_loss",
                 "eval/cot_coverage",
@@ -917,6 +996,7 @@ class VLATrainer(TrainerUtils):
             t_end_data = time.perf_counter()
 
             self._maybe_stage_decoder()
+            self._publish_train_step()
 
             t_start_model = time.perf_counter()
             step_metrics = self._train_step(batch_vla)
@@ -968,7 +1048,10 @@ class VLATrainer(TrainerUtils):
             step_metrics.update(self.memory_monitor.collect(self.completed_steps, self.vla_iter))
             self._log_metrics(step_metrics)
 
-            if self.completed_steps % self.config.trainer.save_interval == 0 and self.completed_steps > 0:
+            # The final step always gets a step checkpoint (evals load checkpoints/steps_N), also when save_interval
+            # does not divide max_train_steps; final_model is then a duplicate and off by default (2026-10-07 quota).
+            reached_end = self.completed_steps >= self.config.trainer.max_train_steps
+            if self.completed_steps > 0 and (self.completed_steps % self.config.trainer.save_interval == 0 or reached_end):
                 self._save_checkpoint()
 
             if self.completed_steps >= self.config.trainer.max_train_steps:
@@ -1479,6 +1562,19 @@ class VLATrainer(TrainerUtils):
             logger.info(f"[stage] step {self.completed_steps}: decoder {scope} "
                         f"{'FROZEN' if want_frozen else 'UNFROZEN'} ({n/1e6:.0f}M params)")
 
+    def _publish_train_step(self):
+        """Tell the framework which optimizer step it is about to take.
+
+        Scheduled image dropout is a curriculum over training, so the model has to know
+        the step. Nothing else in the framework needs it, and reading it from a stale
+        attribute would silently freeze the schedule at its start value -- which looks
+        exactly like a working permanently-blind arm -- so it is published every step,
+        unconditionally, next to the other staged schedules.
+        """
+        model = self.accelerator.unwrap_model(self.model)
+        if hasattr(model, "_modality_step"):
+            model._modality_step = int(self.completed_steps)
+
     def _decoder_blocks(self):
         """The causal decoder stack of the enc-dec backbone, or None."""
         model = self.accelerator.unwrap_model(self.model)
@@ -1694,6 +1790,27 @@ class VLATrainer(TrainerUtils):
             # take down a training run.
             logger.warning(f"encoder grad split unavailable: {exc}")
 
+    def _guard_nonfinite_loss(self, total_loss):
+        """Replace a non-finite loss (on any rank) with a zero-gradient loss.
+
+        Clipping cannot repair NaN gradients, and one NaN step corrupts the weights
+        for good (this killed every modality-z run). All ranks agree on the skip so
+        DeepSpeed collectives stay aligned; too many skips in a row abort the run.
+        """
+        bad = torch.tensor([0.0 if torch.isfinite(total_loss.detach()).all() else 1.0],
+                           device=total_loss.device)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(bad, op=dist.ReduceOp.MAX)
+        if bad.item() == 0.0:
+            self._nonfinite_streak = 0
+            return total_loss
+        self._nonfinite_skips = getattr(self, "_nonfinite_skips", 0) + 1
+        self._nonfinite_streak = getattr(self, "_nonfinite_streak", 0) + 1
+        logger.warning(f"__NONFINITE_LOSS__ skipped (total={self._nonfinite_skips}, streak={self._nonfinite_streak})")
+        if self._nonfinite_streak > 50:
+            raise RuntimeError("more than 50 consecutive non-finite losses; aborting instead of training on NaN")
+        return sum(p.sum() * 0.0 for p in self.model.parameters() if p.requires_grad)
+
     def _train_step(self, batch_vla, batch_vlm=None):
         """Execute single training step."""
         grad_accum = self.accelerator.gradient_accumulation_steps
@@ -1764,6 +1881,7 @@ class VLATrainer(TrainerUtils):
                     tied_dynamics_scale=tied_dynamics_scale,
                 )
 
+            total_loss = self._guard_nonfinite_loss(total_loss)
             self.accelerator.backward(total_loss / grad_accum)
 
             if self._ds_sync_gradients:
@@ -1838,6 +1956,15 @@ class VLATrainer(TrainerUtils):
             if state_keep_rate is not None:
                 metrics["train/state_keep_rate"] = float(state_keep_rate)
                 metrics["state_keep_rate"] = float(state_keep_rate)
+            # Scheduled image dropout. Without these two the only evidence an arm is not a
+            # silent copy of its control is a loss curve, which is not evidence. Both are
+            # reported: `drop` is what the schedule asked for, `keep` is what the batch
+            # actually got, and a persistent gap means protect_state is rescuing rows.
+            for key in ("vision_keep_rate", "vision_drop_rate"):
+                value = output_dict.get(key, None)
+                if value is not None:
+                    metrics[f"train/{key}"] = float(value)
+                    metrics[key] = float(value)
             return metrics
 
         with self.accelerator.accumulate(self.model):
@@ -1893,6 +2020,7 @@ class VLATrainer(TrainerUtils):
                     tied_dynamics_scale=tied_dynamics_scale,
                 )
 
+            total_loss = self._guard_nonfinite_loss(total_loss)
             self.accelerator.backward(total_loss)
 
             if self.config.trainer.gradient_clipping is not None:
@@ -1972,6 +2100,11 @@ class VLATrainer(TrainerUtils):
         if state_keep_rate is not None:
             metrics["train/state_keep_rate"] = float(state_keep_rate)
             metrics["state_keep_rate"] = float(state_keep_rate)
+        for key in ("vision_keep_rate", "vision_drop_rate"):
+            value = output_dict.get(key, None)
+            if value is not None:
+                metrics[f"train/{key}"] = float(value)
+                metrics[key] = float(value)
         return metrics
 
     def _finalize_training(self):
@@ -1986,7 +2119,7 @@ class VLATrainer(TrainerUtils):
             self.accelerator.wait_for_everyone()
             return
 
-        save_final_checkpoint = bool(getattr(self.config.trainer, "save_final_checkpoint", True))
+        save_final_checkpoint = bool(getattr(self.config.trainer, "save_final_checkpoint", False))
         if self.accelerator.is_main_process and save_final_checkpoint:
             save_format = getattr(self.config.trainer, "save_format", "pt")
             final_checkpoint = os.path.join(self.config.output_dir, "final_model")
@@ -2004,6 +2137,17 @@ class VLATrainer(TrainerUtils):
         elif self.accelerator.is_main_process:
             logger.info("Training complete. Final checkpoint disabled by config.")
 
+        # A finished run never resumes, so its full DeepSpeed/optimizer states (~42 GB each) only fill the
+        # quota; the weights checkpoints stay. trainer.delete_training_state_on_finish: false keeps them.
+        # Only after reaching max_train_steps; a time-limit stop returns above and keeps its state.
+        if (self.accelerator.is_main_process
+                and bool(getattr(self.config.trainer, "delete_training_state_on_finish", True))
+                and self.completed_steps >= self.config.trainer.max_train_steps):
+            for state_dir in sorted(Path(self.checkpoint_dir).glob("steps_*_training_state*")):
+                if state_dir.is_dir():
+                    shutil.rmtree(state_dir, ignore_errors=True)
+                    logger.info("Deleted full training state after completed training: %s", state_dir)
+
         if self.accelerator.is_main_process:
             wandb.finish()
 
@@ -2018,7 +2162,11 @@ def main(cfg, accelerator: Accelerator) -> None:
     log_eval_backend_banner(cfg, accelerator)
 
     output_dir = setup_directories(cfg=cfg)
+    configure_pack_image_size(cfg, output_dir)
     vla = build_framework(cfg)
+    from starVLA.training.trainer_utils.mem_profile import install_mem_profile
+
+    install_mem_profile(vla)  # no-op unless STARVLA_MEM_PROFILE=1
     configure_dataloader_resume(cfg, output_dir)
     vla_train_dataloader = prepare_data(cfg=cfg, accelerator=accelerator, output_dir=output_dir)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)

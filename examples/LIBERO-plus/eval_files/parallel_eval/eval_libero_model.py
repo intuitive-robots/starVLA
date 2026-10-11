@@ -34,6 +34,8 @@ if str(EVAL_FILES_DIR) not in sys.path:
     sys.path.insert(0, str(EVAL_FILES_DIR))
 
 from model2libero_interface import ModelClient
+import online_obj_mask  # default off (STARVLA_ONLINE_OBJ_MASK=1); see online_obj_mask.py
+import episode_trace  # default off (STARVLA_EPISODE_TRACE=<dir>); see episode_trace.py
 
 try:
     import draccus
@@ -86,6 +88,36 @@ class AdaptiveEnsembler:
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
+
+
+def _should_send_state(client_model) -> bool:
+    """Whether to attach proprioceptive state to each request.
+
+    The checkpoint already answers this: the policy server derives
+    ``expects_state`` from the checkpoint's explicit token and/or continuous state
+    pathways (see ``deployment/model_server/policy_wrapper.py``) and ships it in
+    the handshake, which ``ModelClient`` parses. Follow it.
+
+    This used to be gated solely on ``STARVLA_EVAL_INCLUDE_STATE``. On the
+    vanilla-LIBERO path nothing ever set it, so every state-trained checkpoint
+    was silently evaluated blind to proprioception; measured 2026-09-21 on
+    ervla_state_gr00t_*_v2 @30k, 800 episodes per cell, paired: the encoder arm
+    scored 91.9% without state and 98.1% with it (+14.0pp on libero_10 alone).
+    This path was not silently broken -- eval_libero_in_one.sh forwards the var --
+    but it defaulted it to "0", so the same wrong answer was one forgotten export
+    away.
+
+    The env var remains an explicit override in both directions ("1" forces state
+    on, "0" forces it off), so a state-trained model can still be deliberately
+    evaluated blind as an ablation. Unset or empty means "ask the checkpoint".
+
+    NOTE: the in-process ``PolicyModel`` path (``--use_server false``) exposes no
+    handshake, so it reports False here and needs the explicit "1" to send state.
+    """
+    override = os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "").strip()
+    if override:
+        return override == "1"
+    return bool(getattr(client_model, "expects_state", False))
 
 
 def _binarize_gripper(open_val: np.ndarray | float, encoding: str) -> np.ndarray:
@@ -293,6 +325,10 @@ class Args:
     # Exactly K indices floor(k * suite_size / K), k=0..K-1, filtered to this
     # worker's [start_idx,end_idx). Zero keeps the legacy stride behavior.
     exact_sample_count: int = 0
+    # Reuse completed episode records already staged in output_dir. A task is
+    # skipped only when a matching shard summary JSON also exists, so records
+    # from an interrupted shard can never disappear from the final aggregate.
+    skip_existing_episodes: bool = False
     # Round-robin sharding WITHIN [start_idx,end_idx): this worker evaluates
     # task_ids[shard_idx::num_shards] instead of a contiguous block of them.
     # Perturbation categories are large contiguous index blocks, and their cost
@@ -687,6 +723,15 @@ def eval_libero(args: Args) -> None:
     else:
         task_ids = list(range(args.start_idx, args.end_idx, args.stride))
         sample_tag = "" if args.stride == 1 else f"_stride{args.stride}"
+    ids_dir = os.environ.get("STARVLA_TASK_IDS_DIR", "").strip()
+    if ids_dir:
+        # Opt-in fixed task subset (e.g. a validated high-divergence subset): <dir>/<suite>.txt holds one
+        # task id per line (same ids as the *_episodes.jsonl records). Replaces the exact/stride selection;
+        # the tag keeps these shard files apart from full-protocol ones in the same output_dir.
+        ids_file = pathlib.Path(ids_dir) / f"{args.task_suite_name}.txt"
+        wanted = sorted({int(x) for x in ids_file.read_text().split() if x.strip()})
+        task_ids = [t for t in wanted if args.start_idx <= t < args.end_idx]
+        sample_tag = f"_ids{len(wanted)}"
     if args.num_shards > 1:
         if not 0 <= args.shard_idx < args.num_shards:
             raise ValueError(
@@ -701,6 +746,35 @@ def eval_libero(args: Args) -> None:
         # so an overlapping leftover file from a differently sharded earlier run
         # would otherwise be silently double-counted.
         sample_tag += f"_shard{args.shard_idx}of{args.num_shards}"
+    if args.skip_existing_episodes:
+        existing_log_path = pathlib.Path(args.output_dir) / "logs" / args.task_suite_name
+        completed_episodes: dict[int, set[int]] = {}
+        for summary_path in existing_log_path.glob("*.json"):
+            episode_path = summary_path.with_name(
+                summary_path.name[: -len(".json")] + "_episodes.jsonl"
+            )
+            if not episode_path.is_file():
+                continue
+            with episode_path.open(encoding="utf-8") as episode_file:
+                for line in episode_file:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    completed_episodes.setdefault(int(record["task_id"]), set()).add(
+                        int(record["episode_idx"])
+                    )
+        required_episode_ids = set(range(args.num_trials_per_task))
+        before_reuse = len(task_ids)
+        task_ids = [
+            task_id
+            for task_id in task_ids
+            if not required_episode_ids.issubset(completed_episodes.get(task_id, set()))
+        ]
+        print(
+            f"reused {before_reuse - len(task_ids)}/{before_reuse} assigned tasks from "
+            f"completed episode records in {existing_log_path}"
+        )
     print(
         f"processing {len(task_ids)} tasks from {args.start_idx} to {args.end_idx} "
         f"(stride={args.stride}, exact_sample_count={args.exact_sample_count}, "
@@ -757,6 +831,15 @@ def eval_libero(args: Args) -> None:
             use_bf16=args.use_bf16,
         )
 
+    # Resolved once from the handshake, not re-read per step.
+    send_state = _should_send_state(client_model)
+    logging.info(
+        "Proprioceptive state: %s (server expects_state=%s, STARVLA_EVAL_INCLUDE_STATE=%r)",
+        "SENT" if send_state else "withheld",
+        getattr(client_model, "expects_state", False),
+        os.environ.get("STARVLA_EVAL_INCLUDE_STATE", ""),
+    )
+
     # Resolve the gripper convention; a wrong choice inverts the gripper and the
     # policy can never grasp, so fail rather than guess silently.
     gripper_encoding = args.gripper_encoding
@@ -786,6 +869,39 @@ def eval_libero(args: Args) -> None:
 
     total_episodes, total_successes = 0, 0
     episode_records = []
+    # Opt-in per-episode checkpoint (STARVLA_PARTIAL_CKPT=1, host side APPTAINERENV_STARVLA_PARTIAL_CKPT=1):
+    # every finished episode is appended to <shard>_episodes.partial.jsonl; a restarted attempt of the
+    # SAME shard restores its counters and records from it and skips those tasks, then writes the usual
+    # summary JSON and episodes JSONL (same format, same totals) and removes the partial file. Default
+    # off: the shard summary is written only at the end, as before.
+    partial_path = pathlib.Path(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}_episodes.partial.jsonl")
+    partial_ckpt = os.environ.get("STARVLA_PARTIAL_CKPT", "0") == "1"
+    if partial_ckpt and partial_path.is_file():
+        restored = []
+        for line in partial_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                restored.append(json.loads(line))
+            except json.JSONDecodeError:
+                break  # a torn last line from the abort: drop it and everything after
+        done_eps: dict[int, set[int]] = {}
+        for rec in restored:
+            done_eps.setdefault(int(rec["task_id"]), set()).add(int(rec["episode_idx"]))
+        full = {t for t, e in done_eps.items() if set(range(args.num_trials_per_task)).issubset(e)}
+        restored = [rec for rec in restored if int(rec["task_id"]) in full and int(rec["task_id"]) in set(task_ids)]
+        for rec in restored:
+            episode_records.append(rec)
+            total_episodes += 1
+            total_successes += int(bool(rec["success"]))
+            disturb_res[rec["category"]]["total_count"] += 1
+            disturb_res[rec["category"]]["success_count"] += int(bool(rec["success"]))
+        task_ids = [t for t in task_ids if t not in full]
+        logger.info(f"PARTIAL CKPT: restored {len(restored)} episodes ({total_successes} successes) from {partial_path}")
+        partial_path.write_text("".join(json.dumps(rec) + "\n" for rec in restored), encoding="utf-8")
+    elif partial_ckpt:
+        partial_path.write_text("", encoding="utf-8")
     print(
         f"*****************num tasks in {args.task_suite_name}: {num_tasks_in_suite}****************, processing from{args.start_idx} to {args.end_idx}"
     )
@@ -816,6 +932,13 @@ def eval_libero(args: Args) -> None:
             # Reset environment
             client_model.reset(task_description=task_description)  # Reset the client connection
             env.reset()
+            obj_mask = None
+            if online_obj_mask.enabled():
+                if args.num_steps_wait < 1:
+                    raise ValueError("STARVLA_ONLINE_OBJ_MASK needs num_steps_wait >= 1")
+                obj_mask = online_obj_mask.OnlineObjectMask()
+                _resolved = obj_mask.reset(env, tag=f"{args.task_suite_name}_t{task_id:04d}_e{episode_idx}")
+                logger.info(f"Online object mask: objects of interest {json.dumps(_resolved, sort_keys=True)}")
 
             # Set initial states
             obs = env.set_init_state(initial_states[episode_idx])
@@ -823,6 +946,9 @@ def eval_libero(args: Args) -> None:
                 env, args.object_perturb_m, args.object_perturb_roles,
                 args.object_perturb_seed, args.task_suite_name, task_id, episode_idx,
             )
+            trace = None
+            if episode_trace.enabled():
+                trace = episode_trace.EpisodeTrace(env, perturbation["source_objects"], perturbation["target_objects"])
             # Avoid a second flattened-state restore: in the pinned
             # LIBERO/robosuite renderer it corrupts the offscreen camera and
             # produces black observations. Settling steps below refresh obs.
@@ -844,6 +970,8 @@ def eval_libero(args: Args) -> None:
                 # IMPORTANT: Do nothing for the first few timesteps because the simulator drops objects
                 # and we need to wait for them to fall
                 if t < args.num_steps_wait:
+                    if obj_mask is not None:  # segment only the frame that feeds the first query
+                        obj_mask.arm(t == args.num_steps_wait - 1)
                     obs, reward, done, info = env.step(LIBERO_DUMMY_ACTION)
                     t += 1
                     continue
@@ -892,8 +1020,16 @@ def eval_libero(args: Args) -> None:
                 example_dict = {
                     "image": [observation["observation.primary"][0], observation["observation.wrist_image"][0]],
                     "lang": observation["instruction"][0],
+                    # Stable key for deterministic server-side corruption after the
+                    # checkpoint's exact training-time state normalization.
+                    "_state_corrupt_key": (
+                        f"{args.task_suite_name}|{task_id}|{episode_idx}|{step}"
+                    ),
                 }
-                if os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "0") == "1":
+                if obj_mask is not None and step % client_model.action_chunk_size == 0:
+                    # [2, 8, 8] float16 task-object token fractions (agentview, wrist), policy orientation
+                    example_dict["_obj_tok"] = obj_mask(obs, step, images=[img, wrist_img])
+                if send_state:
                     if state.shape != (8,):
                         raise RuntimeError(f"expected 8-D LIBERO state, got {state.shape}")
                     example_dict["state"] = observation["observation.state"].astype(np.float32)
@@ -945,6 +1081,10 @@ def eval_libero(args: Args) -> None:
 
                 # __import__("ipdb").set_trace()
                 # see ../robosuite/controllers/controller_factory.py
+                if obj_mask is not None:
+                    obj_mask.arm((step + 1) % client_model.action_chunk_size == 0)
+                if trace is not None:
+                    trace.step(obs, delta_action)
                 obs, reward, done, info = env.step(delta_action.tolist())
                 if done:
                     task_successes += 1
@@ -968,6 +1108,14 @@ def eval_libero(args: Args) -> None:
                     fps=25,
                 )
 
+            if trace is not None:
+                trace.step(obs)  # final state, after the last action
+                trace.save(
+                    f"{args.task_suite_name}_t{task_id:05d}_e{episode_idx}",
+                    {"suite": args.task_suite_name, "task_id": task_id, "episode_idx": episode_idx,
+                     "success": bool(done), "category": ID2CATEGORY[task_id + 1][0], "task_name": task.name,
+                     "prompt": str(task_description), "task_language": task.language, "perturbation": perturbation},
+                )
             full_actions = np.stack(full_actions)
             # np.save(pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_episode{episode_idx}_{suffix}.npy", full_actions)
 
@@ -980,7 +1128,14 @@ def eval_libero(args: Args) -> None:
                 "category": ID2CATEGORY[task_id + 1][0],
                 "perturbation": perturbation, "initial_cot_text": initial_cot_text,
                 "paired_episode_seed": episode_seed if os.environ.get("STARVLA_PAIRED_ROLLOUT", "0") == "1" else None,
+                **({"obj_mask_resolved": obj_mask.resolved, "obj_mask_ms_per_query": 1e3 * obj_mask.seconds / max(obj_mask.calls, 1)}
+                   if obj_mask is not None else {}),
             })
+            if partial_ckpt:
+                with partial_path.open("a", encoding="utf-8") as pf:
+                    pf.write(json.dumps(episode_records[-1]) + "\n")
+                    pf.flush()
+                    os.fsync(pf.fileno())
             logger.info(f"# episodes completed so far: {total_episodes}")
             logger.info(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)")
 
@@ -992,8 +1147,15 @@ def eval_libero(args: Args) -> None:
     with open(os.path.join(log_path, f"{args.start_idx}_to_{args.end_idx}{sample_tag}_episodes.jsonl"), "w", encoding="utf-8") as f:
         for record in episode_records:
             f.write(json.dumps(record) + "\n")
+    if partial_ckpt and partial_path.is_file():
+        partial_path.unlink()  # the shard's summary and episodes JSONL above now hold every episode
     logger.info(f"Total success rate: {float(total_successes) / float(total_episodes)}")
     logger.info(f"Total episodes: {total_episodes}")
+
+
+_LPLUS_SUFFIX = re.compile(
+    r"( view( -?\d+)+ initstate \d+( noise \d+)?| add \d+| light \d+| table \d+| tb \d+|( moved)? level\d+ sample\d+)$"
+)
 
 
 def _get_libero_env(task, resolution, seed):
@@ -1005,14 +1167,46 @@ def _get_libero_env(task, resolution, seed):
         "camera_heights": resolution,
         "camera_widths": resolution,
     }
-    # NVIDIA EGL context creation can race across independent workers on the
-    # same node. Serialize only construction; rollouts remain fully parallel.
-    lock_path = os.environ.get("STARVLA_EGL_INIT_LOCK", "/tmp/starvla_egl_init.lock")
-    with open(lock_path, "w", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+    if online_obj_mask.enabled():
+        # Instance segmentation next to RGB; ControlEnv.step (Sensor Noise) stays in the loop.
+        env_args["camera_segmentations"] = "instance"
+    # Environment construction is NOT locked by default (2026-10-02). Every LIBERO-Plus episode builds a
+    # new environment, and the former node-wide lock serialised construction across all workers: ~60% of
+    # simulator time at 6 workers / GPU, and more workers only lengthened the queue. The EGL init faults
+    # the lock was added for were traced to bad nodes (config/libero_sim_node_blacklist.txt).
+    # Opt back in with STARVLA_EGL_INIT_LOCK = "node" (one node-wide lock), "per_gpu" (one lock per EGL
+    # device) or an explicit lock-file path.
+    lock_mode = os.environ.get("STARVLA_EGL_INIT_LOCK", "").strip()
+    if lock_mode.lower() in ("", "none", "off", "0"):
         env = OffScreenRenderEnv(**env_args)
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
+    else:
+        if lock_mode.lower() == "per_gpu":
+            lock_path = f"/tmp/starvla_egl_init_gpu{os.environ.get('MUJOCO_EGL_DEVICE_ID', 'x')}.lock"
+        elif lock_mode.lower() == "node":
+            lock_path = "/tmp/starvla_egl_init.lock"
+        else:
+            lock_path = lock_mode
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            env = OffScreenRenderEnv(**env_args)
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
     env.seed(seed)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
+    # task.language is built from the variant file name, so outside Language Instructions it carries the
+    # perturbation id (".. add 10", ".. level3 sample1", ".. view 0 0 100 2 352 initstate 0", ".. light 1";
+    # sylvestf/LIBERO-plus#64). Default off, so earlier results stay comparable.
+    #   STARVLA_LPLUS_PROMPT=strip  drop the suffix: gives exactly the training instruction for all 8,493
+    #                               non-language variants (checked 2026-10-04); language rewrites untouched
+    #   STARVLA_LPLUS_PROMPT=bddl   the instruction of the BDDL the scene is built from (capitalised)
+    prompt_mode = os.environ.get("STARVLA_LPLUS_PROMPT", "").strip().lower()
+    if prompt_mode == "strip":
+        task_description = _LPLUS_SUFFIX.sub("", task_description)
+    elif prompt_mode == "bddl":
+        bddl_lang = getattr(env, "language_instruction", None)
+        if isinstance(bddl_lang, (list, tuple)):
+            bddl_lang = " ".join(str(w) for w in bddl_lang)
+        if not bddl_lang:
+            raise RuntimeError(f"STARVLA_LPLUS_PROMPT=bddl but the env has no language_instruction ({task.name})")
+        task_description = str(bddl_lang)
     return env, task_description
 
 
@@ -1073,6 +1267,7 @@ def _parse_stdlib_args() -> Args:
     parser.add_argument("--end_idx", type=int, default=-1)
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--exact_sample_count", type=int, default=0)
+    parser.add_argument("--skip_existing_episodes", type=_parse_bool, default=False)
     parser.add_argument("--shard_idx", type=int, default=0)
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--output_dir", default="./output")

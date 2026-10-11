@@ -35,6 +35,13 @@ from libero.libero.envs import OffScreenRenderEnv
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from examples.LIBERO.eval_files.model2libero_interface import ModelClient
 
+# Shared with the LIBERO-Plus eval; default off (STARVLA_EPISODE_TRACE=<dir>).
+import importlib.util as _ilu
+_trace_spec = _ilu.spec_from_file_location(
+    "episode_trace", pathlib.Path(__file__).resolve().parents[3] / "LIBERO-plus" / "eval_files" / "episode_trace.py")
+episode_trace = _ilu.module_from_spec(_trace_spec)
+_trace_spec.loader.exec_module(episode_trace)
+
 # LIBERO's init-state files are pickled numpy arrays, but torch >= 2.6 defaults
 # torch.load(weights_only=True) and refuses them. The LIBERO-plus fork patches
 # its own benchmark/__init__.py; we patch torch.load here instead so the vanilla
@@ -63,6 +70,31 @@ MAX_STEPS = {
     "libero_10": 520,
     "libero_90": 400,
 }
+
+
+def _should_send_state(client_model) -> bool:
+    """Whether to attach proprioceptive state to each request.
+
+    The checkpoint already answers this: the policy server derives
+    ``expects_state`` from the checkpoint's explicit token and/or continuous state
+    pathways (see ``deployment/model_server/policy_wrapper.py``) and ships it in
+    the handshake, which the client parses. Follow it.
+
+    This used to be gated solely on ``STARVLA_EVAL_INCLUDE_STATE``, which nothing
+    on the vanilla-LIBERO path ever set -- so every state-trained checkpoint was
+    silently evaluated blind to proprioception while the server advertised
+    ``expects_state: True``. Measured 2026-09-21 on ervla_state_gr00t_*_v2 @30k,
+    800 episodes per cell, paired: the encoder arm scored 91.9% without state and
+    98.1% with it (+14.0pp on libero_10 alone), the causal arm 93.5% -> 95.6%.
+
+    The env var remains an explicit override in both directions ("1" forces state
+    on, "0" forces it off), so a state-trained model can still be deliberately
+    evaluated blind as an ablation. Unset or empty means "ask the checkpoint".
+    """
+    override = os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "").strip()
+    if override:
+        return override == "1"
+    return bool(getattr(client_model, "expects_state", False))
 
 
 def _binarize_gripper(open_val: np.ndarray | float, encoding: str) -> np.ndarray:
@@ -258,6 +290,10 @@ def _apply_object_perturbation(
     }
     if magnitude_m == 0:
         return record
+    if not selected and os.environ.get("STARVLA_PERTURB_SKIP_UNSUPPORTED", "0") == "1":
+        # Opt-in: tasks whose goal objects are fixtures (drawers, stoves) run unshifted and are marked.
+        record["skipped_no_movable"] = True
+        return record
     if not selected:
         raise RuntimeError(
             f"No movable goal objects resolved for roles={sorted(roles)} in "
@@ -292,6 +328,10 @@ def _apply_object_perturbation(
         )
 
     env.sim.forward()
+    if env.check_success() and os.environ.get("STARVLA_PERTURB_SKIP_UNSUPPORTED", "0") == "1":
+        # Opt-in: keep the shard alive; the episode is marked and excluded from the analysis.
+        record["accidentally_satisfied"] = True
+        return record
     if env.check_success():
         raise RuntimeError(
             f"Perturbation accidentally satisfied {suite} task={task_id} episode={episode_idx}; "
@@ -365,6 +405,15 @@ def eval_libero(args: Args) -> None:
 
     client_model = ModelClient(host=args.host, port=args.port, unnorm_key=args.unnorm_key)
 
+    # Resolved once from the handshake, not re-read per step.
+    send_state = _should_send_state(client_model)
+    logging.info(
+        "Proprioceptive state: %s (server expects_state=%s, STARVLA_EVAL_INCLUDE_STATE=%r)",
+        "SENT" if send_state else "withheld",
+        getattr(client_model, "expects_state", False),
+        os.environ.get("STARVLA_EVAL_INCLUDE_STATE", ""),
+    )
+
     # Resolve the gripper convention; a wrong choice inverts the gripper and the
     # policy can never grasp, so fail rather than guess silently.
     gripper_encoding = args.gripper_encoding
@@ -424,6 +473,10 @@ def eval_libero(args: Args) -> None:
             # images. The settling env.step() calls below refresh observations
             # from the already-forwarded, directly modified qpos state.
 
+            trace = None
+            if episode_trace.enabled():
+                trace = episode_trace.EpisodeTrace(env, perturbation["source_objects"], perturbation["target_objects"])
+
             t = 0
             step = 0
             done = False
@@ -456,8 +509,14 @@ def eval_libero(args: Args) -> None:
                 example_dict = {
                     "image": [img, wrist_img],
                     "lang": str(task_description),
+                    # Used only when the server enables a state intervention.  Keeping
+                    # this key stable makes shuffle/random paired and independent of
+                    # policy-server batching order.
+                    "_state_corrupt_key": (
+                        f"{args.task_suite_name}|{task_id}|{episode_idx}|{step}"
+                    ),
                 }
-                if os.environ.get("STARVLA_EVAL_INCLUDE_STATE", "0") == "1":
+                if send_state:
                     state = np.concatenate(
                         (
                             obs["robot0_eef_pos"],
@@ -501,6 +560,8 @@ def eval_libero(args: Args) -> None:
                     captured_policy_states.append(policy_state)
                     captured_actions.append(delta_action.astype(np.float32, copy=True))
 
+                if trace is not None:
+                    trace.step(obs, delta_action)
                 obs, reward, done, info = env.step(delta_action.tolist())
                 if done:
                     task_successes += 1
@@ -513,6 +574,15 @@ def eval_libero(args: Args) -> None:
             total_episodes += 1
 
             suffix = "success" if done else "failure"
+            if trace is not None:
+                trace.step(obs)  # final state, after the last action
+                trace.save(
+                    f"{args.task_suite_name}_t{task_id:05d}_e{episode_idx}",
+                    {"suite": args.task_suite_name, "task_id": task_id, "episode_idx": episode_idx,
+                     "success": bool(done), "category": "nominal", "task_name": str(task.name),
+                     "prompt": str(task_description), "task_language": str(task.language),
+                     "perturbation": perturbation},
+                )
             capture_record = None
             if done and args.capture_successful_dir:
                 capture_root = pathlib.Path(args.capture_successful_dir)
@@ -556,6 +626,7 @@ def eval_libero(args: Args) -> None:
                     "task_id": task_id,
                     "episode_idx": episode_idx,
                     "success": bool(done),
+                    "env_steps": int(t),  # simulator steps incl. num_steps_wait settling
                     "perturbation": perturbation,
                     "initial_cot_text": initial_cot_text,
                     "successful_trajectory_capture": capture_record,
@@ -609,13 +680,26 @@ def _get_libero_env(task, resolution, seed):
         "camera_heights": resolution,
         "camera_widths": resolution,
     }
-    # NVIDIA EGL context creation can race across independent workers on the
-    # same node. Serialize only construction; rollouts remain fully parallel.
-    lock_path = os.environ.get("STARVLA_EGL_INIT_LOCK", "/tmp/starvla_egl_init.lock")
-    with open(lock_path, "w", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+    # Environment construction is NOT locked by default (2026-10-02). Every episode builds a new
+    # environment, and the former node-wide lock serialised construction across all workers: ~60% of
+    # simulator time at 6 workers / GPU on LIBERO-Plus, and more workers only lengthened the queue. The
+    # EGL init faults the lock was added for were traced to bad nodes (config/libero_sim_node_blacklist.txt).
+    # Opt back in with STARVLA_EGL_INIT_LOCK = "node" (one node-wide lock), "per_gpu" (one lock per EGL
+    # device) or an explicit lock-file path.
+    lock_mode = os.environ.get("STARVLA_EGL_INIT_LOCK", "").strip()
+    if lock_mode.lower() in ("", "none", "off", "0"):
         env = OffScreenRenderEnv(**env_args)
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
+    else:
+        if lock_mode.lower() == "per_gpu":
+            lock_path = f"/tmp/starvla_egl_init_gpu{os.environ.get('MUJOCO_EGL_DEVICE_ID', 'x')}.lock"
+        elif lock_mode.lower() == "node":
+            lock_path = "/tmp/starvla_egl_init.lock"
+        else:
+            lock_path = lock_mode
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            env = OffScreenRenderEnv(**env_args)
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
     env.seed(seed)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
     return env, task_description
 

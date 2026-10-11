@@ -75,13 +75,17 @@ export object_perturb_seed="${object_perturb_seed:-20260812}"
 # === End of environment variable configuration ===
 ###########################################################################################
 
-task_suite_name="${1:-libero_goal}"
+# One suite name or a comma-separated list. Policy servers are initialized once
+# and reused across the list; loading them once per suite used to multiply the
+# several-minute cold-start cost by four for the standard `all` evaluation.
+task_suite_list="${1:-libero_goal}"
 num_gpus="${2:-4}"
 # 0 (default) = auto: size tasks_per_gpu from the suite's true length so this
 # partition's [start_idx,end_idx) covers exactly its 1/num_partitions share
 # (see suite_size lookup below). Pass a positive value to override.
-tasks_per_gpu="${3:-0}"
+tasks_per_gpu_override="${3:-0}"
 workers_per_gpu="${4:-1}"
+max_concurrent_workers_per_gpu="${max_concurrent_workers_per_gpu:-${workers_per_gpu}}"
 partition_idx="${5:-0}"
 num_trials_per_task="${6:-1}"
 gpu_ids_csv="${7:-}"
@@ -106,7 +110,13 @@ skip_aggregate="${SKIP_AGGREGATE:-false}"
 # libero_10 over 4 nodes, the node holding the Sensor Noise index band drew
 # 263 worker-minutes against 72 for the lightest node -- a 1.80x penalty on
 # total wall clock that no amount of within-node balancing can recover.
-interleave_shards="${STARVLA_INTERLEAVE_SHARDS:-1}"
+interleave_shards_requested="${STARVLA_INTERLEAVE_SHARDS:-1}"
+# chain_suites (default true): compute every suite's range/stride/shard mode first, then run ONE
+# eval_libero_in_one.sh whose workers do their share of all suites back to back (2 s launch stagger once, no
+# barrier per suite). Same episodes, shard ids and result files as the per-suite loop. Test 2026-10-07 (1 node,
+# 4 x 128 tasks): 13:32 vs 23:07, same 512 episodes, 72.7% vs 72.1% success, no failed shards. Not used with
+# STARVLA_ISOLATE_EXACT_TASKS=1. chain_suites=false restores the per-suite loop.
+chain_suites="${chain_suites:-true}"
 
 case "${LIBERO_PLUS_RUNTIME}" in
     auto)
@@ -213,84 +223,20 @@ else
     gpu_ids_csv=$(IFS=,; echo "${gpu_ids[*]}")
 fi
 
-case "${task_suite_name}" in
-    libero_10)
-        suite_size=2519
-        ;;
-    libero_goal)
-        suite_size=2591
-        ;;
-    libero_object)
-        suite_size=2518
-        ;;
-    libero_spatial)
-        suite_size=2402
-        ;;
-    *)
-        echo "[ERROR] Unknown LIBERO-plus task suite: ${task_suite_name}"
-        exit 1
-        ;;
-esac
+IFS=',' read -r -a task_suites <<< "${task_suite_list}"
+for task_suite_name in "${task_suites[@]}"; do
+    case "${task_suite_name}" in
+        libero_10|libero_goal|libero_object|libero_spatial) ;;
+        *)
+            echo "[ERROR] Unknown LIBERO-plus task suite: ${task_suite_name}"
+            exit 1
+            ;;
+    esac
+done
 
-if [ "${exact_tasks_per_suite}" -lt 0 ] || [ "${exact_tasks_per_suite}" -gt "${suite_size}" ]; then
-    echo "[ERROR] exact_tasks_per_suite must be in [0, ${suite_size}], got ${exact_tasks_per_suite}."
+if [ "${partition_idx}" -ge "${num_partitions}" ]; then
+    echo "[ERROR] Partition ${partition_idx} is outside num_partitions=${num_partitions}."
     exit 1
-fi
-
-# stride evaluates every stride'th task index instead of shrinking the range
-# to a prefix -- keeps suite_size (and therefore the GPU/partition split
-# below) spanning the FULL suite, so every category is still represented.
-stride=1
-if [ "${max_tasks_per_suite}" -gt 0 ] && [ "${max_tasks_per_suite}" -lt "${suite_size}" ]; then
-    stride=$((suite_size / max_tasks_per_suite))
-fi
-
-# The stride protocol's SAMPLE is defined by the contiguous shard layout: each
-# shard restarts the stride inside its own range, which is why max_tasks_per_suite=50
-# evaluates 64 instances per suite and not suite_size/stride = 51. Round-robin
-# sharding applies the stride once globally, so it would quietly evaluate 51
-# DIFFERENT instances (2 of 64 in common) and report them under the same protocol
-# name -- silently incomparable with the completed G/D/D-rand results. Exact-sample
-# mode has no such coupling (its index set is computed globally, so every layout
-# selects the same tasks), which is why it keeps round-robin.
-if [ "${stride}" -gt 1 ] && [ "${interleave_shards}" = "1" ]; then
-    echo "[WARN] max_tasks_per_suite=${max_tasks_per_suite} (stride=${stride}) pins the sample to the"
-    echo "       contiguous shard layout; forcing contiguous shards so the instance set stays"
-    echo "       comparable with earlier stride runs. Use exact_tasks_per_suite for a"
-    echo "       layout-independent sample that also gets round-robin load balancing."
-    interleave_shards=0
-fi
-# eval_libero_in_one.sh reads this from the environment; export it unconditionally
-# so the two scripts can never disagree about the layout.
-export STARVLA_INTERLEAVE_SHARDS="${interleave_shards}"
-
-# Auto-size tasks_per_gpu from the true suite length so num_partitions
-# partitions (nodes) cover the suite exactly once between them, each getting
-# ceil(suite_size / (num_partitions * num_gpus)) tasks per GPU.
-if [ "${tasks_per_gpu}" -le 0 ]; then
-    tasks_per_gpu=$(( (suite_size + num_partitions * num_gpus - 1) / (num_partitions * num_gpus) ))
-fi
-
-tasks_per_partition=$((num_gpus * tasks_per_gpu))
-if [ "${interleave_shards}" = "1" ]; then
-    # Whole suite to every node; the global shard stripe does the partitioning.
-    start_idx=0
-    end_idx=${suite_size}
-    if [ "${partition_idx}" -ge "${num_partitions}" ]; then
-        echo "[ERROR] Partition ${partition_idx} is outside num_partitions=${num_partitions}."
-        exit 1
-    fi
-else
-    start_idx=$((partition_idx * tasks_per_partition))
-    end_idx=$((start_idx + tasks_per_partition))
-    if [ "${end_idx}" -gt "${suite_size}" ]; then
-        end_idx=${suite_size}
-    fi
-
-    if [ "${start_idx}" -ge "${suite_size}" ]; then
-        echo "[ERROR] Partition ${partition_idx} starts at ${start_idx}, beyond suite size ${suite_size}."
-        exit 1
-    fi
 fi
 
 num_servers=$((num_gpus * servers_per_gpu))
@@ -298,7 +244,7 @@ num_servers=$((num_gpus * servers_per_gpu))
 echo "=========================================="
 echo " LIBERO-plus Auto Eval"
 echo "=========================================="
-echo " Suite            : ${task_suite_name}"
+echo " Suites           : ${task_suites[*]}"
 echo " Checkpoint       : ${your_ckpt}"
 echo " Output dir       : ${output_dir}"
 echo " Conda env        : ${LIBERO_PLUS_CONDA_ENV}"
@@ -308,25 +254,14 @@ if [ "${LIBERO_PLUS_RUNTIME}" = apptainer ]; then
     echo " Simulator image  : ${LIBERO_PLUS_SIF}"
 fi
 echo " GPUs             : ${gpu_ids_csv}"
-echo " Tasks / GPU      : ${tasks_per_gpu}"
 echo " Workers / GPU    : ${workers_per_gpu}"
+echo " Live sims / GPU  : ${max_concurrent_workers_per_gpu}"
 echo " Servers / GPU    : ${servers_per_gpu}  (total servers: ${num_servers}, ports ${base_port}..$((base_port + num_servers - 1)))"
 echo " Clients / server : $(( (workers_per_gpu + servers_per_gpu - 1) / servers_per_gpu ))  (upper bound on in-flight requests per server)"
 echo " Max batch size   : ${max_batch_size}  (ceiling; max_wait_time=${max_wait_time}s)"
 echo " Object perturb   : ${object_perturb_m}m roles=${object_perturb_roles} seed=${object_perturb_seed}"
 echo " Partition index  : ${partition_idx} / ${num_partitions}"
 echo " Trials / task    : ${num_trials_per_task}"
-if [ "${interleave_shards}" = "1" ]; then
-    echo " Shard mode       : round-robin, global stripe ${partition_idx} of ${num_partitions} node(s)"
-else
-    echo " Shard mode       : contiguous per-node blocks"
-fi
-if [ "${exact_tasks_per_suite}" -gt 0 ]; then
-    echo " Task range       : [${start_idx}, ${end_idx}) of ${suite_size}  (raw partition range)"
-    echo " Exact global sample: ${exact_tasks_per_suite} evenly spaced tasks/suite"
-else
-    echo " Task range       : [${start_idx}, ${end_idx}) of ${suite_size}  (stride=${stride}, ~$(( (end_idx - start_idx + stride - 1) / stride )) tasks evaluated)"
-fi
 echo " Server host      : ${server_host}"
 echo " Base port        : ${base_port}"
 echo "=========================================="
@@ -334,6 +269,11 @@ echo "=========================================="
 if [ "${workers_per_gpu}" -lt "${servers_per_gpu}" ]; then
     echo "[WARN] workers_per_gpu=${workers_per_gpu} < servers_per_gpu=${servers_per_gpu}: some servers will idle."
 fi
+if [ "${max_concurrent_workers_per_gpu}" -lt 1 ] || [ "${max_concurrent_workers_per_gpu}" -gt "${workers_per_gpu}" ]; then
+    echo "[ERROR] max_concurrent_workers_per_gpu must be in [1, ${workers_per_gpu}], got ${max_concurrent_workers_per_gpu}."
+    exit 1
+fi
+export max_concurrent_workers_per_gpu
 
 server_log_dir="${output_dir}/server_logs"
 mkdir -p "${server_log_dir}"
@@ -372,28 +312,103 @@ for ((i=0; i<num_servers; i++)); do
     fi
 done
 
-bash "${SCRIPT_PATH}" \
-    "${task_suite_name}" \
-    "${start_idx}" \
-    "${end_idx}" \
-    "${num_gpus}" \
-    "${tasks_per_gpu}" \
-    "${workers_per_gpu}" \
-    "${num_trials_per_task}" \
-    "${gpu_ids_csv}" \
-    "${base_port}" \
-    "${server_host}" \
-    "true" \
-    "${servers_per_gpu}" \
-    "${stride}" \
-    "${exact_tasks_per_suite}" \
-    "${partition_idx}" \
-    "${num_partitions}"
+run_suite() {
+    local task_suite_name="$1"
+    local suite_size
+    local stride=1
+    local interleave_shards="${interleave_shards_requested}"
+    local tasks_per_gpu="${tasks_per_gpu_override}"
+    local tasks_per_partition start_idx end_idx
 
-if [ "${skip_aggregate}" != "true" ]; then
-    # Suite-scoped (writes <output_dir>/<suite>/overall_results.json), not the
-    # shared combined file -- so aggregating one suite can never race with or
-    # overwrite another suite's results. Combine explicitly across suites with:
-    #   python examples/LIBERO-plus/eval_files/parallel_eval/aggregate_results.py --root_path <output_dir>
-    python "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${task_suite_name}"
+    case "${task_suite_name}" in
+        libero_10) suite_size=2519 ;;
+        libero_goal) suite_size=2591 ;;
+        libero_object) suite_size=2518 ;;
+        libero_spatial) suite_size=2402 ;;
+    esac
+
+    if [ "${exact_tasks_per_suite}" -lt 0 ] || [ "${exact_tasks_per_suite}" -gt "${suite_size}" ]; then
+        echo "[ERROR] exact_tasks_per_suite must be in [0, ${suite_size}], got ${exact_tasks_per_suite}."
+        return 1
+    fi
+
+    # A strided legacy sample is shard-layout-dependent. Exact sampling is not.
+    if [ "${max_tasks_per_suite}" -gt 0 ] && [ "${max_tasks_per_suite}" -lt "${suite_size}" ]; then
+        stride=$((suite_size / max_tasks_per_suite))
+    fi
+    if [ "${stride}" -gt 1 ] && [ "${interleave_shards}" = "1" ]; then
+        echo "[WARN] max_tasks_per_suite=${max_tasks_per_suite} (stride=${stride}) forces contiguous shards"
+        echo "       to preserve the established sample; prefer exact_tasks_per_suite."
+        interleave_shards=0
+    fi
+    export STARVLA_INTERLEAVE_SHARDS="${interleave_shards}"
+
+    if [ "${tasks_per_gpu}" -le 0 ]; then
+        tasks_per_gpu=$(( (suite_size + num_partitions * num_gpus - 1) / (num_partitions * num_gpus) ))
+    fi
+    tasks_per_partition=$((num_gpus * tasks_per_gpu))
+    if [ "${interleave_shards}" = "1" ]; then
+        start_idx=0
+        end_idx=${suite_size}
+    else
+        start_idx=$((partition_idx * tasks_per_partition))
+        end_idx=$((start_idx + tasks_per_partition))
+        [ "${end_idx}" -gt "${suite_size}" ] && end_idx=${suite_size}
+        if [ "${start_idx}" -ge "${suite_size}" ]; then
+            echo "[ERROR] Partition ${partition_idx} starts at ${start_idx}, beyond ${task_suite_name} size ${suite_size}."
+            return 1
+        fi
+    fi
+
+    echo ""
+    echo "############################################"
+    echo "# Suite ${task_suite_name}: range [${start_idx}, ${end_idx}), size=${suite_size}, tasks/GPU=${tasks_per_gpu}"
+    if [ "${exact_tasks_per_suite}" -gt 0 ]; then
+        echo "# Exact global sample: ${exact_tasks_per_suite}; shard mode=${interleave_shards}"
+    else
+        echo "# Stride=${stride}; shard mode=${interleave_shards}"
+    fi
+    echo "############################################"
+
+    if [ "${chain_collect:-0}" = 1 ]; then
+        chain_specs+=("${task_suite_name}:${start_idx}:${end_idx}:${stride}:${interleave_shards}")
+        return 0
+    fi
+
+    bash "${SCRIPT_PATH}" \
+        "${task_suite_name}" "${start_idx}" "${end_idx}" "${num_gpus}" \
+        "${tasks_per_gpu}" "${workers_per_gpu}" "${num_trials_per_task}" \
+        "${gpu_ids_csv}" "${base_port}" "${server_host}" "true" \
+        "${servers_per_gpu}" "${stride}" "${exact_tasks_per_suite}" \
+        "${partition_idx}" "${num_partitions}"
+
+    if [ "${skip_aggregate}" != "true" ]; then
+        python "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${task_suite_name}"
+    fi
+}
+
+if [ "${chain_suites}" = "true" ] && [ "${STARVLA_ISOLATE_EXACT_TASKS:-0}" != "1" ] && [ "${#task_suites[@]}" -gt 1 ]; then
+    chain_specs=()
+    chain_collect=1
+    for task_suite_name in "${task_suites[@]}"; do
+        run_suite "${task_suite_name}"
+    done
+    chain_collect=0
+    echo "Chaining suites in one worker launch: ${chain_specs[*]}"
+    IFS=':' read -r c_suite c_start c_end c_stride c_il <<< "${chain_specs[0]}"
+    STARVLA_CHAIN_SPECS="$(IFS=';'; echo "${chain_specs[*]}")" bash "${SCRIPT_PATH}" \
+        "${c_suite}" "${c_start}" "${c_end}" "${num_gpus}" \
+        0 "${workers_per_gpu}" "${num_trials_per_task}" \
+        "${gpu_ids_csv}" "${base_port}" "${server_host}" "true" \
+        "${servers_per_gpu}" "${c_stride}" "${exact_tasks_per_suite}" \
+        "${partition_idx}" "${num_partitions}"
+    if [ "${skip_aggregate}" != "true" ]; then
+        for task_suite_name in "${task_suites[@]}"; do
+            python "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${task_suite_name}"
+        done
+    fi
+else
+    for task_suite_name in "${task_suites[@]}"; do
+        run_suite "${task_suite_name}"
+    done
 fi

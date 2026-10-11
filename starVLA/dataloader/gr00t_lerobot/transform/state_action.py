@@ -632,3 +632,25 @@ class StateActionSinCosTransform(ModalityTransform):
             cos_state = torch.cos(state)
             data[key] = torch.cat([sin_state, cos_state], dim=-1)
         return data
+
+
+class StateBinarize(ModalityTransform):
+    """Snap normalised state keys to -1 / +1 at ``threshold`` (2026-10-09, LIBERO binary gripper).
+
+    Applied after q99 state normalisation, where the training q01 / q99 map to -1 / +1, so threshold 0 is the
+    midpoint (open vs closed for the LIBERO finger joints). Not invertible; state is never unapplied.
+    """
+
+    threshold: float = Field(default=0.0, description="Values above become +1, the rest -1.")
+
+    def apply(self, data: dict[str, Any]) -> dict[str, Any]:
+        for key in self.apply_to:
+            if key not in data:
+                continue
+            v = data[key]
+            if isinstance(v, torch.Tensor):
+                data[key] = torch.where(v > self.threshold, torch.ones_like(v), -torch.ones_like(v))
+            else:
+                v = np.asarray(v)
+                data[key] = np.where(v > self.threshold, 1.0, -1.0).astype(v.dtype if v.dtype.kind == "f" else np.float32)
+        return data

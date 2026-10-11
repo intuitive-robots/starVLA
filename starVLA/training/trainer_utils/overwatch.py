@@ -146,4 +146,9 @@ class PureOverwatch:
 
 
 def initialize_overwatch(name: str) -> Union[DistributedOverwatch, PureOverwatch]:
+    # DataLoader workers started from a forkserver re-import the trainer's __main__, which reaches this at import
+    # time; a DistributedOverwatch there builds accelerate's PartialState, i.e. a DeepSpeed process group and a CUDA
+    # context per worker. The m3_data loader marks its forkserver (starVLA.dataloader._start_forkserver_without_gpus).
+    if os.environ.get("STARVLA_DATALOADER_WORKER") == "1":
+        return PureOverwatch(name)
     return DistributedOverwatch(name) if int(os.environ.get("WORLD_SIZE", -1)) != -1 else PureOverwatch(name)

@@ -272,3 +272,104 @@ class CoTVideoAugment(ModalityTransform):
             offset += n
         data["_cot_conversation"] = conversation
         return data
+
+
+def _rotate_points(px, py, *, left, top, crop_width, crop_height, width, height, angle_degrees):
+    """Pixel coordinates through crop -> resize -> centred rotation (same convention as
+    _rewrite_coordinate_text)."""
+    a = math.radians(angle_degrees)
+    cos_a, sin_a = math.cos(a), math.sin(a)
+    px = width * (px - left) / crop_width
+    py = height * (py - top) / crop_height
+    dx, dy = px - width / 2.0, py - height / 2.0
+    return cos_a * dx + sin_a * dy + width / 2.0, -sin_a * dx + cos_a * dy + height / 2.0
+
+
+def augment_label_mask(mask: np.ndarray, *, top, left, crop_height, crop_width, height, width,
+                       angle_degrees) -> np.ndarray:
+    """Apply the image geometry to a [h, w] uint8 label map stored at a lower resolution (h divides height).
+    Labels are upsampled by replication, cropped / resized / rotated with nearest-neighbour (no blending,
+    no colour jitter, fill 0 = rest), then pooled back with max over each block (labels are priority-ordered,
+    so a small object keeps its cells)."""
+    h, w = mask.shape
+    fy, fx = height // h, width // w
+    big = Image.fromarray(np.kron(mask, np.ones((fy, fx), np.uint8)))
+    big = TF.rotate(
+        TF.resize(TF.crop(big, top, left, crop_height, crop_width), [height, width],
+                  interpolation=TF.InterpolationMode.NEAREST),
+        angle_degrees, interpolation=TF.InterpolationMode.NEAREST, fill=0)
+    return np.asarray(big, np.uint8).reshape(h, fy, w, fx).max(axis=(1, 3))
+
+
+def augment_boxes(boxes: np.ndarray, **geom) -> np.ndarray:
+    """[..., 4] xyxy in [0, 1] (-1 = absent) through the image geometry: axis-aligned box of the four moved
+    corners, clipped to [0, 1]; boxes that leave the frame entirely become -1."""
+    out = np.array(boxes, np.float32, copy=True)
+    flat = out.reshape(-1, 4)
+    W, H = geom["width"], geom["height"]
+    for i, b in enumerate(flat):
+        if b[0] < 0:
+            continue
+        xs = np.array([b[0], b[2], b[0], b[2]]) * W
+        ys = np.array([b[1], b[1], b[3], b[3]]) * H
+        rx, ry = _rotate_points(xs, ys, **geom)
+        nb = np.array([rx.min() / W, ry.min() / H, rx.max() / W, ry.max() / H])
+        nb = np.clip(nb, 0.0, 1.0)
+        flat[i] = nb if (nb[2] > nb[0] and nb[3] > nb[1]) else -1.0
+    return out
+
+
+class AnnotVideoAugment(ModalityTransform):
+    """Worker-side joint transform for runs with simulator annotations (2026-10-03).
+
+    Same recipe and parameters as the LIBERO ``crop_photometric`` augmentation (0.95 crop, resize back,
+    rotation in [-5, 5] deg, brightness / contrast / saturation jitter 0.3 / 0.4 / 0.5 shared across views),
+    with ONE sampled crop and angle applied to every camera image and to ``data["_annot"]``: its label masks
+    (``mask`` [n_cams, h, w], nearest-neighbour, no jitter) and 2D boxes (``box2d`` [n_cams, slots, 4]).
+    3D boxes / poses are in the robot frame and stay as they are."""
+
+    mode: str = Field(default="crop_photometric", description="photometric or crop_photometric")
+    crop_scale: float = Field(default=0.95, gt=0.0, le=1.0)
+
+    def apply(self, data: dict) -> dict:
+        if not self.training:
+            return data
+        keys = [key for key in self.apply_to if key in data]
+        if not keys:
+            return data
+        shapes, counts, frames = {}, {}, []
+        for key in keys:
+            value = np.asarray(data[key])
+            if value.ndim != 4 or value.shape[-1] not in (1, 3, 4):
+                raise ValueError(f"{key} must be [T,H,W,C] before augmentation, got {value.shape}")
+            shapes[key] = value.shape
+            counts[key] = value.shape[0]
+            frames.extend(Image.fromarray(frame) for frame in value)
+        width, height = frames[0].size
+        crop = angle = None
+        if self.mode == "crop_photometric":
+            ch, cw = int(height * self.crop_scale), int(width * self.crop_scale)
+            top = int(torch.randint(0, height - ch + 1, ()).item())
+            left = int(torch.randint(0, width - cw + 1, ()).item())
+            angle = float(torch.empty(()).uniform_(-5.0, 5.0).item())
+            crop = (top, left, ch, cw)
+        aug_frames, _ = augment_cot_sample(frames, None, mode=self.mode, crop_scale=self.crop_scale,
+                                           crop=crop, angle_degrees=angle)
+        offset = 0
+        for key in keys:
+            n = counts[key]
+            dtype = np.asarray(data[key]).dtype
+            data[key] = np.stack([np.asarray(f, dtype=dtype) for f in aug_frames[offset:offset + n]], 0)
+            assert data[key].shape == shapes[key], (data[key].shape, shapes[key])
+            offset += n
+        ann = data.get("_annot")
+        if crop is not None and ann is not None:
+            top, left, ch, cw = crop
+            geom = dict(top=top, left=left, crop_height=ch, crop_width=cw, height=height, width=width,
+                        angle_degrees=angle)
+            ann = dict(ann)
+            ann["mask"] = np.stack([augment_label_mask(m, **geom) for m in ann["mask"]], 0)
+            ann["box2d"] = augment_boxes(ann["box2d"], left=left, top=top, crop_width=cw, crop_height=ch,
+                                         width=width, height=height, angle_degrees=angle)
+            data["_annot"] = ann
+        return data

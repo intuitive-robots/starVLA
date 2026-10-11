@@ -24,6 +24,7 @@ def main(args) -> None:
         use_bf16=args.use_bf16,
         is_inference=True,
         cot_max_new_tokens=args.cot_max_new_tokens,
+        attn_implementation=args.attn_implementation,
     )
 
     hostname = socket.gethostname()
@@ -49,6 +50,13 @@ def build_argparser():
     parser.add_argument("--ckpt_path", type=str, default="Qwen/Qwen2.5-VL-3B-Instruct")
     parser.add_argument("--port", type=int, default=10093)
     parser.add_argument("--use_bf16", action="store_true")
+    parser.add_argument(
+        "--attn_implementation",
+        type=str,
+        default=os.environ.get("STARVLA_ATTN_IMPLEMENTATION"),
+        help="Inference-only attention backend override; may also be set with "
+        "STARVLA_ATTN_IMPLEMENTATION.",
+    )
     parser.add_argument("--idle_timeout", type=int, default=1800, help="Idle timeout in seconds, -1 means never close")
     parser.add_argument(
         "--cot_max_new_tokens",

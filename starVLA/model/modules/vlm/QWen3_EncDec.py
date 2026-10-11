@@ -38,6 +38,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+from starVLA.model._init_flags import skip_redundant_init
 from starVLA.training.trainer_utils import initialize_overwatch
 
 from .QWen3 import _QWen3_VL_Interface
@@ -92,6 +93,37 @@ def build_encoder_mlm_template(mask_token: str, fields=DEFAULT_ENCODER_MLM_FIELD
     for name, slots in fields:
         lines.append(f"<{name}>{mask_token * int(slots)}</{name}>")
     return "\n".join(lines)
+
+
+def _checkpoint_block_forwards(blocks) -> int:
+    """Activation checkpointing per block (framework.qwenvl.enable_gradient_checkpointing).
+
+    Wraps each block's own forward, not __call__, so forward hooks and pre-hooks on the
+    blocks (fusion registers, future copies, M3, layer capture) run once in the forward and
+    are not replayed during the backward recompute. Off under no_grad (EMA passes, inference).
+    """
+    from torch.utils.checkpoint import checkpoint
+
+    n = 0
+    for block in blocks:
+        if getattr(block, "_starvla_ckpt", False):
+            continue
+        def forward(*args, _orig=block.forward, _block=block, **kwargs):
+            # Not `_block.training`: the pretrained VLM stays in eval mode during training (from_pretrained returns
+            # eval() and the trainer only calls .train() after an open-loop eval), so gating on it never
+            # checkpointed (allocation 2189367). Qwen has no dropout, so eval vs train mode changes nothing else.
+            use = torch.is_grad_enabled()
+            if os.environ.get("STARVLA_CKPT_DEBUG") == "1" and not getattr(_block, "_ckpt_logged", False):
+                _block._ckpt_logged = True
+                print(f"[ckpt] {type(_block).__name__} training={_block.training} grad={torch.is_grad_enabled()} "
+                      f"checkpointed={use}", flush=True)
+            if use:
+                return checkpoint(_orig, *args, use_reentrant=False, **kwargs)
+            return _orig(*args, **kwargs)
+        block.forward = forward
+        block._starvla_ckpt = True
+        n += 1
+    return n
 
 
 class _StopAfterEncoder(Exception):
@@ -168,6 +200,14 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         )
 
         ckpt = qcfg.get("encdec_ckpt", None)
+        if ckpt and skip_redundant_init():
+            # Inference: baseframework.from_pretrained loads the fine-tuned
+            # checkpoint with strict=True, so every tensor this would write is
+            # overwritten anyway. Skipping saves 7.2 GB of reads and 934
+            # load_state_dict copies per policy server. STARVLA_FULL_INIT=1
+            # restores the full path.
+            logger.info(f"enc-dec ckpt {ckpt}: SKIPPED (inference; overwritten by the strict checkpoint load)")
+            ckpt = None
         if ckpt:
             from pathlib import Path
 
@@ -245,6 +285,18 @@ class _QWen3_EncDec_Interface(_QWen3_VL_Interface):
         lm_ = self._text_model()
         encoder_blocks = self._encoder_blocks(lm_)
         self.num_encoder_feature_layers = len(encoder_blocks)
+        if bool(qcfg.get("enable_gradient_checkpointing", False)):
+            visual = getattr(self.model.model, "visual", None)
+            groups = {"encoder": encoder_blocks, "decoder": self._decoder_blocks(lm_),
+                      "vision": list(getattr(visual, "blocks", []) or [])}
+            # gradient_checkpointing_scope: comma list of encoder / decoder / vision (default all): checkpointing only
+            # the vision tower recomputes less when its activations (all cameras + future copies) dominate
+            scope = [g.strip() for g in str(qcfg.get("gradient_checkpointing_scope", "encoder,decoder,vision")).split(",")]
+            unknown = [g for g in scope if g not in groups]
+            if unknown:
+                raise ValueError(f"gradient_checkpointing_scope: unknown groups {unknown}; use {sorted(groups)}")
+            blocks = [b for g in scope for b in groups[g]]
+            logger.info("gradient checkpointing on %d blocks (%s)", _checkpoint_block_forwards(blocks), ",".join(scope))
         if self._collect_layers:
             def _grab(mod, args, out):
                 self._layer_out.append(out[0] if isinstance(out, tuple) else out)

@@ -9,6 +9,10 @@
 #SBATCH --partition=booster
 #SBATCH -A m3
 #SBATCH --cpus-per-task=288
+# Shared simulator-node quarantine; see the matching note in
+# eval_libero_plus_slurm.sh.  Only repeated fatal EGL/black-frame nodes belong
+# here, not nodes that emit a destructor warning after successful rollouts.
+#SBATCH --exclude=jpbo-001-03,jpbo-013-26,jpbo-013-28,jpbo-016-32,jpbo-026-19,jpbo-031-15,jpbo-031-16,jpbo-047-46,jpbo-047-48,jpbo-053-11,jpbo-055-05,jpbo-055-23,jpbo-081-33
 # Uncomment and set partition/account as needed:
 # #SBATCH --partition=gpu
 # #SBATCH --account=your_account
@@ -44,14 +48,14 @@
 #   --ckpt <path>            path to pytorch_model.pt (required; or set $your_ckpt env var)
 #   --suite <name>           libero_spatial|libero_object|libero_goal|libero_10|libero_90|all (default: all)
 #   --num_gpus <n>           GPUs PER NODE, default: GPUs visible to the job (nvidia-smi -L)
-#   --workers_per_gpu <n>    default: 4 (or $workers_per_gpu env var); set close to --max_batch_size
+#   --workers_per_gpu <n>    default: 16 (or $workers_per_gpu env var); set close to --max_batch_size
 #   --num_trials <n>         trials per task, default: 20 (or $num_trials env var)
 #   --servers_per_gpu <n>    policy servers per GPU, default: 1 (or $servers_per_gpu env var).
 #                            Leave at 1 now that batching exists -- see above.
 #   --max_batch_size <n>     batch concurrent requests into one predict_action() call,
 #                            default: 32 (or $max_batch_size env var). 1 = old unbatched behavior.
 #   --max_wait_time <s>      how long the dispatcher may BLOCK waiting for a batch to reach
-#                            --max_batch_size, default: 0 (or $max_wait_time env var). Only
+#                            --max_batch_size, default: 0.01 (or $max_wait_time env var). Only
 #                            workers_per_gpu/servers_per_gpu clients can ever have a request
 #                            in flight, so a positive value stalls on requests that cannot
 #                            arrive; batches fill on their own during the previous inference.
@@ -62,6 +66,7 @@
 #   --object_perturb_m <m>   fixed-radius XY shift of selected goal objects (default 0)
 #   --object_perturb_roles   comma-separated source,target (default both)
 #   --object_perturb_seed    deterministic paired perturbation seed
+#   --resume                 skip completed shard JSONs and retry only missing shards
 #
 # Env vars forwarded as-is to auto_eval_libero.sh: output_dir, server_host, base_port,
 # server_idle_timeout, save_video, LIBERO_PYTHON, STARVLA_PYTHON.
@@ -89,17 +94,34 @@ DEFAULT_SUITES=(libero_spatial libero_object libero_goal libero_10)
 # ── Parse flags ────────────────────────────────────────────────────────────
 CKPT="${your_ckpt:-}"
 SUITE="${suite:-all}"
+# 20 trials/task -> 4 suites x 10 tasks x 20 trials = 800 episodes. This has been the default
+# since the script was first added (24d0816) and is kept deliberately: it is the more precise
+# measurement, roughly halving the standard error versus the 10-trial protocol.
+#
+# Be aware that BOTH protocols appear in results_master.csv on the `libero` benchmark, and the
+# column does not distinguish them -- check n_episodes:
+#   n=400 (4 x 100, 10 trials/task): the older `ervla_*` runs, e.g.
+#                                    ervla_x_pi_encoder_actiononly_freeze8 98.8%
+#   n=800 (4 x 200, 20 trials/task): libero_qwen08b_base 98.0%, and everything run since
+# A 400-episode result carries ~sqrt(2) more noise than an 800-episode one; they are
+# comparable in expectation but not in precision.
 NUM_TRIALS="${num_trials:-20}"
-WORKERS_PER_GPU="${workers_per_gpu:-4}"
+# 2026-10-02 benchmark (jobs 2141016 / 2143025, CLAUDE.md "LIBERO-Plus eval throughput"): with the EGL
+# construction lock removed (now the default), 16 workers / GPU, 1 server / GPU and a 25 ms batching
+# wait were fastest; scores unchanged. Two servers per GPU slow each other's forwards.
+# Lock-free benchmark 2143025: 16 workers + 10 ms wait fastest (651 s / 200 episodes) -> default 0.01.
+WORKERS_PER_GPU="${workers_per_gpu:-16}"
+MAX_CONCURRENT_WORKERS_PER_GPU="${max_concurrent_workers_per_gpu:-${WORKERS_PER_GPU}}"
 SERVERS_PER_GPU="${servers_per_gpu:-1}"
 MAX_BATCH_SIZE="${max_batch_size:-32}"
-MAX_WAIT_TIME="${max_wait_time:-0.0}"
+MAX_WAIT_TIME="${max_wait_time:-0.01}"
 COT_MAX_NEW_TOKENS="${cot_max_new_tokens:-0}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"
 OBJECT_PERTURB_M="${object_perturb_m:-0.0}"
 OBJECT_PERTURB_ROLES="${object_perturb_roles:-source,target}"
 OBJECT_PERTURB_SEED="${object_perturb_seed:-20260812}"
+RESUME_EVAL="${STARVLA_RESUME_EVAL:-0}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -107,6 +129,7 @@ while [[ $# -gt 0 ]]; do
         --suite) SUITE="$2"; shift 2 ;;
         --num_gpus) NUM_GPUS="$2"; shift 2 ;;
         --workers_per_gpu) WORKERS_PER_GPU="$2"; shift 2 ;;
+        --max_concurrent_workers_per_gpu) MAX_CONCURRENT_WORKERS_PER_GPU="$2"; shift 2 ;;
         --num_trials) NUM_TRIALS="$2"; shift 2 ;;
         --servers_per_gpu) SERVERS_PER_GPU="$2"; shift 2 ;;
         --max_batch_size) MAX_BATCH_SIZE="$2"; shift 2 ;;
@@ -116,6 +139,7 @@ while [[ $# -gt 0 ]]; do
         --object_perturb_m) OBJECT_PERTURB_M="$2"; shift 2 ;;
         --object_perturb_roles) OBJECT_PERTURB_ROLES="$2"; shift 2 ;;
         --object_perturb_seed) OBJECT_PERTURB_SEED="$2"; shift 2 ;;
+        --resume) RESUME_EVAL=1; shift ;;
         *) echo "[ERROR] Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -174,6 +198,7 @@ echo " Output dir:    ${output_dir}"
 echo " Suites:        ${SUITES[*]}"
 echo " GPUs/node:     ${NUM_GPUS:-<auto: nvidia-smi -L on each node>}"
 echo " Workers/GPU:   ${WORKERS_PER_GPU}"
+echo " Live sims/GPU:  ${MAX_CONCURRENT_WORKERS_PER_GPU}"
 echo " Servers/GPU:   ${SERVERS_PER_GPU}"
 echo " Max batch:     ${MAX_BATCH_SIZE}  (max_wait_time=${MAX_WAIT_TIME}s)"
 echo " CoT max tokens: ${COT_MAX_NEW_TOKENS}  (0 = checkpoint default)"
@@ -185,6 +210,7 @@ echo "=========================================="
 # can read them without fragile nested-quoting string interpolation.
 export your_ckpt output_dir
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
+export SUITE_MAX_CONCURRENT_WORKERS_PER_GPU="${MAX_CONCURRENT_WORKERS_PER_GPU}"
 export SUITE_SERVERS_PER_GPU="${SERVERS_PER_GPU}"
 export SUITE_MAX_BATCH_SIZE="${MAX_BATCH_SIZE}"
 export SUITE_MAX_WAIT_TIME="${MAX_WAIT_TIME}"
@@ -197,6 +223,7 @@ export SUITE_AUTO_EVAL_SCRIPT="${AUTO_EVAL_SCRIPT}"
 export SUITE_OBJECT_PERTURB_M="${OBJECT_PERTURB_M}"
 export SUITE_OBJECT_PERTURB_ROLES="${OBJECT_PERTURB_ROLES}"
 export SUITE_OBJECT_PERTURB_SEED="${OBJECT_PERTURB_SEED}"
+export SUITE_RESUME_EVAL="${RESUME_EVAL}"
 
 # One SLURM task per node runs the entire single-node pipeline against its
 # own partition_idx=$SLURM_PROCID slice; SKIP_AGGREGATE defers the merge to
@@ -209,24 +236,32 @@ NODE_PARTITION_CMD='
     node_num_gpus="${SUITE_NUM_GPUS:-$(nvidia-smi -L | wc -l)}"
     echo "[node ${SLURM_PROCID}/$((SUITE_NUM_NODES - 1)) $(hostname)] gpus=${node_num_gpus} partition=${SLURM_PROCID}"
     SKIP_AGGREGATE=true servers_per_gpu="${SUITE_SERVERS_PER_GPU}" \
+        max_concurrent_workers_per_gpu="${SUITE_MAX_CONCURRENT_WORKERS_PER_GPU}" \
         max_batch_size="${SUITE_MAX_BATCH_SIZE}" max_wait_time="${SUITE_MAX_WAIT_TIME}" \
         cot_max_new_tokens="${SUITE_COT_MAX_NEW_TOKENS}" \
         object_perturb_m="${SUITE_OBJECT_PERTURB_M}" \
         object_perturb_roles="${SUITE_OBJECT_PERTURB_ROLES}" \
         object_perturb_seed="${SUITE_OBJECT_PERTURB_SEED}" \
+        STARVLA_RESUME_EVAL="${SUITE_RESUME_EVAL}" \
         bash "${SUITE_AUTO_EVAL_SCRIPT}" \
             "$1" "${node_num_gpus}" "${SUITE_WORKERS_PER_GPU}" "${SUITE_NUM_TRIALS}" \
             "${SUITE_GPU_IDS_CSV}" "${SLURM_PROCID}" "${SUITE_NUM_NODES}"
 '
 
-for eval_suite in "${SUITES[@]}"; do
-    echo ""
-    echo "############################################"
-    echo "# Evaluating suite: ${eval_suite} (${NUM_NODES} node(s))"
-    echo "############################################"
-    srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
-        bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}"
+# One srun for ALL suites, not one per suite. auto_eval_libero.sh takes a
+# comma-separated list and loops internally, so the policy servers are loaded
+# once and reused; the old per-suite srun tore every server down and reloaded
+# it between suites (~1.1 min each warm, a full cold load if the page cache had
+# turned over) purely to change one command-line argument.
+SUITE_CSV=$(IFS=,; echo "${SUITES[*]}")
+echo ""
+echo "############################################"
+echo "# Evaluating suites: ${SUITE_CSV} (${NUM_NODES} node(s)), servers loaded once"
+echo "############################################"
+srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
+    bash -c "${NODE_PARTITION_CMD}" _ "${SUITE_CSV}"
 
+for eval_suite in "${SUITES[@]}"; do
     echo "All ${NUM_NODES} partition(s) of ${eval_suite} finished. Aggregating..."
     "${AGGREGATE_PY[@]}" "${AGGREGATE_SCRIPT}" --root_path "${output_dir}" --task_suite_name "${eval_suite}"
 done

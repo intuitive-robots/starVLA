@@ -99,7 +99,8 @@ class DeferredMainProcessBatchLoader:
     is not allowed to pin one worker while it constructs an entire local batch.
     """
 
-    def __init__(self, loader, *, batch_size: int, collate_fn, drop_last: bool):
+    def __init__(self, loader, *, batch_size: int, collate_fn, drop_last: bool, backend: str = "marigold_data"):
+        self.backend = backend
         self.loader = loader
         self.batch_size = int(batch_size)
         self.collate_fn = collate_fn
@@ -110,7 +111,10 @@ class DeferredMainProcessBatchLoader:
         return self.loader
 
     def after_accelerator_prepare(self, prepared_loader):
-        from marigold_data.dataloader import MainProcessBatchLoader
+        if self.backend == "m3_data":
+            from m3_data.dataloader import MainProcessBatchLoader
+        else:
+            from marigold_data.dataloader import MainProcessBatchLoader
 
         return MainProcessBatchLoader(
             prepared_loader,
@@ -140,6 +144,84 @@ def save_dataset_statistics(dataset_statistics, run_dir):
         json.dump(dataset_statistics, f_json, indent=2)
     logger.info(f"Saved dataset statistics file at path {out_path}")
 
+
+
+def _start_forkserver_without_gpus() -> None:
+    """Start this process's forkserver with no visible GPUs.
+
+    DataLoader workers are forked from the forkserver, which re-imports the trainer's __main__. That import
+    reaches initialize_overwatch (starVLA/model/tools.py), which under accelerate built PartialState: a DeepSpeed
+    process group and a ~0.5 GB CUDA context on the rank's GPU, once per worker. With 32 workers per rank that
+    filled the GPUs (ABC sweep 2187360). STARVLA_DATALOADER_WORKER=1 makes overwatch skip PartialState there, and
+    hiding the GPUs keeps any other import from opening a context. RANK / WORLD_SIZE stay, because m3_data shards
+    the data by them in the workers.
+    """
+    import multiprocessing.forkserver as forkserver
+
+    if getattr(forkserver._forkserver, "_forkserver_pid", None) is not None:
+        logger.warning("forkserver already running; DataLoader workers may open CUDA contexts")
+        return
+    overrides = {"CUDA_VISIBLE_DEVICES": "", "STARVLA_DATALOADER_WORKER": "1"}
+    saved = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    cpu_only = _set_cpu_node_mempolicy()  # inherited by the forkserver and every worker
+    try:
+        forkserver.ensure_running()
+    finally:
+        if cpu_only:
+            _set_mempolicy(0, [])  # MPOL_DEFAULT again for the trainer itself
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _set_mempolicy(mode: int, nodes: list) -> bool:
+    """set_mempolicy(2) through libc; nodes = NUMA node ids. Returns success."""
+    import ctypes
+    import platform
+
+    nr = {"aarch64": 237, "x86_64": 238}.get(platform.machine())
+    if nr is None:
+        return False
+    words = (max(nodes) // 64 + 1) if nodes else 1
+    mask = (ctypes.c_ulong * words)()
+    for n in nodes:
+        mask[n // 64] |= 1 << (n % 64)
+    libc = ctypes.CDLL(None, use_errno=True)
+    rc = libc.syscall(nr, ctypes.c_int(mode), mask if nodes else None, ctypes.c_ulong(words * 64 + 1 if nodes else 0))
+    return rc == 0
+
+
+def _set_cpu_node_mempolicy() -> bool:
+    """Prefer the NUMA nodes that have CPUs for this process (and its future children).
+
+    On GH200 each GPU's HBM is also a CPU-less NUMA node, and the kernel placed DataLoader worker pages there:
+    ~0.65 GB per worker, ~21 GB of GPU 0 with 32 workers per rank (memory profile, allocation 2189367), memory
+    the training process then cannot use. MPOL_BIND, not MPOL_PREFERRED_MANY: with preferred-many the kernel
+    tries the CPU nodes without reclaiming page cache and then falls back to the nearest node, which is the
+    GPU's (allocation 2189367: workers with "prefer (many):0-3" still held ~0.4-0.9 GB each on HBM). Bind
+    reclaims cache on the CPU nodes instead; 4 x 120 GB of CPU memory is ample for the workers.
+    """
+    from pathlib import Path
+
+    nodes = []
+    for node in sorted(Path("/sys/devices/system/node").glob("node[0-9]*")):
+        cpulist = (node / "cpulist").read_text().strip() if (node / "cpulist").exists() else ""
+        if cpulist:
+            nodes.append(int(node.name[4:]))
+    hbm = [int(n.name[4:]) for n in Path("/sys/devices/system/node").glob("node[0-9]*")
+           if int(n.name[4:]) not in nodes and (n / "meminfo").exists()
+           and "MemTotal:" in (n / "meminfo").read_text() and not (n / "meminfo").read_text().split("MemTotal:")[1].strip().startswith("0 ")]
+    if not nodes or not hbm:
+        return False  # no CPU-less memory nodes: nothing to keep workers away from
+    if _set_mempolicy(2, nodes):  # MPOL_BIND
+        logger.info("DataLoader workers: memory bound to CPU NUMA nodes %s (not GPU memory nodes %s)",
+                    nodes, sorted(hbm))
+        return True
+    logger.warning("could not set a CPU-only memory policy for the DataLoader workers")
+    return False
 
 
 def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here only is get dataset, we need mv dataloader to here
@@ -283,6 +365,55 @@ def build_dataloader(cfg, dataset_py="lerobot_datasets_oxe"): # TODO now here on
             )
         if not dist.is_initialized() or dist.get_rank() == 0:
             logger.info("Built full marigold_data VLA DataLoader")
+            output_dir = Path(cfg.output_dir)
+            vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
+        return vla_train_dataloader
+    elif dataset_py == "m3_data_datasets":
+        # m3_data (successor of marigold_data). The bridge module puts the RIG-VLA lerobot fork and the m3_data
+        # checkout on sys.path itself, so only runs that select this loader see them.
+        from starVLA.dataloader.m3_data_datasets import get_m3_data_vla_dataset, collate_fn
+
+        vla_dataset_cfg = cfg.datasets.vla_data
+        vla_dataset = get_m3_data_vla_dataset(data_cfg=vla_dataset_cfg)
+        from m3_data.dataloader import _single_sample_collate
+
+        loader_kwargs = _build_loader_kwargs(vla_dataset_cfg)
+        # Workers must not be forked from the trainer: a forked worker inherits wandb's import hook and deadlocks on
+        # its first lazy import (m3_data imports lerobot inside the adapters). forkserver is m3_data's production
+        # start method; the bridge exports its sys.path additions through the environment for the fresh workers.
+        if loader_kwargs.get("num_workers", 0) > 0:
+            loader_kwargs["multiprocessing_context"] = str(
+                getattr(vla_dataset_cfg, "multiprocessing_context", None) or "forkserver"
+            )
+        if loader_kwargs.get("multiprocessing_context") == "forkserver":
+            _start_forkserver_without_gpus()
+        round_robin = bool(getattr(vla_dataset_cfg, "round_robin_dataloader", True))
+        drop_last = bool(getattr(vla_dataset_cfg, "drop_last", True))
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            logger.info(
+                "Building m3_data VLA DataLoader: batch_size=%s, num_workers=%s, prefetch_factor=%s, "
+                "round_robin=%s, drop_last=%s, embodiments=%s",
+                cfg.datasets.vla_data.per_device_batch_size, loader_kwargs.get("num_workers", 0),
+                loader_kwargs.get("prefetch_factor", "n/a"), round_robin, drop_last, vla_dataset.embodiments,
+            )
+        if round_robin:
+            inner_loader = DataLoader(vla_dataset, batch_size=1, collate_fn=_single_sample_collate, **loader_kwargs)
+            vla_train_dataloader = DeferredMainProcessBatchLoader(
+                inner_loader,
+                batch_size=cfg.datasets.vla_data.per_device_batch_size,
+                collate_fn=collate_fn,
+                drop_last=drop_last,
+                backend="m3_data",
+            )
+        else:
+            vla_train_dataloader = DataLoader(
+                vla_dataset,
+                batch_size=cfg.datasets.vla_data.per_device_batch_size,
+                collate_fn=collate_fn,
+                drop_last=drop_last,
+                **loader_kwargs,
+            )
+        if not dist.is_initialized() or dist.get_rank() == 0:
             output_dir = Path(cfg.output_dir)
             vla_dataset.save_dataset_statistics(output_dir / "dataset_statistics.json")
         return vla_train_dataloader

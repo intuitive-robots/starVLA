@@ -174,7 +174,19 @@ def make_LeRobotSingleDataset(
     else:
         modality_config = data_config.modality_config()
     shared_z_future_offset = int(data_cfg.get("shared_z_future_offset", 0) or 0)
-    if shared_z_future_offset:
+    # future_offsets (default off): load the frames at several future offsets per camera, e.g. [2, 4, 6, 8];
+    # samples then carry future_images_multi {offset: [images]} and future_image = the largest offset.
+    future_offsets = sorted({int(k) for k in (data_cfg.get("future_offsets") or [])})
+    if future_offsets:
+        if future_offsets[0] < 1:
+            raise ValueError("future_offsets must be positive")
+        if shared_z_future_offset and shared_z_future_offset != future_offsets[-1]:
+            raise ValueError("shared_z_future_offset must equal max(future_offsets) when both are set")
+        video_config = modality_config.get("video")
+        if video_config is None:
+            raise ValueError("future_offsets requires a video modality")
+        video_config.delta_indices = [0] + future_offsets
+    elif shared_z_future_offset:
         if shared_z_future_offset < 1:
             raise ValueError("shared_z_future_offset must be positive")
         video_config = modality_config.get("video")

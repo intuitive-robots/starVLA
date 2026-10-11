@@ -1,0 +1,186 @@
+# LIBERO / LIBERO-Plus simulator exclusion list.
+#
+# One Booster node per line. Keep this scoped to simulator jobs: a node that
+# cannot sustain many MuJoCo/EGL contexts may still be perfectly usable for
+# training. Add a dated evidence comment for every entry.
+
+# Legacy simulator exclusions already carried by eval_libero{,_plus}_slurm.sh.
+# They are repeated here because a command-line --exclude replaces, rather than
+# augments, an #SBATCH directive; this file is the submit wrapper's authority.
+jpbo-001-03
+jpbo-013-26
+jpbo-013-28
+jpbo-026-19
+jpbo-047-46
+jpbo-047-48
+jpbo-053-11
+jpbo-055-05
+jpbo-055-23
+
+# 2026-09-22: 21/24 full-Plus shards exhausted three rc=134 attempts.
+jpbo-067-31
+jpbo-073-45
+
+# 2026-09-22: repeated zero/nearly-black agent-view frames.
+jpbo-031-15
+jpbo-031-16
+jpbo-016-32
+
+# 2026-09-22: repeated simulator aborts in PI-v4/modality-z recoveries.
+jpbo-007-16
+jpbo-013-29
+jpbo-081-33
+
+# 2026-09-22: anomalously low full-Plus throughput at 6 live sims/GPU;
+# exact-resumed elsewhere rather than trusting a node-dependent result.
+jpbo-007-15
+jpbo-073-02
+
+# 2026-09-22: encoder-s42 full-Plus resume exhausted five first-suite
+# shards after 17 rc=134 failures.
+jpbo-006-09
+
+# 2026-09-22: Ctrl-4 full-Plus exact resume exhausted six first-suite
+# shards after 22 rc=134 failures at 6 live simulators/GPU.
+jpbo-122-41
+
+# 2026-09-22: earlier allocations exhausted every requested Plus suite.
+jpbo-002-07
+jpbo-081-21
+jpbo-009-16
+
+# 2026-09-22: Qwen3.5-0.8B OFT nominal eval produced repeated zero/black
+# agent-view frames, EGL aborts, and four exhausted shards.
+jpbo-041-33
+
+# 2026-09-22 21:45: insight knockout evals 1959078/80/82/86 exhausted 24-39 shards each
+# with rc=134 and eglMakeCurrent result=0 (EGL render failures) on these nodes.
+jpbo-058-27
+jpbo-060-14
+jpbo-067-30
+jpbo-089-16
+
+# 2026-09-22 23:18: p0_ins_ko_D_state2img_rest 1961432 failed every libero_goal shard from attempt 1 (rc=134, EGL errors).
+jpbo-011-34
+
+# 2026-09-23 00:31: modality-block s43 full-Plus job 1956110 made only
+# 944/10030 episodes in 92 minutes and repeatedly exhausted EGL shards.
+jpbo-014-34
+
+# 2026-09-23 00:31: Qwen3.5-0.8B OFT nominal exact-resume job 1960323
+# again produced black frames / EGL failures and did not finish its shards.
+jpbo-118-36
+
+# 2026-09-23 01:12: modality-block s43 resume 1962710 exhausted four
+# first-suite shards after repeated rc=134/EGL failures at six live sims/GPU.
+jpbo-008-41
+
+# 2026-09-23 01:48: modality-block s43 resume 1963049 exhausted eight
+# libero_10 shards after repeated rc=134/EGL failures at four live sims/GPU.
+jpbo-001-32
+
+# 2026-09-23 02:43: CP-2 seed-42 full-Plus job 1958627 exhausted
+# many first-suite shards after repeated rc=134/EGL failures at six live sims/GPU.
+jpbo-012-39
+jpbo-038-18
+jpbo-117-32
+jpbo-019-28
+jpbo-019-24
+jpbo-054-08
+jpbo-037-16
+jpbo-075-28
+jpbo-099-31
+jpbo-060-10
+jpbo-046-33
+jpbo-033-44
+jpbo-068-46
+jpbo-107-03
+jpbo-085-13
+jpbo-007-40
+jpbo-002-26
+jpbo-071-01
+jpbo-002-05
+jpbo-002-06
+jpbo-002-08
+jpbo-002-12
+jpbo-020-07
+jpbo-026-34
+jpbo-028-30
+jpbo-030-24
+jpbo-045-16
+jpbo-055-39
+jpbo-106-02
+jpbo-117-26  # 2026-09-26 00:40: black agentview frames with >=2 EGL envs per GPU (1 env/GPU renders), alloc 2029938
+jpbo-059-14  # 2026-09-26 01:42: EGLError + Aborted rc=134 every 1-2 episodes at 12 sims/GPU, job 2034520
+jpbo-051-37  # 2026-09-28 rc=134 libero_10 aborts (2101865)
+jpbo-039-48  # 2026-09-28 rc=134 libero_10 aborts (2101870)
+jpbo-103-41  # 2026-09-28 rc=134 libero_10 aborts (2101866)
+jpbo-102-47  # 2026-09-28 rc=134 libero_10 aborts (2101877)
+jpbo-013-36
+jpbo-013-48
+jpbo-053-36
+jpbo-109-13
+jpbo-077-17
+jpbo-077-18
+jpbo-077-19
+jpbo-046-12
+jpbo-046-13
+jpbo-088-29
+jpbo-013-46
+jpbo-035-17
+jpbo-088-28
+jpbo-028-19
+jpbo-079-14  # 2026-09-28 16:33 rc=134, 21 shards exhausted (2104946)
+jpbo-091-16  # 2026-09-28 18:08 rc=134, 21 shards exhausted (2106186)
+jpbo-013-01  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-02  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-03  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-04  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-05  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-06  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-07  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-08  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-09  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-10  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-11  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-12  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-13  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-14  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-15  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-16  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-17  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-18  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-19  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-20  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-21  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-22  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-23  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-24  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-25  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-27  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-30  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-31  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-32  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-33  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-34  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-35  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-37  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-38  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-39  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-40  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-41  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-42  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-43  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-44  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-45  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-013-47  # 2026-09-28 18:08 rack 013: 8 degraded render nodes today, whole rack excluded
+jpbo-107-13  # 2026-09-28 19:59 rc=134 x68 (2107514)
+jpbo-038-14  # 2026-09-28 21:56 rc=134 node fault
+jpbo-052-21  # 2026-09-28 21:56 rc=134 node fault
+jpbo-051-31   # 2026-09-29 rc=134 shard aborts, P5-PIv4 LIBERO-10 eval 2109678
+jpbo-051-30   # 2026-09-29 rc=134 / stalled sim shards (sv PIv4 evals 2111101, 2111107)
+jpbo-091-08   # 2026-09-29 rc=134 / stalled sim shards (sv PIv4 evals 2111101, 2111107)
+jpbo-066-44   # 2026-10-02 rc=134 on all 24 libero_10 shards x3 attempts, eval 2129674 (rb_cdq_p2_s43 noext)
+jpbo-005-08   # 2026-10-06 609 EGL/abort lines, annealed-state eval 2182707 timed out at 279 episodes
+jpbo-051-32   # 2026-10-06 sim workers Aborted on 16 shards, eval 2185925 (pi05_e7ffc exact4k)
+jpbo-079-48  # 2026-10-07 rc=134 aborts at episode start, 16 shards x3 attempts (eval 2197214)

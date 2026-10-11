@@ -1,0 +1,135 @@
+# C30 Bridge (bridge_orig v3.0, image_0 only, SimplerEnv-WidowX protocol), paradigm p1_causal, without state.
+# Derived from ervla_v5_gr00t_state_causal_v3_b32.yaml: only data (Bridge, 1 camera, 224 px), action horizon 16 (7-D delta EEF),
+# include_state, schedule (30k/1k, batch 16/GPU x 16 GPUs = 256) and saving changed; backbone/head/state tokens unchanged.
+# Action head = starVLA's reference SimplerEnv GR00T head (16 layers, hidden/action/output 1024), dropout kept at 0.1.
+datasets:
+  vla_data:
+    action_horizon: 16
+    augmentation: crop_photometric
+    data_mix: bridge
+    data_root_dir: /e/scratch/m3/blank4/datasets_oxe
+    dataset_py: lerobot_datasets
+    drop_last: true
+    include_state: false
+    lerobot_version: v3.0
+    load_all_data_for_training: true
+    marigold_resume_batches_per_rank: 0
+    marigold_resume_steps: 0
+    num_workers: 24
+    pack_image_size:
+    - 224
+    - 224
+    per_device_batch_size: 16
+    persistent_workers: true
+    pin_memory: true
+    prefetch_factor: 4
+    seed: 42
+    sequential_step_sampling: false
+    video_backend: torchcodec
+    video_reader_cache_size: 40
+  vlm_data:
+    base_interval: 2
+    data_flatten: false
+    dataformat: llava_json
+    dataset_py: vlm_datasets
+    dataset_use: sharegpt4v_coco
+    eval_dataset: sharegpt4v_coco
+    max_pixels: 307200
+    min_pixels: 784
+    model_max_length: 2048
+    model_type: qwen3.5
+    num_workers: 4
+    per_device_batch_size: 4
+    persistent_workers: true
+    pin_memory: true
+    prefetch_factor: 2
+framework:
+  action_model:
+    action_dim: 7
+    action_hidden_dim: 1024
+    action_horizon: 16
+    action_model_type: DiT-B
+    add_pos_embed: true
+    diffusion_model_cfg:
+      cross_attention_dim: 2048
+      dropout: 0.1
+      final_dropout: true
+      interleave_self_attention: true
+      norm_type: ada_norm
+      num_layers: 16
+      output_dim: 1024
+      positional_embeddings: null
+    future_action_window_size: 15
+    hidden_size: 1024
+    max_seq_len: 1024
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    num_timestep_buckets: 1000
+    past_action_window_size: 0
+    repeated_diffusion_steps: 8
+    state_dim: 0
+  choice_policy:
+    enabled: false
+    location: encoder
+    num_choices: 5
+  name: QwenGR00T
+  qwenvl:
+    attn_implementation: flash_attention_3
+    base_vlm: /e/scratch/m3/misc_data/nogga2/weights/Qwen3-VL-2B-Instruct
+    enc_dec: false
+    vl_hidden_dim: 2048
+  readout_tokens:
+    dropout: 0.0
+    enabled: false
+    ffn_dim: 0
+    num_heads: 8
+    num_layers: 2
+    num_tokens: 32
+  state_token_mode: reserved_ids
+  state_routing: legacy
+  state_num_bins: 256
+  state_token_source: rare_real
+  trainable_bin_embedding: false
+is_debug: false
+run_id: bridge_p1_causal_nostate_b256_s42
+run_root_dir: playground/Checkpoints
+seed: 42
+trainer:
+  eval_interval: 1000
+  freeze_modules: ''
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+  gradient_clipping: 1.0
+  learning_rate:
+    action_model: 0.0001
+    base: 2.5e-05
+    qwen_vl_interface: 1.0e-05
+  logging_frequency: 100
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  lr_scheduler_type: cosine_with_min_lr
+  max_grad_norm: 1.0
+  max_train_steps: 30000
+  num_warmup_steps: 1000
+  optimizer:
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+    name: AdamW
+    weight_decay: 1.0e-08
+  save_interval: 10000
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  weight_decay: 0.0
+  save_total_limit: 2
+  save_full_training_state: true
+  full_state_save_total_limit: 1
+use_deepspeed: true
+version_id: '0.21'
+wandb_entity: niblank
+wandb_project: starvla_libero

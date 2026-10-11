@@ -28,7 +28,7 @@ fi
 if [[ -f $JOBS_MD ]]; then
   untracked=$(comm -23 \
     <(squeue -h -u "$USER" -o "%i" | sort -u) \
-    <(grep -oE '\b18[0-9]{5}\b' "$JOBS_MD" | sort -u))
+    <(grep -oE '\b[0-9]{7}\b' "$JOBS_MD" | sort -u))
   if [[ -n $untracked ]]; then
     echo
     echo "!! In the queue but NOT in JOBS.md (record them with their launch command):"

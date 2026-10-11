@@ -9,6 +9,12 @@
 #SBATCH --partition=booster
 #SBATCH -A m3
 #SBATCH --cpus-per-task=288
+# Nodes below produced repeated fatal EGL/black-frame failures or exhausted all
+# simulator retries in fresh allocations.  Harmless post-exit EGL destructor
+# warnings are deliberately not sufficient for this list.  A submit-time
+# `sbatch --exclude=...` option can override this default when the cluster
+# health record changes.
+#SBATCH --exclude=jpbo-001-03,jpbo-013-26,jpbo-013-28,jpbo-016-32,jpbo-026-19,jpbo-031-15,jpbo-031-16,jpbo-047-46,jpbo-047-48,jpbo-053-11,jpbo-055-05,jpbo-055-23,jpbo-081-33
 # Uncomment and set partition/account as needed:
 # #SBATCH --partition=gpu
 # #SBATCH --account=your_account
@@ -45,7 +51,7 @@
 #   --ckpt <path>             path to pytorch_model.pt (required; or set $your_ckpt env var)
 #   --suite <name[,name...]>  one or more comma-separated suites, or all (default: all)
 #   --num_gpus <n>            GPUs PER NODE, default: GPUs visible to the job (nvidia-smi -L)
-#   --workers_per_gpu <n>     sim workers per GPU, default: 8 (or $workers_per_gpu env var).
+#   --workers_per_gpu <n>     sim workers per GPU, default: 16 (or $workers_per_gpu env var).
 #                             Each worker is one concurrent rollout. 8 per GPU (32 per node)
 #                             already saturates a GH200 booster node: benchmarked on
 #                             libero_10 (512 instances, bench_libero_plus_sharding_slurm.sh
@@ -57,7 +63,7 @@
 #                             both arms); the limit is on the simulator side. Raising this
 #                             costs memory and buys nothing -- scale across NODES instead
 #                             (sbatch --nodes=N).
-#   --servers_per_gpu <n>     policy servers per GPU, default: 2 (or $servers_per_gpu env var).
+#   --servers_per_gpu <n>     policy servers per GPU, default: 1 (or $servers_per_gpu env var).
 #                             Each server is a full model copy on that GPU (~11 GB VRAM) but
 #                             gives real inference concurrency to workers sharing it -- best
 #                             throughput when workers_per_gpu is a multiple of servers_per_gpu.
@@ -86,7 +92,7 @@
 #                             queue during the previous batch's inference, so this is not a
 #                             target the dispatcher waits for. See auto_eval_libero_plus.sh.
 #   --max_wait_time <s>       how long the dispatcher may BLOCK waiting for a batch to reach
-#                             that ceiling, default: 0 (or $max_wait_time env var). The old
+#                             that ceiling, default: 0.01 (or $max_wait_time env var). The old
 #                             1.0 default stalled a full second in front of every ~0.19s
 #                             inference, because only workers_per_gpu/servers_per_gpu clients
 #                             can ever have a request in flight -- 4, against a ceiling of 32.
@@ -121,7 +127,35 @@ NUM_TRIALS="${num_trials:-1}"
 # 32 is not a safety limit -- it is simply where throughput peaked. CoT models, which
 # are inference-bound rather than sim-bound, gain from MORE clients per server (16
 # clients beat 4 by 1.9x), so raise workers_per_gpu for those.
-WORKERS_PER_GPU="${workers_per_gpu:-32}"
+# 12, not 32. Measured on identical checkpoints and nodes (2026-09-19):
+#   32 workers/GPU ->   45 and  979 eps/h, 0 and 26 permanently exhausted shards
+#   12 workers/GPU -> 3188-3268 eps/h across four jobs, 0 exhausted shards
+# Lower concurrency is ~3.3x FASTER, not slower. Each sim worker holds its own MuJoCo EGL
+# context; at 32 the GPU is oversubscribed, renders abort with SIGABRT, and an aborted
+# shard discards all of its completed episodes and restarts -- so the retries cost more
+# than the extra parallelism buys. The variance is the giveaway: the four 12-worker jobs
+# agree within 2.5% across different nodes, while the two 32-worker jobs differ by 20x.
+# A 4,000-episode suite is ~74 min here versus ~4 h at 32, and the 4 h version arrives
+# with 20-47% of its shards missing.
+#
+# 6, not 12 (2026-09-20). At 12 EVERY progressing eval showed 144-384
+# EGL_NOT_INITIALIZED events plus SIGABRTs, across unrelated node blocks (030, 036, 051,
+# 060) -- so this is systematic oversubscription, not unlucky draws. The launcher's own
+# benchmark above already says 8/GPU saturates a GH200 and that the simulator is a SHARED
+# bottleneck, which is why 32 -> 12 made things 3.3x FASTER rather than slower. The same
+# logic has not bottomed out at 12: fewer workers each run faster, and an aborted shard
+# discards every episode it had completed, so a retry costs far more than the parallelism
+# buys. Deliberately trading ~20-30 min of wall clock for runs that finish on the first
+# attempt. Raise only with a measurement, never on intuition.
+# 2026-10-02 benchmark (jobs 2141016 / 2143025, CLAUDE.md "LIBERO-Plus eval throughput"): with the EGL
+# construction lock removed (now the default), 16 workers / GPU, 1 server / GPU and a 25 ms batching
+# wait were fastest; scores unchanged. Two servers per GPU slow each other's forwards.
+# Lock-free benchmark 2143025: 16 workers + 10 ms wait fastest (651 s / 200 episodes) -> default 0.01.
+WORKERS_PER_GPU="${workers_per_gpu:-16}"
+# Resolve the default *after* CLI parsing.  Otherwise `--workers_per_gpu 4`
+# leaves this at the pre-parse default of 6 and the downstream launcher rejects
+# the internally inconsistent 6-live / 4-total worker request.
+MAX_CONCURRENT_WORKERS_PER_GPU="${max_concurrent_workers_per_gpu:-}"
 SERVERS_PER_GPU="${servers_per_gpu:-1}"
 GPU_IDS_CSV="${gpu_ids_csv:-}"
 NUM_GPUS="${num_gpus:-}"
@@ -133,7 +167,7 @@ EXACT_TASKS_PER_SUITE="${exact_tasks_per_suite:-0}"
 # count costs nothing (it is a ceiling, not a target -- the dispatcher never waits when
 # max_wait_time is 0). A GH200 has ~96GB, so headroom is not the constraint.
 MAX_BATCH_SIZE="${max_batch_size:-}"
-MAX_WAIT_TIME="${max_wait_time:-0.0}"
+MAX_WAIT_TIME="${max_wait_time:-0.01}"
 SAVE_VIDEO="${save_video:-False}"
 OBJECT_PERTURB_M="${object_perturb_m:-0.0}"
 OBJECT_PERTURB_ROLES="${object_perturb_roles:-source,target}"
@@ -147,6 +181,7 @@ while [[ $# -gt 0 ]]; do
         --suite) SUITE="$2"; shift 2 ;;
         --num_gpus) NUM_GPUS="$2"; shift 2 ;;
         --workers_per_gpu) WORKERS_PER_GPU="$2"; shift 2 ;;
+        --max_concurrent_workers_per_gpu) MAX_CONCURRENT_WORKERS_PER_GPU="$2"; shift 2 ;;
         --servers_per_gpu) SERVERS_PER_GPU="$2"; shift 2 ;;
         --num_trials) NUM_TRIALS="$2"; shift 2 ;;
         --max_tasks_per_suite) MAX_TASKS_PER_SUITE="$2"; shift 2 ;;
@@ -165,6 +200,10 @@ while [[ $# -gt 0 ]]; do
         *) echo "[ERROR] Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+if [ -z "${MAX_CONCURRENT_WORKERS_PER_GPU}" ]; then
+    MAX_CONCURRENT_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
+fi
 
 if [ "${MAX_TASKS_PER_SUITE}" -gt 0 ] && [ "${EXACT_TASKS_PER_SUITE}" -gt 0 ]; then
     echo "[ERROR] --max_tasks_per_suite and --exact_tasks_per_suite are mutually exclusive."
@@ -244,6 +283,7 @@ echo " Output dir:    ${output_dir}"
 echo " Suites:        ${SUITES[*]}"
 echo " GPUs/node:     ${NUM_GPUS:-<auto: nvidia-smi -L on each node>}"
 echo " Workers/GPU:   ${WORKERS_PER_GPU}"
+echo " Live sims/GPU:  ${MAX_CONCURRENT_WORKERS_PER_GPU}"
 echo " Servers/GPU:   ${SERVERS_PER_GPU}"
 echo " Trials/task:   ${NUM_TRIALS}"
 echo " Max tasks/suite: ${MAX_TASKS_PER_SUITE}  (0 = full suite)"
@@ -277,6 +317,7 @@ SUITE_ATTEMPTS="${suite_attempts:-3}"
 export POLICY_SERVER_GPU="${POLICY_SERVER_GPU-0}"
 export STARVLA_RESUME_EVAL="${RESUME_EVAL:-0}"
 export SUITE_WORKERS_PER_GPU="${WORKERS_PER_GPU}"
+export SUITE_MAX_CONCURRENT_WORKERS_PER_GPU="${MAX_CONCURRENT_WORKERS_PER_GPU}"
 export SUITE_SERVERS_PER_GPU="${SERVERS_PER_GPU}"
 export SUITE_NUM_TRIALS="${NUM_TRIALS}"
 export SUITE_MAX_TASKS_PER_SUITE="${MAX_TASKS_PER_SUITE}"
@@ -295,8 +336,10 @@ export SUITE_OBJECT_PERTURB_SEED="${OBJECT_PERTURB_SEED}"
 export SUITE_LIBERO_PLUS_RUNTIME="${SIM_RUNTIME}"
 export SUITE_LIBERO_PLUS_SIF="${SIM_SIF}"
 
-# One SLURM task per node runs the entire single-node pipeline against its
-# own partition_idx=$SLURM_PROCID slice; SKIP_AGGREGATE defers the final
+# One SLURM task per node runs every requested suite against its own
+# partition_idx=$SLURM_PROCID slice. The comma-separated suite list is handled
+# inside one auto-eval process, so each node loads its policy servers exactly
+# once and reuses them for every suite. SKIP_AGGREGATE defers the final
 # merge to this script (a per-node aggregate would race against the others
 # over the still-filling shared output_dir). Inlined as a plain command
 # string (not `export -f` + a shell function) -- some clusters' PAM/security
@@ -306,6 +349,7 @@ NODE_PARTITION_CMD='
     node_num_gpus="${SUITE_NUM_GPUS:-$(nvidia-smi -L | wc -l)}"
     echo "[node ${SLURM_PROCID}/$((SUITE_NUM_NODES - 1)) $(hostname)] gpus=${node_num_gpus} partition=${SLURM_PROCID}"
     SKIP_AGGREGATE=true servers_per_gpu="${SUITE_SERVERS_PER_GPU}" \
+        max_concurrent_workers_per_gpu="${SUITE_MAX_CONCURRENT_WORKERS_PER_GPU}" \
         max_tasks_per_suite="${SUITE_MAX_TASKS_PER_SUITE}" \
         exact_tasks_per_suite="${SUITE_EXACT_TASKS_PER_SUITE}" \
         max_batch_size="${SUITE_MAX_BATCH_SIZE}" max_wait_time="${SUITE_MAX_WAIT_TIME}" \
@@ -322,45 +366,40 @@ NODE_PARTITION_CMD='
             "${SUITE_SERVERS_PER_GPU}" "${SUITE_NUM_NODES}"
 '
 
-for eval_suite in "${SUITES[@]}"; do
-    echo ""
-    echo "############################################"
-    echo "# Evaluating suite: ${eval_suite} (${NUM_NODES} node(s))"
-    echo "############################################"
-    # Retry the suite rather than losing it. A degraded render GPU kills the whole
-    # partition with an EGL abort or EGL_NOT_INITIALIZED -- seven such casualties on seven
-    # different nodes in one day here, each costing 1-2h of rollouts and returning nothing.
-    # Every attempt after the first runs with STARVLA_RESUME_EVAL=1, so shards that already
-    # wrote their JSON are skipped and only the missing ones are re-rolled: the partitioning
-    # is untouched, so a recovered suite evaluates exactly the episodes an uninterrupted run
-    # would have. SUITE_ATTEMPTS=1 disables it.
-    suite_attempt=0
-    while : ; do
-        suite_attempt=$((suite_attempt + 1))
-        suite_rc=0
-        if [ "${suite_attempt}" -gt 1 ]; then
-            export STARVLA_RESUME_EVAL=1
-            echo "[retry ${suite_attempt}/${SUITE_ATTEMPTS}] ${eval_suite}: resuming, completed shards are kept"
-        fi
-        if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
-            # The sbatch shell already runs on the allocated node. Avoid an extra
-            # ParaStation spawn when its step launcher is unavailable; still use
-            # the same four-GPU pipeline and exact-task partitioning (one partition).
-            SLURM_PROCID=0 bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}" || suite_rc=$?
-        else
-            srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
-                bash -c "${NODE_PARTITION_CMD}" _ "${eval_suite}" || suite_rc=$?
-        fi
-        [ "${suite_rc}" -eq 0 ] && break
-        if [ "${suite_attempt}" -ge "${SUITE_ATTEMPTS}" ]; then
-            echo "[ERROR] ${eval_suite}: failed ${suite_attempt} attempt(s) on $(hostname) -- giving up"
-            echo "${eval_suite} failed after ${suite_attempt} attempts on $(hostname)" \
-                >> "${output_dir}/failed_suites.txt"
-            break
-        fi
-        echo "[WARN] ${eval_suite}: attempt ${suite_attempt} failed (rc=${suite_rc}) on $(hostname); retrying"
-    done
+SUITE_CSV=$(IFS=,; echo "${SUITES[*]}")
+echo "Starting one server lifecycle for suites: ${SUITE_CSV}"
 
+# Retry the combined run rather than losing it. On a retry, completed shard JSONs
+# from every suite are retained and only missing shards are rolled again. A retry
+# necessarily reloads the servers, but the healthy path now has one load per node
+# instead of one load per suite.
+suite_attempt=0
+while : ; do
+    suite_attempt=$((suite_attempt + 1))
+    suite_rc=0
+    if [ "${suite_attempt}" -gt 1 ]; then
+        export STARVLA_RESUME_EVAL=1
+        echo "[retry ${suite_attempt}/${SUITE_ATTEMPTS}] suites=${SUITE_CSV}: completed shards are kept"
+    fi
+    if [ "${STARVLA_EVAL_IN_BATCH:-0}" = 1 ]; then
+        # The sbatch shell already runs on the allocated node. Avoid an extra
+        # ParaStation spawn when its step launcher is unavailable.
+        SLURM_PROCID=0 bash -c "${NODE_PARTITION_CMD}" _ "${SUITE_CSV}" || suite_rc=$?
+    else
+        srun --ntasks="${NUM_NODES}" --ntasks-per-node=1 \
+            bash -c "${NODE_PARTITION_CMD}" _ "${SUITE_CSV}" || suite_rc=$?
+    fi
+    [ "${suite_rc}" -eq 0 ] && break
+    if [ "${suite_attempt}" -ge "${SUITE_ATTEMPTS}" ]; then
+        echo "[ERROR] suites=${SUITE_CSV}: failed ${suite_attempt} attempt(s) -- giving up"
+        echo "${SUITE_CSV} failed after ${suite_attempt} attempts on $(hostname)" \
+            >> "${output_dir}/failed_suites.txt"
+        exit "${suite_rc}"
+    fi
+    echo "[WARN] suites=${SUITE_CSV}: attempt ${suite_attempt} failed (rc=${suite_rc}); retrying"
+done
+
+for eval_suite in "${SUITES[@]}"; do
     echo "All ${NUM_NODES} partition(s) of ${eval_suite} finished. Aggregating..."
     # Suite-scoped: writes output_dir/<suite>/overall_results.json only, so this
     # can never race with / overwrite another suite's results (each suite in

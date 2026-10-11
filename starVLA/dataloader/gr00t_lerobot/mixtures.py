@@ -87,6 +87,12 @@ DATASET_NAMED_MIXTURES = {
     "libero_mixed": [
         ("libero", 1.0, "libero_franka"),
     ],
+    # 2026-10-07 data-scaling test: the 4 suites + LIBERO-90 (libero90_pm: ae project's v3.0 copy with the gripper
+    # action remapped to PI's -1 open / +1 close), sampled 50 / 50 (get_vla_dataset does not balance by length).
+    "libero_mixed_90": [
+        ("libero", 1.0, "libero_franka"),
+        ("libero90_pm", 1.0, "libero_franka"),
+    ],
 
     "vlabench_primitive": [
         ("vlabench_primitive_ft_lerobot_video", 1.0, "vlabench_franka"),

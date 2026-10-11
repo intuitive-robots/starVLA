@@ -180,6 +180,16 @@ def eval_libero(args: Args) -> None:
                     "image": [observation["observation.primary"][0], observation["observation.wrist_image"][0]],
                     "lang": observation["instruction"][0],
                 }
+                # Proprioception, but ONLY for checkpoints trained with it. The state above
+                # was computed and then dropped, so every state-trained policy rolled out
+                # with no [STATE] suffix and no state token while having had both in every
+                # training sample. Sent RAW on purpose: Libero4in1DataConfig.transform()
+                # normalises the ACTION keys only, so training quantises raw state into 256
+                # bins over [-1,1] and passing raw state reproduces that exactly. Layout
+                # matches modality.json dim-for-dim ([x,y,z,roll,pitch,yaw,pad,gripper],
+                # dims 6-7 being the two gripper_qpos joints). See JOBS.md.
+                if getattr(client_model, "expects_state", False):
+                    example_dict["state"] = observation["observation.state"]
 
                 start_time = time.time()
 

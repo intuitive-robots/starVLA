@@ -1,0 +1,34 @@
+jpbo-072-37
+jpbo-048-37
+jpbo-006-23
+jpbo-114-01
+jpbo-118-34
+jpbo-118-34  # 2026-09-24 CloseBlenderLid aborts x3 (1984250)
+jpbo-055-03  # 2026-09-24 read_pixels aborts mid-episode (1971847)
+jpbo-026-35  # 2026-09-24 read_pixels abort (1971849)
+jpbo-085-13  # 2026-09-24 read_pixels abort (1990656; also LIBERO rc=134)
+jpbo-109-17  # 2026-09-24 read_pixels abort (1990660)
+jpbo-042-48  # 2026-09-24 read_pixels abort (1971851)
+jpbo-109-15  # 2026-09-24 read_pixels abort (1990659)
+jpbo-085-03  # 2026-09-24 read_pixels (rcx152); jpbo-085 rack looks degraded
+jpbo-085-15  # 2026-09-24 read_pixels (rcx152); jpbo-085 rack looks degraded
+jpbo-085-16  # 2026-09-24 read_pixels (rcx152); jpbo-085 rack looks degraded
+jpbo-048-36  # 2026-09-24 read_pixels (rcko enc_s4_text2img)
+jpbo-048-45  # 2026-09-24 read_pixels (rcko enc_s4_img2state)
+jpbo-048-38  # 2026-09-24 read_pixels (rcko enc_s4_instr2img)
+jpbo-048-41  # 2026-09-24 read_pixels (rcko enc_s4_img2text)
+jpbo-048-43  # 2026-09-24 read_pixels (rcko enc_s4_img2instr)
+jpbo-049-21  # 2026-09-24 read_pixels (rcko prefixlm_s4_instr2img)
+jpbo-100-43  # 2026-09-24 read_pixels (rcko prefixlm_s4_img2text)
+jpbo-100-44  # 2026-09-24 read_pixels (rcko prefixlm_s4_img2instr)
+jpbo-100-45  # 2026-09-24 read_pixels (rcko prefixlm_s4_img2state)
+jpbo-100-46  # 2026-09-24 read_pixels (rcko prefixlm_s4_state2img)
+jpbo-088-46  # 2026-09-24 read_pixels (rcko causal_s4_instr2img)
+jpbo-047-44  # 2026-09-24 policy servers hung in model load 30 min (1994028)
+jpbo-033-31  # 2026-09-24 read_pixels (rcko noconv s4 img2instr)
+jpbo-001-46  # 2026-09-24 read_pixels (job 1994679)
+jpbo-008-31  # 2026-09-24 read_pixels (job 1994356)
+jpbo-021-46  # 2026-09-24 read_pixels (job 1994386)
+jpbo-008-30  # 2026-09-24 read_pixels (job 1994352)
+jpbo-085-03  # 2026-09-24 read_pixels (job 1992278)
+jpbo-108-44  # 2026-09-25 RoboCasa aborts, 0/17 units in 53 min (1997168)

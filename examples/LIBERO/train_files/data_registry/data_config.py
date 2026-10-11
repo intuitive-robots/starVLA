@@ -4,7 +4,7 @@ import os
 
 from starVLA.dataloader.gr00t_lerobot.datasets import ModalityConfig
 from starVLA.dataloader.gr00t_lerobot.transform.base import ComposedModalityTransform
-from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionToTensor, StateActionTransform
+from starVLA.dataloader.gr00t_lerobot.transform.state_action import StateActionToTensor, StateActionTransform, StateBinarize
 from starVLA.dataloader.gr00t_lerobot.transform.video import (
     VideoColorJitter,
     VideoCrop,
@@ -13,7 +13,7 @@ from starVLA.dataloader.gr00t_lerobot.transform.video import (
     VideoToNumpy,
     VideoToTensor,
 )
-from starVLA.dataloader.cot_augmentation import CoTVideoAugment
+from starVLA.dataloader.cot_augmentation import AnnotVideoAugment, CoTVideoAugment
 from starVLA.dataloader.gr00t_lerobot.embodiment_tags import EmbodimentTag
 
 
@@ -97,9 +97,17 @@ class Libero4in1DataConfig:
             raise ValueError(
                 f"unknown LIBERO augmentation {augmentation!r}; expected one of {sorted(allowed)}")
         has_cot = bool(data_cfg.get("cot"))
+        has_annot = bool(data_cfg.get("annot", False))
+        if has_annot and has_cot:
+            raise ValueError("datasets.vla_data.annot and cot cannot be combined (both own the joint image geometry)")
 
         transforms = []
-        if augmentation != "none" and has_cot:
+        if augmentation != "none" and has_annot:
+            # Simulator annotations (masks, 2D boxes) must follow the image geometry: one sampled crop and
+            # angle for every camera and the annotation, same recipe and parameters as below (2026-10-03).
+            transforms.append(AnnotVideoAugment(
+                apply_to=self.video_keys, mode=augmentation, crop_scale=0.95))
+        elif augmentation != "none" and has_cot:
             # The dataset attaches the resolved conversation before transforms run, letting
             # workers overlap image augmentation and coordinate rewriting with GPU compute.
             transforms.append(CoTVideoAugment(
@@ -134,6 +142,30 @@ class Libero4in1DataConfig:
                 VideoToNumpy(apply_to=self.video_keys),
             ])
 
+        # Opt-in q99 state normalization (``datasets.vla_data.state_normalization: q99``).
+        # Default stays raw: every LIBERO ladder checkpoint was trained on raw state, which
+        # the state-token quantizer clips to [-1, 1] (roll collapses to one bin). The base
+        # Libero4in1DataConfig's q99 switch is shadowed by this registry class.
+        state_normalization = data_cfg.get("state_normalization", None)
+        if state_normalization in ("", "none", "raw", False):
+            state_normalization = None
+        if state_normalization not in (None, "q99"):
+            raise ValueError(f"LIBERO state_normalization must be raw or 'q99', got {state_normalization!r}")
+        # 2026-10-09: optional open / closed gripper (``state_gripper_binary: true``, q99 only): both finger joints
+        # snapped to -1 / +1 after normalisation. The state-resolution probe showed q99 policies use the precise
+        # finger opening as a replay cue; raw-state policies see it in only ~6 bins.
+        gripper_binary = bool(data_cfg.get("state_gripper_binary", False))
+        if gripper_binary and state_normalization != "q99":
+            raise ValueError("LIBERO state_gripper_binary needs state_normalization: q99")
+        if state_normalization == "q99":
+            transforms.extend([
+                StateActionToTensor(apply_to=self.state_keys),
+                StateActionTransform(apply_to=self.state_keys,
+                                     normalization_modes={key: "q99" for key in self.state_keys}),
+            ])
+            if gripper_binary:
+                transforms.append(StateBinarize(apply_to=["state.pad", "state.gripper"]))
+
         normalization_modes = {
             "action.x": "min_max",
             "action.y": "min_max",
@@ -155,8 +187,28 @@ class Libero4in1DataConfig:
         return ComposedModalityTransform(transforms=transforms)
 
 
+class Libero4in1PrimaryOnlyDataConfig(Libero4in1DataConfig):
+    """Single-view LIBERO: agent-view camera only, no wrist camera (rebuttal H-cam).
+
+    Identical to ``Libero4in1DataConfig`` except ``video_keys``: same state/action keys,
+    same transforms and the same FRANKA embodiment tag, so dataset_statistics.json keeps
+    its ``franka`` key. Selected with ``datasets.vla_data.data_mix: libero_mixed_primary``.
+
+    ``serve_image_indices`` is the serving contract: the policy server
+    (deployment/model_server/policy_wrapper.py) keeps only these positions of the
+    client's image list, so an eval client that sends [agentview, wrist] feeds the model
+    exactly the one view it was trained on. Absent on every other DataConfig (no-op).
+    """
+
+    video_keys = [
+        "video.primary_image",
+    ]
+    serve_image_indices = [0]
+
+
 ROBOT_TYPE_CONFIG_MAP = {
     "libero_franka": Libero4in1DataConfig(),
+    "libero_franka_primary": Libero4in1PrimaryOnlyDataConfig(),
 }
 
 
@@ -167,6 +219,9 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
     # Per Proposal A, embodiment_tag now lives as a classvar on each DataConfig.
     # The registry derives ROBOT_TYPE_TO_EMBODIMENT_TAG automatically. Kept as
     # an empty dict for backward compat (it is honored as legacy override).
+    # The loader (lerobot_datasets.make_LeRobotSingleDataset) still reads this map and
+    # falls back to NEW_EMBODIMENT, so the single-view robot type is listed explicitly.
+    "libero_franka_primary": EmbodimentTag.FRANKA,
 }
 
 
@@ -185,5 +240,9 @@ DATASET_NAMED_MIXTURES = {
     ],
     "multi_robot": [
         ("LEROBOT_LIBERO_DATA/libero_10_no_noops_1.0.0_lerobot", 1.0, "libero_franka"),
+    ],
+    # Same data as the base ``libero_mixed`` (mixtures.py), agent-view camera only.
+    "libero_mixed_primary": [
+        ("libero", 1.0, "libero_franka_primary"),
     ],
 }

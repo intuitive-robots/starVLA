@@ -92,6 +92,10 @@ class ModelClient:
 
         server_meta = self.client.get_server_metadata()
         self.action_chunk_size = server_meta["action_chunk_size"]
+        # Whether this checkpoint was trained with proprioceptive state. Older servers do
+        # not advertise it; False is the historically correct default, because every
+        # LIBERO config before 2026-09 set state_dim: 0.
+        self.expects_state = bool(server_meta.get("expects_state", False))
         print(f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key}, server_meta: {server_meta} ***")
 
     def _add_image_to_history(self, image: np.ndarray) -> None:

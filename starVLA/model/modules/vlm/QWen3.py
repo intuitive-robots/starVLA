@@ -2,12 +2,15 @@
 # Licensed under the MIT License, Version 1.0 (the "License");
 # Implemented by [Jinhui YE / HKUST University] in [2025].
 
+from types import MethodType
 from typing import Optional
 
 import torch
 from starVLA.training.trainer_utils import initialize_overwatch
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+from transformers.models.qwen3_vl.modeling_qwen3_vl import apply_rotary_pos_emb
 
 logger = initialize_overwatch(__name__)
 
@@ -24,6 +27,324 @@ _ACTION_TOKEN_MAX = (
 
 
 import torch.nn as nn
+
+
+# ``framework.qwenvl.prompt_order``: where the user text goes relative to the images.
+#   image_first (default, unset): [images] [instruction (+ [STATE] ... [ACTION])], the
+#       historical layout, byte-identical to before this flag existed.
+#   text_first: [instruction (+ state)] [images]. Under a causal mask image tokens can
+#       read the instruction and state, but instruction tokens can no longer read images.
+#   sandwich: [instruction copy, no state] [images] [instruction (+ state)]. The trailing
+#       block is exactly the image_first text, so the instruction->image route and the
+#       state position are unchanged, and image tokens can additionally read the copy.
+PROMPT_ORDERS = ("image_first", "text_first", "sandwich")
+_STATE_SUFFIX_MARKER = " [STATE] "
+
+
+def _resolve_prompt_order(value) -> str:
+    order = "image_first" if value is None else str(value).strip().lower()
+    if order not in PROMPT_ORDERS:
+        raise ValueError(f"framework.qwenvl.prompt_order must be one of {PROMPT_ORDERS}, got {value!r}")
+    return order
+
+
+def _instruction_copy_without_state(prompt: str) -> str:
+    """Sandwich lead text: the prompt up to the appended state block (StateTokenMixin
+    writes ``f"{instruction} [STATE] {slots} [ACTION]"``). A row whose state was dropped
+    has no block, so the copy is the whole prompt."""
+    lead = prompt.split(_STATE_SUFFIX_MARKER, 1)[0]
+    if "<|fim_pad|>" in lead or "[STATE]" in lead:
+        raise RuntimeError(f"sandwich lead text still carries state placeholders: {lead!r}")
+    return lead
+
+
+def arrange_prompt_content(image_items: list, prompt: str, prompt_order: str) -> list:
+    """User-turn content list for one sample (see PROMPT_ORDERS)."""
+    text_item = {"type": "text", "text": prompt}
+    if prompt_order == "image_first":
+        return list(image_items) + [text_item]
+    if prompt_order == "text_first":
+        return [text_item] + list(image_items)
+    if prompt_order == "sandwich":
+        lead = {"type": "text", "text": _instruction_copy_without_state(prompt)}
+        return [lead] + list(image_items) + [text_item]
+    raise ValueError(f"unknown prompt_order {prompt_order!r}")
+
+
+def build_modality_block_ids(
+    input_ids: torch.Tensor,
+    attention_mask: Optional[torch.Tensor],
+    vision_start_token_id: int,
+    vision_end_token_id: int,
+    state_token_mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Assign valid prompt tokens to camera, language, and state blocks.
+
+    Every block is internally bidirectional. Information between blocks follows prompt
+    order: a block may attend to itself and earlier blocks, never later blocks. ``-1`` is
+    padding. Chat boilerplate before the first image belongs to camera 1, separators
+    between images belong to the following camera, and the suffix from the first state
+    token onward belongs to the state block.
+    """
+    if input_ids.ndim != 2:
+        raise ValueError(f"input_ids must be [batch, length], got {tuple(input_ids.shape)}")
+    if attention_mask is None:
+        valid = torch.ones_like(input_ids, dtype=torch.bool)
+    else:
+        if attention_mask.shape != input_ids.shape:
+            raise ValueError("attention_mask and input_ids must have the same shape")
+        valid = attention_mask.to(dtype=torch.bool)
+    if state_token_mask is not None and state_token_mask.shape != input_ids.shape:
+        raise ValueError("state_token_mask and input_ids must have the same shape")
+
+    block_ids = torch.full_like(input_ids, -1, dtype=torch.long)
+    for row in range(input_ids.shape[0]):
+        valid_pos = valid[row].nonzero(as_tuple=True)[0]
+        if valid_pos.numel() == 0:
+            continue
+        starts = ((input_ids[row] == vision_start_token_id) & valid[row]).nonzero(as_tuple=True)[0]
+        ends = ((input_ids[row] == vision_end_token_id) & valid[row]).nonzero(as_tuple=True)[0]
+        if starts.numel() != ends.numel():
+            raise RuntimeError(
+                f"row {row}: unmatched vision delimiters ({starts.numel()} starts, "
+                f"{ends.numel()} ends)"
+            )
+
+        cursor = int(valid_pos[0])
+        block = 0
+        for start, end in zip(starts.tolist(), ends.tolist()):
+            if start < cursor or end < start:
+                raise RuntimeError(f"row {row}: malformed or overlapping vision span")
+            block_ids[row, cursor : end + 1] = block
+            cursor = end + 1
+            block += 1
+
+        valid_end = int(valid_pos[-1]) + 1
+        if starts.numel() == 0:
+            block = 0
+            cursor = int(valid_pos[0])
+
+        state_start = None
+        if state_token_mask is not None:
+            state_pos = (state_token_mask[row].to(dtype=torch.bool) & valid[row]).nonzero(as_tuple=True)[0]
+            if state_pos.numel() > 0:
+                state_start = int(state_pos[0])
+
+        language_end = state_start if state_start is not None else valid_end
+        if cursor < language_end:
+            block_ids[row, cursor:language_end] = block
+            block += 1
+        if state_start is not None:
+            block_ids[row, state_start:valid_end] = block
+
+        if bool((block_ids[row, valid_pos] < 0).any()):
+            raise RuntimeError(f"row {row}: one or more valid tokens were not assigned a block")
+    return block_ids
+
+
+def build_modality_block_pack_plan(block_ids: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Precompute the invariant gather/scatter indices for one prompt batch."""
+    groups = []
+    max_block = int(block_ids.max().item())
+    for source_row in range(block_ids.shape[0]):
+        for block in range(max_block + 1):
+            current_pos = (block_ids[source_row] == block).nonzero(as_tuple=True)[0]
+            if current_pos.numel() == 0:
+                continue
+            previous_pos = (
+                (block_ids[source_row] >= 0) & (block_ids[source_row] < block)
+            ).nonzero(as_tuple=True)[0]
+            groups.append((source_row, current_pos, previous_pos))
+    if not groups:
+        raise RuntimeError("modality block plan contains no query groups")
+
+    max_current = max(current_pos.numel() for _, current_pos, _ in groups)
+    max_previous = max(previous_pos.numel() for _, _, previous_pos in groups)
+    key_length = max_previous + max_current
+    device = block_ids.device
+    source_rows = torch.tensor(
+        [source_row for source_row, _, _ in groups], dtype=torch.long, device=device
+    )
+    query_indices = torch.zeros((len(groups), max_current), dtype=torch.long, device=device)
+    key_indices = torch.zeros((len(groups), key_length), dtype=torch.long, device=device)
+    query_mask = torch.zeros((len(groups), max_current), dtype=torch.bool, device=device)
+    key_mask = torch.zeros((len(groups), key_length), dtype=torch.bool, device=device)
+    for packed_row, (_, current_pos, previous_pos) in enumerate(groups):
+        n_current = current_pos.numel()
+        n_previous = previous_pos.numel()
+        query_offset = max_current - n_current
+        key_current_offset = max_previous + query_offset
+        query_indices[packed_row, query_offset:] = current_pos
+        query_mask[packed_row, query_offset:] = True
+        if n_previous:
+            key_indices[packed_row, :n_previous] = previous_pos
+            key_mask[packed_row, :n_previous] = True
+        key_indices[packed_row, key_current_offset:] = current_pos
+        key_mask[packed_row, key_current_offset:] = True
+    return {
+        "source_rows": source_rows,
+        "query_indices": query_indices,
+        "key_indices": key_indices,
+        "query_mask": query_mask,
+        "key_mask": key_mask,
+    }
+
+
+def build_full_prefix_pack_plan(attention_mask: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Right-align every valid prompt for one non-causal FA3 call.
+
+    QwenGR00T has no teacher-forced answer in the plain policy recipe: cameras,
+    instruction, and tokenized state are all observation-prefix tokens.  This is
+    therefore the policy-time half of a PaLiGemma-style PrefixLM mask.
+    """
+    if attention_mask.ndim != 2:
+        raise ValueError(
+            f"attention_mask must have shape [batch, length], got {tuple(attention_mask.shape)}"
+        )
+    valid = attention_mask.to(dtype=torch.bool)
+    lengths = valid.sum(dim=1)
+    if bool((lengths == 0).any()):
+        bad = (lengths == 0).nonzero(as_tuple=True)[0].tolist()
+        raise ValueError(f"full-prefix rows contain no valid tokens: {bad}")
+    width = int(lengths.max().item())
+    indices = torch.zeros((valid.shape[0], width), dtype=torch.long, device=valid.device)
+    keep = torch.zeros((valid.shape[0], width), dtype=torch.bool, device=valid.device)
+    for row in range(valid.shape[0]):
+        pos = valid[row].nonzero(as_tuple=True)[0]
+        indices[row, width - pos.numel() :] = pos
+        keep[row, width - pos.numel() :] = True
+    return {"indices": indices, "keep": keep, "valid": valid}
+
+
+def _modality_block_attention_forward(
+    self,
+    hidden_states: torch.Tensor,
+    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    attention_mask: Optional[torch.Tensor],
+    past_key_values=None,
+    **kwargs,
+):
+    """FA3 attention: bidirectional within blocks, causal between blocks.
+
+    FA3 does not consume arbitrary dense masks. For block ``g`` this packs keys from
+    blocks ``<= g`` and queries from block ``g``, then calls FA3 non-causally. All
+    (sample, block) rows are packed into one enlarged batch, so this costs one kernel call
+    per layer rather than one call per sample or semantic block.
+    """
+    if past_key_values is not None:
+        raise RuntimeError(
+            "modality_block_causal is a full-prompt policy topology and does not support KV-cache generation"
+        )
+    block_ids = getattr(self, "_starvla_modality_block_ids", None)
+    if block_ids is None or block_ids.shape != hidden_states.shape[:2]:
+        raise RuntimeError("modality block ids were not installed for this attention forward")
+    pack_plan = getattr(self, "_starvla_modality_pack_plan", None)
+    if pack_plan is None:
+        # Unit/direct callers may not go through the wrapper. Production computes this
+        # once per input batch and shares it across all layers and checkpoint replays.
+        pack_plan = build_modality_block_pack_plan(block_ids)
+
+    input_shape = hidden_states.shape[:-1]
+    hidden_shape = (*input_shape, -1, self.head_dim)
+    query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+    cos, sin = position_embeddings
+    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+    if self.config._attn_implementation != "flash_attention_3":
+        raise RuntimeError("modality_block_causal requires flash_attention_3")
+    attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+
+    batch, query_heads, _, head_dim = query_states.shape
+    key_value_heads = key_states.shape[1]
+    output = query_states.new_zeros((batch, input_shape[1], query_heads, head_dim))
+    # The wrapper builds these indices once. Vectorized gathers avoid reconstructing the
+    # same groups in every layer and again during gradient-checkpoint backward replays.
+    source_rows = pack_plan["source_rows"]
+    query_indices = pack_plan["query_indices"]
+    key_indices = pack_plan["key_indices"]
+    query_mask = pack_plan["query_mask"]
+    kv_mask = pack_plan["key_mask"]
+    q_pack = query_states[source_rows[:, None], :, query_indices].permute(0, 2, 1, 3)
+    k_pack = key_states[source_rows[:, None], :, key_indices].permute(0, 2, 1, 3)
+    v_pack = value_states[source_rows[:, None], :, key_indices].permute(0, 2, 1, 3)
+
+    block_output, _ = attention_interface(
+        self,
+        q_pack,
+        k_pack,
+        v_pack,
+        kv_mask,
+        dropout=0.0 if not self.training else self.attention_dropout,
+        scaling=self.scaling,
+        is_causal=False,
+        **kwargs,
+    )
+    destination = source_rows[:, None] * input_shape[1] + query_indices
+    output = output.view(batch * input_shape[1], query_heads, head_dim).index_copy(
+        0, destination[query_mask], block_output[query_mask]
+    ).view(batch, input_shape[1], query_heads, head_dim)
+
+    output = output.reshape(*input_shape, -1).contiguous()
+    return self.o_proj(output), None
+
+
+def _full_prefix_attention_forward(
+    self,
+    hidden_states: torch.Tensor,
+    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    attention_mask: Optional[torch.Tensor],
+    past_key_values=None,
+    **kwargs,
+):
+    """FA3 full-attention forward over the complete valid observation prefix."""
+    if past_key_values is not None:
+        raise RuntimeError(
+            "full_prefix_bidir is a policy representation topology and does not support KV-cache generation"
+        )
+    plan = getattr(self, "_starvla_full_prefix_plan", None)
+    if plan is None:
+        raise RuntimeError("full-prefix pack plan was not installed before attention")
+    if self.config._attn_implementation != "flash_attention_3":
+        raise RuntimeError("full_prefix_bidir requires flash_attention_3")
+
+    input_shape = hidden_states.shape[:-1]
+    hidden_shape = (*input_shape, -1, self.head_dim)
+    query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+    cos, sin = position_embeddings
+    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+    attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+    batch, query_heads, seq_len, head_dim = query_states.shape
+    rows = torch.arange(batch, device=hidden_states.device)[:, None]
+    indices = plan["indices"]
+    keep = plan["keep"]
+    q_pack = query_states[rows, :, indices].permute(0, 2, 1, 3)
+    k_pack = key_states[rows, :, indices].permute(0, 2, 1, 3)
+    v_pack = value_states[rows, :, indices].permute(0, 2, 1, 3)
+    call_kwargs = dict(kwargs)
+    call_kwargs.pop("is_causal", None)
+    packed_output, _ = attention_interface(
+        self,
+        q_pack,
+        k_pack,
+        v_pack,
+        keep,
+        dropout=0.0 if not self.training else self.attention_dropout,
+        scaling=self.scaling,
+        is_causal=False,
+        **call_kwargs,
+    )
+    output = query_states.new_zeros((batch, seq_len, query_heads, head_dim))
+    destination = rows * seq_len + indices
+    output = output.view(batch * seq_len, query_heads, head_dim).index_copy(
+        0, destination[keep], packed_output[keep]
+    ).view(batch, seq_len, query_heads, head_dim)
+    output = output.reshape(*input_shape, -1).contiguous()
+    return self.o_proj(output), None
 
 
 class _QWen3_VL_Interface(nn.Module):
@@ -49,6 +370,27 @@ class _QWen3_VL_Interface(nn.Module):
         qwenvl_config = config.framework.get("qwenvl", {})
         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
+        self.attention_topology = str(qwenvl_config.get("attention_topology", "causal"))
+        if self.attention_topology not in {"causal", "modality_block_causal", "full_prefix_bidir"}:
+            raise ValueError(
+                "framework.qwenvl.attention_topology must be 'causal', "
+                "'modality_block_causal', or 'full_prefix_bidir'; "
+                f"got {self.attention_topology!r}"
+            )
+        if self.attention_topology in {"modality_block_causal", "full_prefix_bidir"} and attn_implementation != "flash_attention_3":
+            raise ValueError(f"{self.attention_topology} requires attn_implementation: flash_attention_3")
+        # Position of the user text relative to the camera images (rebuttal R4 control).
+        # Read from the (checkpoint) config, so eval reproduces the training layout.
+        self.prompt_order = _resolve_prompt_order(qwenvl_config.get("prompt_order", None))
+        if self.prompt_order != "image_first" and self.attention_topology == "modality_block_causal":
+            # build_modality_block_ids assumes [images][language][state]: text placed
+            # before the first image would be folded into the camera-1 block.
+            raise ValueError(
+                "framework.qwenvl.prompt_order != image_first is not supported with "
+                "attention_topology=modality_block_causal"
+            )
+        if self.prompt_order != "image_first":
+            print(f"__PROMPT_ORDER__ {self.prompt_order}", flush=True)
 
         # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
         if attn_implementation == "flash_attention_2":
@@ -71,6 +413,27 @@ class _QWen3_VL_Interface(nn.Module):
         self.processor = processor
         self.config = config
 
+        if self.attention_topology == "modality_block_causal":
+            for layer in self.model.model.language_model.layers:
+                layer.self_attn.forward = MethodType(
+                    _modality_block_attention_forward, layer.self_attn
+                )
+            print(
+                "__ATTENTION_TOPOLOGY__ modality_block_causal "
+                "(bidirectional within camera/language/state blocks; causal across blocks; FA3)",
+                flush=True,
+            )
+        elif self.attention_topology == "full_prefix_bidir":
+            for layer in self.model.model.language_model.layers:
+                layer.self_attn.forward = MethodType(
+                    _full_prefix_attention_forward, layer.self_attn
+                )
+            print(
+                "__ATTENTION_TOPOLOGY__ full_prefix_bidir "
+                "(single causal Qwen stack; all valid observation tokens mutually visible; FA3)",
+                flush=True,
+            )
+
         # alin qwen3 with qwen2.5
         self.model.config.hidden_size = self.model.config.text_config.hidden_size
 
@@ -91,6 +454,43 @@ class _QWen3_VL_Interface(nn.Module):
         # The causal Qwen model has no use for it and must not receive an unknown kwarg.
         kwargs.pop("_cot_encoder_prefix_length", None)
 
+        state_token_mask = kwargs.pop("_state_token_mask", None)
+        attentions = []
+        if self.attention_topology == "modality_block_causal":
+            if kwargs.get("input_ids") is None:
+                raise RuntimeError("modality_block_causal requires input_ids")
+            # This topology is used as a policy encoder, never for autoregressive token
+            # generation. Disabling the cache also prevents HF from materializing an
+            # empty DynamicCache and presenting it to the patched attention layers.
+            kwargs["use_cache"] = False
+            block_ids = build_modality_block_ids(
+                kwargs["input_ids"],
+                kwargs.get("attention_mask"),
+                int(self.model.config.vision_start_token_id),
+                int(self.model.config.vision_end_token_id),
+                state_token_mask,
+            )
+            pack_plan = build_modality_block_pack_plan(block_ids)
+            attentions = [layer.self_attn for layer in self.model.model.language_model.layers]
+            for attention in attentions:
+                attention._starvla_modality_block_ids = block_ids
+                attention._starvla_modality_pack_plan = pack_plan
+        elif self.attention_topology == "full_prefix_bidir":
+            if kwargs.get("attention_mask") is None:
+                if kwargs.get("input_ids") is None:
+                    raise RuntimeError("full_prefix_bidir requires attention_mask or input_ids")
+                valid_mask = torch.ones_like(kwargs["input_ids"], dtype=torch.long)
+            else:
+                valid_mask = kwargs["attention_mask"]
+            kwargs["use_cache"] = False
+            pack_plan = build_full_prefix_pack_plan(valid_mask)
+            attentions = [layer.self_attn for layer in self.model.model.language_model.layers]
+            for attention in attentions:
+                attention._starvla_full_prefix_plan = pack_plan
+
+        # Keep block_ids installed through backward: gradient checkpointing replays each
+        # layer after this wrapper's forward has returned. The next batch overwrites them
+        # before its own forward, after the preceding backward is complete.
         with torch.autocast("cuda", dtype=torch.bfloat16):
             outputs = self.model(
                 **kwargs,
@@ -156,8 +556,14 @@ class _QWen3_VL_Interface(nn.Module):
         assert len(images) == len(instructions), "Images and instructions must have the same length"
         if cot_modes is not None and len(cot_modes) != len(instructions):
             raise ValueError("cot_modes length must match batch size")
+        prompt_order = getattr(self, "prompt_order", "image_first")
+        # future_copies: the last _n_tail_images of each row go after the text (default 0: unchanged)
+        n_tail = int(getattr(self, "_n_tail_images", 0) or 0)
         for i, (imgs, instruction) in enumerate(zip(images, instructions)):
-            content = [{"type": "image", "image": img} for img in imgs]
+            image_items = [{"type": "image", "image": img} for img in imgs]
+            tail_items = []
+            if n_tail:
+                image_items, tail_items = image_items[:-n_tail], image_items[-n_tail:]
 
             conv = cot_conversations[i] if cot_conversations is not None else None
             if conv is not None:
@@ -174,7 +580,7 @@ class _QWen3_VL_Interface(nn.Module):
                     raise ValueError(f"unsupported cot mode: {mode!r}")
                 prompt = f"{prompt}\n/{mode}"
 
-            content.append({"type": "text", "text": prompt})
+            content = arrange_prompt_content(image_items, prompt, prompt_order) + tail_items
             msg = [{"role": "user", "content": content}]
 
             if solutions is not None:

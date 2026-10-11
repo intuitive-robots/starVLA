@@ -9,12 +9,13 @@ Note: No device placement or optimizer concerns handled here (delegated to train
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
 from transformers import PretrainedConfig, PreTrainedModel
 
+from starVLA.model._init_flags import set_skip_redundant_init
 from starVLA.model.framework.share_tools import dict_to_namespace, read_mode_config
 from starVLA.model.tools import FRAMEWORK_REGISTRY, FrameworkTools, auto_get_trainable_modules
 from starVLA.training.trainer_utils import initialize_overwatch
@@ -207,6 +208,7 @@ class baseframework(PreTrainedModel):
         cls,
         pretrained_checkpoint: str,
         is_inference: bool = False,
+        attn_implementation: Optional[str] = None,
         **kwargs,
     ) -> None:
         """
@@ -223,6 +225,8 @@ class baseframework(PreTrainedModel):
             pretrained_checkpoint: Path to .pt file inside run/checkpoints directory.
             is_inference: When True, allow inference-only fallbacks such as
                 skipping optional training-only assets (for example CoT mapping files).
+            attn_implementation: Optional inference-only attention backend override. This
+                changes model construction without rewriting the checkpoint's training config.
             **kwargs: Extra constructor overrides passed to subclass.
 
         Returns:
@@ -235,11 +239,28 @@ class baseframework(PreTrainedModel):
         pretrained_checkpoint = Path(pretrained_checkpoint)
         model_config, norm_stats = read_mode_config(pretrained_checkpoint)  # read config and norm_stats
 
+        if attn_implementation is not None:
+            model_config.setdefault("framework", {}).setdefault("qwenvl", {})[
+                "attn_implementation"
+            ] = str(attn_implementation)
+            logger.info(
+                "Inference override: framework.qwenvl.attn_implementation=%s",
+                attn_implementation,
+            )
+
         config = dict_to_namespace(model_config)
         model_config = config
         model_config.trainer.pretrained_checkpoint = None
 
-        FrameworkModel = build_framework(cfg=model_config, is_inference=is_inference, **kwargs)
+        # The strict=True load below overwrites every key in the model, so any
+        # weights read while CONSTRUCTING it are discarded. At inference that is
+        # pure startup latency (~7.2 GB for the enc-dec pretrain checkpoint, per
+        # policy server). Armed only around construction; training never sets it.
+        set_skip_redundant_init(is_inference)
+        try:
+            FrameworkModel = build_framework(cfg=model_config, is_inference=is_inference, **kwargs)
+        finally:
+            set_skip_redundant_init(False)
         # set for action un-norm
         FrameworkModel.norm_stats = norm_stats
         # Load from Checkpoint (Custom --> should load both *projector* and *llm* weights)
