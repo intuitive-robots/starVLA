@@ -73,6 +73,16 @@ class PIRecipeMixin:
                 raise ValueError("PI recipe: inference_vision_rate > 0 is not implemented")
         elif max(_resolve_scheduled_rate(self.pi_md_rate, s, "x") for s in (0, 10**9)) > 0.0:
             raise ValueError("framework.modality_dropout has a non-zero rate but enabled=false")
+        # modality_dropout.cameras (default: every image slot): the slots camera dropout may pick. A padded slot
+        # (e.g. pi0.5-DROID's masked right_wrist_0_rgb) must be left out, or independent dropout can remove both
+        # real cameras of a row (the all-cameras guard would only see the padded one survive).
+        cams = md.get("cameras", None)
+        if cams in (None, "null", "", []):
+            self.pi_md_cameras = list(range(len(self.image_keys)))
+        else:
+            self.pi_md_cameras = sorted({int(c) for c in ([cams] if isinstance(cams, (int, str)) else cams)})
+            if not all(0 <= c < len(self.image_keys) for c in self.pi_md_cameras):
+                raise ValueError(f"modality_dropout.cameras {self.pi_md_cameras} outside image_keys {self.image_keys}")
 
         self.pi_state_rate = float(fw.get("state_dropout_rate", 0.0) or 0.0)
         self.pi_state_mask = bool(fw.get("state_dropout_mask", False))
@@ -204,7 +214,6 @@ class PIRecipeMixin:
     def _pi_draw(self, batch: int) -> Dict:
         """state keep (StateTokenMixin._add_state_conditioning) -> cameras (_modality_vision_keep +
         _modality_zero_pixels) -> instruction (_mask_instruction_tokens), each a numpy draw as in the reference."""
-        n_cams = len(self.image_keys)
         if self.training and self.pi_state_rate > 0.0:
             state_keep = np.random.random(batch) >= self.pi_state_rate
         else:
@@ -221,7 +230,7 @@ class PIRecipeMixin:
             for row in range(batch):
                 if vision_keep[row]:
                     continue
-                cams = list(range(n_cams))
+                cams = list(self.pi_md_cameras)
                 if self.pi_md_mode == "camera":
                     chosen = [cams[int(np.random.randint(len(cams)))]]
                 elif self.pi_md_mode == "independent":

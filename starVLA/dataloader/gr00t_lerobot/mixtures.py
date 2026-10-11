@@ -79,6 +79,15 @@ DATASET_NAMED_MIXTURES = {
     "droid_pi05_2cam": [
         ("droid_success_180x320_pi05", 1.0, "droid_pi05_2cam"),
     ],
+    # 2026-10-11 v2: the same pi0.5 inputs on droid_resized_success (74,604 episodes, ~ARC's 74.7k), through the view
+    # droid_resized_success_pi05 (symlinked data/videos, own modality.json and keep_ranges). droid_pi05_resized samples
+    # exterior_1_left / exterior_2_left per sample as openpi's DROID loader; _ext1 keeps exterior_1_left only.
+    "droid_pi05_resized": [
+        ("droid_resized_success_pi05", 1.0, "droid_pi05_resized"),
+    ],
+    "droid_pi05_resized_ext1": [
+        ("droid_resized_success_pi05", 1.0, "droid_pi05_resized_ext1"),
+    ],
     "droid_lerobot_resized": [
         ("droid_resized", 1.0, "droid_lerobot_resized_joint_pos"),
     ],

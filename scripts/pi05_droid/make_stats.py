@@ -3,6 +3,8 @@
 1. <out_dir>/stats_override_openpi_droid_jointpos.json: LeRobot-style per-column statistics for
    datasets.vla_data.stats_override_path (gr00t loader). Columns: observation.joint_position (7),
    observation.gripper_position (1), action.joint_position (7, joint DELTAS a_t - s_0 as in openpi), action.gripper_position (1).
+   (v2) <out_dir>/stats_override_openpi_droid_jointpos_resized.json: the same values under droid_resized_success's
+   names (observation.state.joint_position / observation.state.gripper_position).
 2. <ckpt_dir>/dataset_statistics.json: the starVLA run format {tag: {action: {...,mask}, state: {...}, ...}} with
    flat 8-d arrays, so the converted checkpoint can be served directly.
 openpi has no min/max in its quantile stats; min/max are set to q01/q99 (only min_max mode would read them).
@@ -34,6 +36,12 @@ os.makedirs(out_dir, exist_ok=True)
 p1 = os.path.join(out_dir, "stats_override_openpi_droid_jointpos.json")
 json.dump({"source": src, "note": "openpi pi05_droid_jointpos quantile stats; actions = joint deltas to s_0 + abs gripper",
            "statistics": override}, open(p1, "w"), indent=1)
+# v2: the same values under droid_resized_success's column names (observation.state.*)
+p1r = os.path.join(out_dir, "stats_override_openpi_droid_jointpos_resized.json")
+json.dump({"source": src, "note": "openpi pi05_droid_jointpos quantile stats; actions = joint deltas to s_0 + abs gripper; "
+           "droid_resized_success column names",
+           "statistics": {k.replace("observation.", "observation.state.", 1): v for k, v in override.items()}},
+          open(p1r, "w"), indent=1)
 
 flat_s = take(st, 0, 8)
 flat_a = take(ac, 0, 8)

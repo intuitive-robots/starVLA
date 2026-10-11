@@ -5,22 +5,27 @@
 # copies meta/episodes and adds keep_ranges to it (openpi's DROID idle filter: joint-velocity deltas < 1e-3 for
 # >= 7 steps are idle, kept segments >= 16 steps, last 10 steps of each segment trimmed), and adds modality.json.
 # The loader writes nothing here when stats_override_path is set.
-# usage: make_view.sh <code_dir> ; runs in the starVLA image (pandas/pyarrow)
+# v2 (droid_resized_success; its own meta/modality.json already names the columns droid_pi05_resized reads):
+#   make_view.sh <code_dir> /e/scratch/m3/datasets/lerobot_3_0/DROID/droid_resized_success \
+#     /e/scratch/m3/blank4/pi05_droid/data/droid_resized_success_pi05 source
+# usage: make_view.sh <code_dir> [src] [view] [modality.json | source] ; runs in the starVLA image (pandas/pyarrow)
 set -euo pipefail
 CODE=${1:-/e/scratch/m3/blank4/pi05_droid/code}
-SRC=/e/scratch/m3/datasets/lerobot_3_0_transcoded/DROID/droid_success_180x320
-V=/e/scratch/m3/blank4/pi05_droid/data/droid_success_180x320_pi05
+SRC=${2:-/e/scratch/m3/datasets/lerobot_3_0_transcoded/DROID/droid_success_180x320}
+V=${3:-/e/scratch/m3/blank4/pi05_droid/data/droid_success_180x320_pi05}
+MOD=${4:-$CODE/examples/DROID/train_files/modality.json}
+[ "$MOD" = source ] && MOD=$SRC/meta/modality.json
 PY=/e/project1/m3/blank4/code/starVLA/scripts/env/starvla_python
 mkdir -p "$V/meta"
 ln -sfn "$SRC/data" "$V/data"
 ln -sfn "$SRC/videos" "$V/videos"
 for f in info.json stats.json tasks.parquet; do ln -sfn "$SRC/meta/$f" "$V/meta/$f"; done
-cp "$CODE/examples/DROID/train_files/modality.json" "$V/meta/modality.json"
+cp "$MOD" "$V/meta/modality.json"
 if [ ! -f "$V/meta/KEEP_RANGES_DONE" ]; then
   rm -rf "$V/meta/episodes"
   cp -r "$SRC/meta/episodes" "$V/meta/episodes"
   chmod -R u+w "$V/meta/episodes"
-  "$PY" -I /e/scratch/m3/blank4/pi05_droid/scripts/add_keep_ranges.py "$CODE" "$V"
+  "$PY" -I "$CODE/scripts/pi05_droid/add_keep_ranges.py" "$CODE" "$V"
   date > "$V/meta/KEEP_RANGES_DONE"
 fi
 "$PY" -I - "$V" <<'EOF'

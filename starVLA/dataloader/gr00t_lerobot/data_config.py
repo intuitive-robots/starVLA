@@ -904,6 +904,50 @@ class DroidPi05TwoCamDataConfig:
         return ComposedModalityTransform(transforms=transforms)
 
 
+class DroidPi05ResizedDataConfig(DroidPi05TwoCamDataConfig):
+    """``DroidPi05TwoCamDataConfig`` on ``droid_resized_success`` (2026-10-11 v2; 74,604 episodes, 180x320 AV1,
+    column names ``observation.state.*`` / ``observation.images.{exterior_1_left, exterior_2_left, wrist_left}``).
+
+    Two images reach the model, [exterior, wrist]; the PI05 framework pads its third slot (right_wrist_0_rgb) with
+    a black image whose mask is False, as openpi's DroidInputs does. The exterior camera follows openpi's DROID
+    training loader (droid_rlds_dataset.py): exterior_1_left or exterior_2_left at random, which needs
+    ``sample_video_groups: [[video.exterior_1_left, video.exterior_2_left]]`` (the default here; in eval mode the
+    loader takes the first, exterior_1_left, which is what openpi's DroidInputs and RoboLab feed at inference).
+    ``droid_pi05_resized_ext1`` (``DroidPi05ResizedExt1DataConfig``) loads exterior_1_left only.
+    """
+
+    default_data_cfg = {"sample_video_groups": [["video.exterior_1_left", "video.exterior_2_left"]]}
+    video_keys = [
+        "video.exterior_1_left",
+        "video.exterior_2_left",
+        "video.wrist_left",
+    ]
+    language_keys = [
+        "annotation.language_instruction",
+        "annotation.language_instruction_2",
+        "annotation.language_instruction_3",
+    ]
+
+    def transform(self, data_cfg: dict | None = None):
+        groups = [sorted(str(k) if str(k).startswith("video.") else f"video.{k}" for k in g)
+                  for g in ((data_cfg or {}).get("sample_video_groups") or [])]
+        if len(self.video_keys) == 3 and sorted(self.video_keys[:2]) not in groups:
+            # without the group all three cameras load and the wrist lands in the third (masked) slot
+            raise ValueError("droid_pi05_resized needs sample_video_groups [[video.exterior_1_left, "
+                             "video.exterior_2_left]] (or use droid_pi05_resized_ext1)")
+        return super().transform(data_cfg=data_cfg)
+
+
+class DroidPi05ResizedExt1DataConfig(DroidPi05ResizedDataConfig):
+    """``DroidPi05ResizedDataConfig`` with exterior_1_left only (no exterior sampling)."""
+
+    default_data_cfg = {}
+    video_keys = [
+        "video.exterior_1_left",
+        "video.wrist_left",
+    ]
+
+
 ###########################################################################################
 
 class DroidLerobotResizedJointPosDataConfig:
@@ -1477,6 +1521,8 @@ ROBOT_TYPE_CONFIG_MAP = {
     "droid_lerobot_joint_pos": DroidLerobotJointPosDataConfig(),
     "droid_lerobot_resized_joint_pos": DroidLerobotResizedJointPosDataConfig(),
     "droid_pi05_2cam": DroidPi05TwoCamDataConfig(),
+    "droid_pi05_resized": DroidPi05ResizedDataConfig(),
+    "droid_pi05_resized_ext1": DroidPi05ResizedExt1DataConfig(),
     "SO101": SO101Config(),
     "demo_sim_franka_delta_joints": SingleFrankaRobotiqDeltaJointsDataConfig(),
     "arx_x5": ArxX5DataConfig(),

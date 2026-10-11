@@ -74,6 +74,8 @@ ROBOT_TYPE_TO_EMBODIMENT_TAG = {
     "droid_lerobot_delta_eef": EmbodimentTag.FRANKA,
     "droid_lerobot_resized_joint_pos": EmbodimentTag.FRANKA,
     "droid_pi05_2cam": EmbodimentTag.FRANKA,
+    "droid_pi05_resized": EmbodimentTag.FRANKA,
+    "droid_pi05_resized_ext1": EmbodimentTag.FRANKA,
     "droid_lerobot_resized_delta_eef": EmbodimentTag.FRANKA,
     "demo_sim_franka_delta_joints": EmbodimentTag.FRANKA,
     "custom_robot_config": EmbodimentTag.NEW_EMBODIMENT,

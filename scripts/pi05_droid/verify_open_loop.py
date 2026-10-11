@@ -26,6 +26,11 @@ p.add_argument("--bs", type=int, default=16)
 p.add_argument("--steps", type=int, default=15)
 p.add_argument("--seed", type=int, default=0)
 p.add_argument("--out", default="")
+# v2: override framework.image_keys (comma list: 2 slots = v1, 3 = openpi's padded right_wrist slot) and the data mix /
+# stats file, so 2- and 3-slot inference are scored on the same frames
+p.add_argument("--image_keys", default="")
+p.add_argument("--data_mix", default="")
+p.add_argument("--stats_override_path", default="")
 a = p.parse_args()
 sys.path.insert(0, a.code)
 
@@ -40,7 +45,14 @@ from starVLA.model.framework.base_framework import build_framework  # noqa: E402
 print("starVLA from", starVLA.__file__, flush=True)
 cfg = OmegaConf.load(a.yaml)
 cfg.trainer.pretrained_checkpoint = None
-dcfg = OmegaConf.to_container(cfg.datasets.vla_data, resolve=True)
+if a.image_keys:
+    cfg.framework.image_keys = a.image_keys.split(",")
+if a.data_mix:
+    cfg.datasets.vla_data.data_mix = a.data_mix
+if a.stats_override_path:
+    cfg.datasets.vla_data.stats_override_path = a.stats_override_path
+print("image_keys", list(cfg.framework.image_keys), "data_mix", cfg.datasets.vla_data.data_mix, flush=True)
+dcfg =OmegaConf.to_container(cfg.datasets.vla_data, resolve=True)
 mix = __import__("starVLA.dataloader.gr00t_lerobot.mixtures", fromlist=["x"]).DATASET_NAMED_MIXTURES[dcfg["data_mix"]]
 name, _, robot_type = mix[0]
 t0 = time.time()
@@ -58,8 +70,9 @@ print("example:", samples[0]["lang"], [im.size for im in samples[0]["image"]], "
 stats = json.load(open(dcfg["stats_override_path"]))["statistics"]
 q01 = np.array(stats["action.joint_position"]["q01"] + stats["action.gripper_position"]["q01"], dtype=np.float32)
 q99 = np.array(stats["action.joint_position"]["q99"] + stats["action.gripper_position"]["q99"], dtype=np.float32)
-sq01 = np.array(stats["observation.gripper_position"]["q01"], dtype=np.float32)
-sq99 = np.array(stats["observation.gripper_position"]["q99"], dtype=np.float32)
+gk = "observation.gripper_position" if "observation.gripper_position" in stats else "observation.state.gripper_position"
+sq01 = np.array(stats[gk]["q01"], dtype=np.float32)
+sq99 = np.array(stats[gk]["q99"], dtype=np.float32)
 
 
 def unnorm(x):
@@ -77,7 +90,8 @@ def score(pred):
             "grip_mae": float(np.abs(pu[..., 7] - gu[..., 7]).mean())}
 
 
-res = {"n": a.n, "steps_scored": S, "indices": idx}
+res = {"n": a.n, "steps_scored": S, "indices": idx, "image_keys": list(cfg.framework.image_keys),
+       "data_mix": str(cfg.datasets.vla_data.data_mix)}
 hold = np.zeros_like(gt)
 hold[..., :7] = 2.0 * (0.0 - q01[:7]) / (q99[:7] - q01[:7]) - 1.0                      # zero joint delta
 grip_now = (st[:, 7] + 1.0) / 2.0 * (sq99 - sq01) + sq01                                   # current gripper
