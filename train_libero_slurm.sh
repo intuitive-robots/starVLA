@@ -48,6 +48,11 @@ done
 # ── Environment modules ───────────────────────────────────────────────────────
 ml load CUDA
 export CUDA_VISIBLE_DEVICES="${STARVLA_CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+# STARVLA_TORCHCODEC_LD=1 (opt-in, 2026-10-11): torchcodec's libtorchcodec_core needs the host CUDA runtime inside
+# the image (same as the m3_data bridge / ABC runs); needed for datasets.vla_data.video_backend: torchcodec.
+if [ "${STARVLA_TORCHCODEC_LD:-0}" = 1 ]; then
+    export APPTAINERENV_LD_LIBRARY_PATH="/e/software/default/stages/2026/software/CUDA/13/targets/sbsa-linux/lib:${LD_LIBRARY_PATH:-}"
+fi
 
 # ── Environment: Apptainer image, not conda ───────────────────────────────────
 # The conda envs were replaced by packed images on 2026-09-14; `conda activate

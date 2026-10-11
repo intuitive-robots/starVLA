@@ -104,7 +104,12 @@ datasets:
     pack_image_size: null
     holdout_trajectories_per_dataset: 0
     holdout_trajectories_per_task: 0
-    video_backend: decord
+    # torchcodec with seek_mode approximate (the loader's default for torchcodec, datasets.vla_data.video_seek_mode):
+    # decord indexes each whole 55k-frame AV1 file on open (150 ms, and it does not scale across 64 workers: 68
+    # samples/s per node, the v2 control smoke ran data-bound at 1.47 s/step); torchcodec decodes the same frames
+    # (80/80 identical) at 242 samples/s per node. Needs STARVLA_TORCHCODEC_LD=1 for train_libero_slurm.sh.
+    video_backend: torchcodec
+    video_seek_mode: approximate
     sequential_step_sampling: false
     load_all_data_for_training: true
     per_device_batch_size: 16
@@ -122,6 +127,11 @@ trainer:
   open_loop_eval: false
   # unused in the pi0.5 graph: the action expert's LM head (263M) and the PaliGemma final norm
   freeze_modules: action_head.gemma_expert.lm_head,vlm.model.model.language_model.norm
+  # ARC / openpi: EMA 0.99 of the weights, evaluated instead of the online weights (steps_N_ema_pytorch_model.pt next
+  # to each checkpoint; fp32 shadow sharded across the 4 ranks, restored from the full training state on resume)
+  weight_ema:
+    enabled: true
+    decay: 0.99
   gradient_accumulation_steps: 1
   gradient_checkpointing: false
   gradient_clipping: 1.0

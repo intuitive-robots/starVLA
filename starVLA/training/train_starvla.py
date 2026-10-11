@@ -400,7 +400,9 @@ def _prune_old_checkpoints(checkpoint_dir: str | Path, save_total_limit: int | N
     for step in old_steps:
         for model_path in checkpoints_by_step[step]:
             state_path = _dataloader_state_path(model_path)
-            for path in (model_path, state_path):
+            ema_paths = [checkpoint_dir / f"steps_{step}_ema_model.safetensors",
+                         checkpoint_dir / f"steps_{step}_ema_pytorch_model.pt"]
+            for path in (model_path, state_path, *ema_paths):
                 if path.exists():
                     path.unlink()
                     logger_fn("Deleted old checkpoint file: %s", path)
@@ -637,8 +639,25 @@ class VLATrainer(TrainerUtils):
         # The scheduler is intentionally stepped outside Accelerate's prepare wrapper.
         # Register it explicitly so a full-state checkpoint restores its exact phase.
         self.accelerator.register_for_checkpointing(self.lr_scheduler)
+        self.weight_ema = None
+        ema_cfg = getattr(self.config.trainer, "weight_ema", None)
+        if ema_cfg is not None and bool(getattr(ema_cfg, "enabled", False)):
+            from starVLA.training.weight_ema import ShardedWeightEMA
+
+            self.weight_ema = ShardedWeightEMA(self.accelerator.unwrap_model(self.model),
+                                               float(getattr(ema_cfg, "decay", 0.99)))
         if self._resume_training_state_dir is not None:
             self.accelerator.load_state(str(self._resume_training_state_dir))
+            if self.weight_ema is not None:
+                self.weight_ema.load_shards(self._resume_training_state_dir)
+            # DeepSpeed ZeRO-2 reads every rank's optimizer shard in every process with a storage-preserving
+            # map_location, so the foreign shards pass through (and stay cached on) the other ranks' GPUs; release
+            # them before the first step (2026-10-11: the pi0.5 DROID E7f resume ran out of memory on one GPU with
+            # ~30 GB held by other processes).
+            import gc
+
+            gc.collect()
+            torch.cuda.empty_cache()
             logger.info(
                 "Restored full DeepSpeed training state (model, optimizer, scheduler, RNG) from %s",
                 self._resume_training_state_dir,
@@ -793,6 +812,10 @@ class VLATrainer(TrainerUtils):
                 )
                 return
 
+            # trainer.resume_required (default false, 2026-10-11): a continuation segment of a chained run must not
+            # silently restart from the init when the previous segment died before its first checkpoint.
+            if bool(getattr(self.config.trainer, "resume_required", False)):
+                raise RuntimeError(f"trainer.resume_required: no checkpoint to resume in {self.checkpoint_dir}")
             logger.warning(f"No valid checkpoint found in {self.checkpoint_dir}. Starting training from scratch.")
             self.completed_steps = 0
 
@@ -829,6 +852,8 @@ class VLATrainer(TrainerUtils):
         # Under DeepSpeed every rank must enter save_state; optimizer shards are
         # rank-local and cannot be reconstructed from rank zero alone.
         self.accelerator.save_state(str(partial_dir), safe_serialization=False)
+        if getattr(self, "weight_ema", None) is not None:
+            self.weight_ema.save_shards(partial_dir)
         self.accelerator.wait_for_everyone()
 
         if self.accelerator.is_main_process:
@@ -845,10 +870,30 @@ class VLATrainer(TrainerUtils):
         if bool(getattr(self.config.trainer, "save_full_training_state", False)):
             self._save_full_training_state(checkpoint_path)
 
+        # weight EMA: the gather is collective (each rank owns a share of the fp32 shadow)
+        online_state_dict, ema_state_dict = None, None
+        if getattr(self, "weight_ema", None) is not None:
+            if self.accelerator.is_main_process:
+                online_state_dict = self.accelerator.get_state_dict(self.model)
+            ema_state_dict = self.weight_ema.gather_state_dict(online_state_dict)
+
         if self.accelerator.is_main_process:
             save_format = getattr(self.config.trainer, "save_format", "pt")
 
-            state_dict = self.accelerator.get_state_dict(self.model)
+            state_dict = online_state_dict if online_state_dict is not None else self.accelerator.get_state_dict(self.model)
+            if ema_state_dict is not None:
+                ema_ext = "_ema_model.safetensors" if save_format == "safetensors" else "_ema_pytorch_model.pt"
+                ema_path = Path(checkpoint_path + ema_ext)
+                ema_partial = ema_path.with_name(f"{ema_path.name}.partial.{os.getpid()}")
+                if save_format == "safetensors":
+                    from safetensors.torch import save_file
+
+                    save_file(ema_state_dict, ema_partial)
+                else:
+                    torch.save(ema_state_dict, ema_partial)
+                os.replace(ema_partial, ema_path)
+                logger.info("Saved weight EMA (%d updates) at %s", self.weight_ema.num_updates, ema_path)
+                del ema_state_dict
             if save_format == "safetensors":
                 from safetensors.torch import save_file
 
@@ -1008,6 +1053,8 @@ class VLATrainer(TrainerUtils):
             if sync:
                 progress_bar.update(1)
                 self.completed_steps += 1
+                if self.weight_ema is not None:
+                    self.weight_ema.update()
 
             # Slurm's early-warning signal is translated by the batch launcher
             # into a shared-filesystem flag. Check it only after a synchronized
@@ -1045,6 +1092,10 @@ class VLATrainer(TrainerUtils):
             ):
                 self._last_timing_flush_step = self.completed_steps
                 step_metrics.update(self.step_timers.summary())
+                if torch.cuda.is_available():
+                    # allocator peak since the last flush (nvidia-smi shows the cache, which fills the GPU anyway)
+                    step_metrics["gpu/max_alloc_gb"] = torch.cuda.max_memory_allocated() / 2**30
+                    torch.cuda.reset_peak_memory_stats()
             step_metrics.update(self.memory_monitor.collect(self.completed_steps, self.vla_iter))
             self._log_metrics(step_metrics)
 

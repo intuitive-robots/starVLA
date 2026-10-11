@@ -836,6 +836,10 @@ class PI0(PIRecipeMixin, baseframework):
     def forward_split(self, examples, batch, actions, noise=None, time=None, return_debug=False):
         device = self.action_head.action_in_proj.weight.device
         B = len(examples)
+        if getattr(self, "pi_fusion", False) and self._pi_aux_active() and "_pi_ema_state" not in self.__dict__:
+            # create the EMA prefix copy now, before this step's activations exist, instead of lazily inside the
+            # recipe loss on a full GPU (creation does not update; the first update moves it toward the same weights)
+            self._pi_ema_update()
         draws = self._pi_draw(B) if self.pi_recipe_on else None
         text = self._build_text(batch, draws)
         images = batch["image"].to(device=device, dtype=torch.float32)        # [B, C, 3, H, W], augmented, full

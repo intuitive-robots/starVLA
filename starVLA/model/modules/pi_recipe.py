@@ -274,16 +274,22 @@ class PIRecipeMixin:
                         _scan(v)
                 for v in list(mod._buffers.values()):
                     _scan(v)
-            ema = copy.deepcopy(self.vlm, memo)
-            ema.eval()
             # The target pass stops after the deepest recipe layer, so the copy keeps only Gemma layers 0..that
-            # layer (same outputs, ~5 GB less with the fp32 shadow at layer 10 of 18).
+            # layer (same outputs, ~5 GB less with the fp32 shadow at layer 10 of 18). The online stack is cut to
+            # those layers only for the duration of the deepcopy, so the dropped layers are never copied (2026-10-11:
+            # copying all 18 and truncating afterwards was a multi-GB transient on a full GPU).
             used = [self.pi_fusion_layer] if self.pi_fusion else []
             used += [self.pi_fc_layer] if self.pi_fc else []
-            lm = ema.language_model
-            n_keep = max(used) + 1 if used else len(lm.layers)
-            if n_keep < len(lm.layers):
-                lm.layers = nn.ModuleList(list(lm.layers)[:n_keep])
+            lm_on = self.vlm.language_model
+            full_layers = lm_on.layers
+            n_keep = max(used) + 1 if used else len(full_layers)
+            if n_keep < len(full_layers):
+                lm_on.layers = nn.ModuleList(list(full_layers)[:n_keep])
+            try:
+                ema = copy.deepcopy(self.vlm, memo)
+            finally:
+                lm_on.layers = full_layers
+            ema.eval()
             src = dict(self.vlm.named_parameters())
             pairs = []
             for n2, pe in ema.named_parameters():
@@ -295,7 +301,7 @@ class PIRecipeMixin:
                     pairs.append((p, pe))
                 else:
                     pe.data = p.data
-            shadow = [p.detach().float().clone() for p, _ in pairs]
+            shadow = [p.detach().to(torch.float32, copy=True) for p, _ in pairs]
             st = {"ema": ema, "pairs": pairs, "shadow": shadow}
             self.__dict__["_pi_ema_state"] = st
             logger.info("PI recipe: EMA prefix stream created (%d trainable tensors, %.1fM params in fp32 shadow, "
@@ -303,7 +309,9 @@ class PIRecipeMixin:
             return ema
         w = 1.0 - self.pi_ema_decay
         for (p, pe), sh in zip(st["pairs"], st["shadow"]):
-            sh.lerp_(p.detach().float(), w)
+            # sh <- decay * sh + w * p, with the bf16 parameter promoted element-wise (no full fp32 copy of p: for
+            # the 257k x 2048 token embedding that copy was a 1.96 GiB transient and OOMed the pi0.5 DROID E7f arm)
+            sh.mul_(self.pi_ema_decay).add_(p.detach(), alpha=w)
             pe.data.copy_(sh)
         return st["ema"]
 
