@@ -127,10 +127,10 @@ trainer:
   open_loop_eval: false
   # unused in the pi0.5 graph: the action expert's LM head (263M) and the PaliGemma final norm
   freeze_modules: action_head.gemma_expert.lm_head,vlm.model.model.language_model.norm
-  # ARC / openpi: EMA 0.99 of the weights, evaluated instead of the online weights (steps_N_ema_pytorch_model.pt next
-  # to each checkpoint; fp32 shadow sharded across the 4 ranks, restored from the full training state on resume)
+  # weight EMA of the policy (ARC / openpi 0.99) is OFF (2026-10-11 user decision): only the E7f latent-prediction
+  # target keeps its EMA (framework.fusion_registers.ema, default 0.995). enabled: true writes steps_N_ema_*.pt.
   weight_ema:
-    enabled: true
+    enabled: false
     decay: 0.99
   gradient_accumulation_steps: 1
   gradient_checkpointing: false
