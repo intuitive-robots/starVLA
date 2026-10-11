@@ -38,6 +38,7 @@ from starVLA.model.modules.state_tokens import StateTokenMixin
 from starVLA.model.modules.privileged_tokens import PrivilegedTokenMixin
 from starVLA.model.modules.modality_dropout import ModalityDropoutMixin
 from starVLA.model.modules.future_latent import FutureLatentMixin, TaskPredMixin
+from starVLA.model.modules.source_decoder import SourceDecoderMixin
 from starVLA.model.modules.fusion_registers import FusionRegisterMixin
 from starVLA.model.modules.backbone_loop import BackboneLoopMixin
 from starVLA.model.modules.instruction_mask import InstructionMaskMixin
@@ -255,7 +256,7 @@ class StructuredEncoderRegressionHead(nn.Module):
 
 @FRAMEWORK_REGISTRY.register("QwenGR00T")
 class Qwen_GR00T(TeacherAlignMixin, M3MaskMixin, PositionPromptMixin, FutureCopyMixin, InstructionMaskMixin, BackboneLoopMixin, FusionRegisterMixin, StateTokenMixin, PrivilegedTokenMixin, ModalityDropoutMixin, SharedZMixin,
-                 FutureLatentMixin, TaskPredMixin, baseframework):
+                 FutureLatentMixin, TaskPredMixin, SourceDecoderMixin, baseframework):
     """
     Multimodal vision-language-action model (GR00T variant).
 
@@ -301,6 +302,9 @@ class Qwen_GR00T(TeacherAlignMixin, M3MaskMixin, PositionPromptMixin, FutureCopy
         self._build_future_latent_modules(int(self.qwen_vl_interface.model.config.hidden_size))
         self._build_task_pred_modules(int(self.qwen_vl_interface.model.config.hidden_size))
         self._build_fusion_register_modules(int(self.qwen_vl_interface.model.config.hidden_size))
+        # Source decoder / head-input dropout (training-only fusion forcing; default off).
+        self._configure_source_decoder(self.config)
+        self._build_source_decoder(int(self.qwen_vl_interface.model.config.hidden_size))
         # Looped backbone blocks (default off); built after the aux hooks so they wrap the loop band.
         self._configure_backbone_loop(self.config)
         self._build_backbone_loop(int(self.qwen_vl_interface.model.config.hidden_size))
@@ -775,7 +779,10 @@ class Qwen_GR00T(TeacherAlignMixin, M3MaskMixin, PositionPromptMixin, FutureCopy
             dit_context = self.readout_projector(last_hidden)  # [B, num_tokens, H]
         else:
             dit_context = last_hidden                          # [B, L, H]
-        dit_valid_mask = self._dit_valid_mask(qwen_inputs, last_hidden)
+        source_loss, source_metrics = self._source_decoder_loss(  # no-op unless framework.source_decoder
+            qwen_inputs, last_hidden, examples, state_keep, raw_instructions)
+        dit_valid_mask = self._head_input_dropout(  # no-op unless framework.head_input_dropout
+            qwen_inputs, self._dit_valid_mask(qwen_inputs, last_hidden))
         # Shared-z bottleneck: pool the encoder into one vector used as AdaLN conditioning.
         # The optional cross-memory projection also exposes that same bottleneck to every
         # cross-attention block, while memory dropout masks only the readout tokens.
@@ -964,6 +971,11 @@ class Qwen_GR00T(TeacherAlignMixin, M3MaskMixin, PositionPromptMixin, FutureCopy
                 aux_metrics.update(fl_metrics)
             result["structured_aux_loss"] = aux_loss
             result.update(aux_metrics)
+        if source_loss is not None:  # joins the structured_aux slot (trainer.loss_scale.structured_aux)
+            prev = result.get("structured_aux_loss")
+            result["structured_aux_loss"] = source_loss if prev is None else prev + source_loss
+            result.update(source_metrics)
+        result.update(self._source_metrics())
         result.update(self._loop_metrics())
         result.update(self._instr_mask_metrics())
         return result
