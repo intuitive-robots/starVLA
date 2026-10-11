@@ -46,6 +46,9 @@ framework:
   - base_0_rgb
   - left_wrist_0_rgb
   - right_wrist_0_rgb
+  # the padded slot is masked in every row: leave it out of the prefix (exact, see PI0._n_active_slots); without this
+  # the E7f arm runs out of memory at per-device batch 16 and every step pays a third SigLIP pass
+  elide_masked_image_slots: true
   train_forward: split
   repeated_diffusion_steps: 8
   action_loss_dims: 8

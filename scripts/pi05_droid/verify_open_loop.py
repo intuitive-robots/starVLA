@@ -31,6 +31,7 @@ p.add_argument("--out", default="")
 p.add_argument("--image_keys", default="")
 p.add_argument("--data_mix", default="")
 p.add_argument("--stats_override_path", default="")
+p.add_argument("--elide", default="", choices=["", "0", "1"], help="override framework.elide_masked_image_slots")
 a = p.parse_args()
 sys.path.insert(0, a.code)
 
@@ -51,7 +52,10 @@ if a.data_mix:
     cfg.datasets.vla_data.data_mix = a.data_mix
 if a.stats_override_path:
     cfg.datasets.vla_data.stats_override_path = a.stats_override_path
-print("image_keys", list(cfg.framework.image_keys), "data_mix", cfg.datasets.vla_data.data_mix, flush=True)
+if a.elide:
+    cfg.framework.elide_masked_image_slots = a.elide == "1"
+print("image_keys", list(cfg.framework.image_keys), "elide", cfg.framework.get("elide_masked_image_slots", False),
+      "data_mix", cfg.datasets.vla_data.data_mix, flush=True)
 dcfg =OmegaConf.to_container(cfg.datasets.vla_data, resolve=True)
 mix = __import__("starVLA.dataloader.gr00t_lerobot.mixtures", fromlist=["x"]).DATASET_NAMED_MIXTURES[dcfg["data_mix"]]
 name, _, robot_type = mix[0]
@@ -91,7 +95,8 @@ def score(pred):
 
 
 res = {"n": a.n, "steps_scored": S, "indices": idx, "image_keys": list(cfg.framework.image_keys),
-       "data_mix": str(cfg.datasets.vla_data.data_mix)}
+       "data_mix": str(cfg.datasets.vla_data.data_mix),
+       "elide_masked_image_slots": bool(cfg.framework.get("elide_masked_image_slots", False))}
 hold = np.zeros_like(gt)
 hold[..., :7] = 2.0 * (0.0 - q01[:7]) / (q99[:7] - q01[:7]) - 1.0                      # zero joint delta
 grip_now = (st[:, 7] + 1.0) / 2.0 * (sq99 - sq01) + sq01                                   # current gripper

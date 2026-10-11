@@ -315,6 +315,11 @@ class PI0(PIRecipeMixin, baseframework):
             raise ValueError("repeated_diffusion_steps > 1 needs framework.train_forward: split")
         if not 0 <= self.action_loss_dims <= self.action_dim or not 0 <= self.output_action_dim <= self.action_dim:
             raise ValueError("action_loss_dims / output_action_dim must be in [0, action_dim]")
+        # framework.elide_masked_image_slots (default off, 2026-10-11): trailing image slots whose mask is False for
+        # every row (openpi's padded slots, e.g. pi0.5-DROID's right_wrist_0_rgb) are left out of the prefix. Exact:
+        # padded tokens are never attended and do not advance the position ids (cumsum of the pad mask), so the
+        # valid tokens see the same sequence; it only saves the SigLIP pass, the 256 prefix tokens and their memory.
+        self.elide_masked_image_slots = bool(fw.get("elide_masked_image_slots", False))
         # policy_wrapper._expects_state reads state_token_mode: the state rides in the prompt as text
         self.state_token_mode = fw.get("state_token_mode", None)
         if self.state_token_mode not in (None, "text"):
@@ -537,10 +542,21 @@ class PI0(PIRecipeMixin, baseframework):
             state=batch["state"].to(device=device, dtype=torch.float32),
         )
 
+    def _n_active_slots(self, img_masks) -> int:
+        """Number of leading image slots to embed: all of them, or (elide_masked_image_slots) all but the trailing
+        slots whose mask is False in every row. img_masks: list per slot of [B] bool, or a [B, C] tensor."""
+        masks = list(img_masks) if isinstance(img_masks, (list, tuple)) else [img_masks[:, c] for c in range(img_masks.shape[1])]
+        n = len(masks)
+        if self.elide_masked_image_slots and not getattr(self, "pi_fc", False):
+            while n > 1 and not bool(masks[n - 1].any()):
+                n -= 1
+        return n
+
     def _preprocess_observation(self, observation: Observation):
+        keys = self.image_keys[: self._n_active_slots([observation.image_masks[k] for k in self.image_keys])]
         return (
-            [observation.images[key] for key in self.image_keys],
-            [observation.image_masks[key] for key in self.image_keys],
+            [observation.images[key] for key in keys],
+            [observation.image_masks[key] for key in keys],
             observation.tokenized_prompt,
             observation.tokenized_prompt_mask,
             observation.state,
@@ -831,7 +847,7 @@ class PI0(PIRecipeMixin, baseframework):
             for r, cams in enumerate(dropped):
                 for c in cams:
                     online_images[r, c] = 0.0   # uniform mid-gray, tokens kept and attended
-        n_cams = len(self.image_keys)
+        n_cams = self._n_active_slots(img_masks)
         fills = [(text["state_fill"], getattr(self, "state_mask_embed", None)),
                  (text["instr_fill"], getattr(self, "instr_mask_embed", None))]
         prefix_embs, prefix_pad = self._embed_prefix_tensors(
